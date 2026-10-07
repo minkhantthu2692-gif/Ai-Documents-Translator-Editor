@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en" class="">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="description"
+      content="Local-first AI document translator and editor. Translate PDFs while preserving layout, fonts and images."
+    />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0b0d10" media="(prefers-color-scheme: dark)" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <title>AI Documents Translator &amp; Editor</title>
+    <script>
+      // Applies the persisted theme and language before first paint to avoid a flash.
+      ;(function () {
+        try {
+          var raw = window.localStorage.getItem('aidt.ui')
+          var ui = raw ? JSON.parse(raw) : null
+          var theme = (ui && ui.state && ui.state.theme) || 'system'
+          var lang = (ui && ui.state && ui.state.language) || 'en'
+          var dark =
+            theme === 'dark' ||
+            (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.classList.toggle('dark', dark)
+          document.documentElement.lang = lang
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+        } catch (e) {
+          /* storage unavailable: keep default light theme */
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

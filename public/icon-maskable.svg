@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="AI Documents Translator and Editor">
+  <rect width="512" height="512" fill="#2563eb" />
+  <path
+    d="M168 152h116a34 34 0 0 1 34 34v140a34 34 0 0 1-34 34H168a28 28 0 0 1-28-28V180a28 28 0 0 1 28-28z"
+    fill="#ffffff"
+  />
+  <path d="M182 210h88M182 250h88M182 290h56" stroke="#2563eb" stroke-width="20" stroke-linecap="round" />
+  <circle cx="330" cy="322" r="62" fill="#0f172a" />
+  <path d="M306 322h48M330 298v48" stroke="#ffffff" stroke-width="18" stroke-linecap="round" />
+</svg>

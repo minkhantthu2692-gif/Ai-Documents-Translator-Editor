@@ -14,6 +14,16 @@ import { eventRepo } from './repo-events'
 export const BACKUP_FORMAT = 'aidt-backup'
 export const BACKUP_SCHEMA_VERSION = 1
 
+/**
+ * Tables that never travel inside a JSON backup.
+ *
+ * `sourceFiles` holds the original PDF bytes (a Blob) — JSON cannot carry
+ * binary payloads and the user still has the original file, so the table is
+ * skipped on export *and* on restore (a replace-restore must not wipe the
+ * locally stored PDFs either).
+ */
+export const BACKUP_EXCLUDED_TABLES: readonly TableName[] = ['sourceFiles']
+
 export interface BackupFile {
   format: typeof BACKUP_FORMAT
   schemaVersion: number
@@ -52,6 +62,7 @@ export async function createBackup(): Promise<BackupFile> {
   const counts: Record<string, number> = {}
 
   for (const name of TABLE_NAMES) {
+    if (BACKUP_EXCLUDED_TABLES.includes(name)) continue
     const rows = await db.table(name).toArray()
     tables[name] = rows as unknown[]
     counts[name] = rows.length
@@ -131,6 +142,7 @@ export async function restoreBackup(
   }
 
   for (const name of TABLE_NAMES) {
+    if (BACKUP_EXCLUDED_TABLES.includes(name)) continue
     const incoming = (backup.tables[name] ?? []) as { id: string; updatedAt?: number }[]
     imported[name] = 0
     skipped[name] = 0

@@ -1,0 +1,15 @@
+# Keep generated/collected binary assets out of line-ending conversion.
+# fixtures/text-300p.pdf is ASCII-only, so Git would otherwise treat it as
+# text and rewrite every LF as CRLF on checkout, breaking its xref table.
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.pfb binary
+*.bcmap binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary

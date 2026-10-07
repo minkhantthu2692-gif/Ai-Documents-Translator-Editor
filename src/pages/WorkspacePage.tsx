@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Badge, Button, Card, EmptyState, Stepper } from '@/components/ui'
+import { PageThumbnails } from '@/components/workspace/PageThumbnails'
 import { PageContainer, PageHeader, PageLayout } from '@/components/layout/Page'
 import { IconWorkspace } from '@/components/layout/icons'
 import { ACTIVE_STATES, PipelineMachine, type FsmEvent, type FsmState } from '@/core/fsm'
@@ -286,6 +287,8 @@ export function WorkspacePage() {
               </p>
             ) : null}
           </Card>
+
+          {hasFile ? <PageThumbnails projectId={projectId} /> : null}
 
           <Card
             title={t('logs.title')}

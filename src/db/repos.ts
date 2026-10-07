@@ -9,6 +9,7 @@ import { jobRepo } from './repo-jobs'
 import { outboxRepo } from './repo-outbox'
 import { projectRepo } from './repo-projects'
 import { settingsRepo } from './repo-settings'
+import { sourceFileRepo } from './repo-sourceFiles'
 import { usageRepo } from './repo-usage'
 
 export const repos = {
@@ -25,6 +26,7 @@ export const repos = {
   apiKeys: apiKeyRepo,
   usage: usageRepo,
   outbox: outboxRepo,
+  sourceFiles: sourceFileRepo,
 }
 
 export {
@@ -41,4 +43,5 @@ export {
   apiKeyRepo,
   usageRepo,
   outboxRepo,
+  sourceFileRepo,
 }

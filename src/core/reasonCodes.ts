@@ -23,6 +23,12 @@ export type ReasonCode =
   | 'SYNC_FAILED'
   | 'BACKUP_INVALID'
   | 'INVALID_STATE_TRANSITION'
+  | 'FILE_NOT_PDF'
+  | 'FILE_TOO_LARGE'
+  | 'TOO_MANY_PAGES'
+  | 'OCR_LANGUAGE_MISSING'
+  | 'PROVIDER_NOT_CONFIGURED'
+  | 'LANGUAGES_MISSING'
 
 export type Severity = 'info' | 'success' | 'warning' | 'error' | 'critical'
 
@@ -225,6 +231,72 @@ export const REASON_CODES: Record<ReasonCode, ReasonCodeDefinition> = {
     messageEn: 'That transition is not allowed from the current state.',
     technicalHint: 'transition guard rejected the event',
     fixActions: [act('dismiss', 'dismiss', 'Dismiss', 'ပိတ်ရန်')],
+  },
+  FILE_NOT_PDF: {
+    code: 'FILE_NOT_PDF',
+    severity: 'error',
+    messageMy: 'ဤဖိုင်သည် PDF မဟုတ်ပါ သို့မဟုတ် မဖတ်နိုင်ပါ။',
+    messageEn: 'This file is not a PDF, or it cannot be read.',
+    technicalHint: 'missing %PDF- header or unsupported container',
+    fixActions: [
+      act('choose_file', 'data', 'Choose a PDF file', 'PDF ဖိုင် ရွေးရန်'),
+      act('open_file_again', 'retry', 'Try another file', 'တစ်ခြားဖိုင် စမ်းရန်'),
+    ],
+  },
+  FILE_TOO_LARGE: {
+    code: 'FILE_TOO_LARGE',
+    severity: 'error',
+    messageMy: 'PDF ဖိုင် အရွယ်အစား ကန့်သတ်ချက်ထက် ကျော်လွန်နေသည်။',
+    messageEn: 'The PDF file is larger than the size limit.',
+    technicalHint: 'file.size > MAX_FILE_BYTES',
+    fixActions: [
+      act('split_pdf', 'data', 'Split or compress the PDF', 'PDF ခွဲရန်/ကျုံ့ရန်'),
+      act('choose_file', 'data', 'Choose another file', 'တစ်ခြားဖိုင် ရွေးရန်'),
+    ],
+  },
+  TOO_MANY_PAGES: {
+    code: 'TOO_MANY_PAGES',
+    severity: 'error',
+    messageMy: 'စာမျက်နှာအရေအတွက် ကန့်သတ်ချက်ထက် ကျော်လွန်နေသည်။',
+    messageEn: 'The page count is above the supported limit.',
+    technicalHint: 'pdf.numPages > MAX_PAGE_COUNT',
+    fixActions: [
+      act('split_pdf', 'data', 'Split the document', 'စာတမ်း ခွဲရန်'),
+      act('choose_file', 'data', 'Choose a shorter file', 'စာမျက်နှာနည်းသောဖိုင် ရွေးရန်'),
+    ],
+  },
+  OCR_LANGUAGE_MISSING: {
+    code: 'OCR_LANGUAGE_MISSING',
+    severity: 'warning',
+    messageMy: 'OCR ဘာသာစကား ဒေတာ မဆွဲရသေးပါ။',
+    messageEn: 'The OCR language data has not been downloaded yet.',
+    technicalHint: 'tesseract language pack not loaded (needs network once)',
+    fixActions: [
+      act('download_language', 'data', 'Download OCR language', 'OCR ဘာသာစကား ဒေတာ ဆွဲရန်'),
+      act('run_ocr', 'retry', 'Run OCR again', 'OCR ပြန်လုပ်ရန်'),
+    ],
+  },
+  PROVIDER_NOT_CONFIGURED: {
+    code: 'PROVIDER_NOT_CONFIGURED',
+    severity: 'error',
+    messageMy: 'ဘာသာပြန်ရန် ပေးပို့သူ (provider) မရွေးရသေးပါ။',
+    messageEn: 'No translation provider or model has been selected.',
+    technicalHint: 'settings.provider === null || settings.model === null',
+    fixActions: [
+      act('choose_provider', 'config', 'Choose provider and model', 'ပေးပို့သူ/မော်ဒယ် ရွေးရန်'),
+      act('open_settings', 'navigation', 'Open Settings', 'ဆက်တင်များ ဖွင့်ရန်'),
+    ],
+  },
+  LANGUAGES_MISSING: {
+    code: 'LANGUAGES_MISSING',
+    severity: 'error',
+    messageMy: 'မူရင်းနှင့် ပန်းတို့ ဘာသာစကား ရွေးချယ်ထားရန် လိုအပ်ပါသည်။',
+    messageEn: 'Both the source and the target language must be chosen.',
+    technicalHint: 'sourceLang === targetLang || either is null',
+    fixActions: [
+      act('pick_languages', 'config', 'Pick both languages', 'ဘာသာစကားနှစ်ခု ရွေးရန်'),
+      act('start_over', 'navigation', 'Restart the wizard', 'wizard ပြန်စရန်'),
+    ],
   },
 }
 

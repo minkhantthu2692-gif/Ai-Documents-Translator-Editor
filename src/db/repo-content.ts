@@ -20,6 +20,15 @@ export class PageRepository {
       .first()
   }
 
+  /** Pages whose layout has not been extracted yet (parse queue input). */
+  listUnparsed(projectId: string): Promise<PageRecord[]> {
+    return getDb()
+      .pages.where('projectId')
+      .equals(projectId)
+      .filter((page) => page.analysisState !== 'done')
+      .toArray()
+  }
+
   async upsert(
     input: Partial<PageRecord> & { projectId: string; index: number },
   ): Promise<PageRecord> {
@@ -64,6 +73,44 @@ export class PageRepository {
   }
 }
 
+/**
+ * Layout-derived block fields, i.e. everything a re-parse may rewrite —
+ * translation state (`status`, `translatedText`) is excluded by construction,
+ * and so are the identity/timestamp fields `stampNew`/`stampUpdate` own.
+ */
+export type ParsedBlockPatch = Omit<
+  BlockRecord,
+  'createdAt' | 'updatedAt' | 'deviceId' | 'version' | 'status' | 'translatedText'
+>
+
+/** Layout fields only — what a brand-new row starts with before `id`s exist. */
+type BlockLayoutFields = Omit<ParsedBlockPatch, 'id' | 'projectId' | 'pageId'>
+
+function blockDefaults(): BlockLayoutFields {
+  return {
+    order: 0,
+    kind: 'paragraph',
+    sourceText: '',
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+    fontFamily: 'Noto Sans',
+    fontSize: 12,
+    lineHeight: 1.5,
+    color: '#000000',
+    bold: false,
+    italic: false,
+    characterCount: 0,
+    region: 'body',
+    alignment: 'left',
+    lines: [],
+    skipRule: null,
+    placeholders: [],
+    listMarker: null,
+  }
+}
+
 export class BlockRepository {
   listByProject(projectId: string): Promise<BlockRecord[]> {
     return getDb().blocks.where('projectId').equals(projectId).sortBy('order')
@@ -91,22 +138,9 @@ export class BlockRepository {
     }
     const record = stampNew<BlockRecord>(
       {
-        order: 0,
-        kind: 'paragraph',
-        sourceText: '',
-        translatedText: '',
-        x: 0,
-        y: 0,
-        width: 0,
-        height: 0,
-        fontFamily: 'Noto Sans',
-        fontSize: 12,
-        lineHeight: 1.5,
-        color: '#000000',
-        bold: false,
-        italic: false,
+        ...blockDefaults(),
         status: 'pending',
-        characterCount: 0,
+        translatedText: '',
         ...input,
       },
       'blk',
@@ -124,6 +158,50 @@ export class BlockRepository {
       results.push(await this.upsert(record))
     }
     return results
+  }
+
+  /**
+   * Writes a page's freshly parsed blocks in one round trip.
+   *
+   * Deliberately excludes `translatedText` and `status` — a re-parse refreshes
+   * layout only, so translation progress and lock/skip decisions survive, and
+   * because ids are the stable content hashes the same blocks map onto the
+   * same rows instead of duplicating.
+   */
+  async upsertParsed(patches: ParsedBlockPatch[]): Promise<number> {
+    if (patches.length === 0) return 0
+    const db = getDb()
+    const existing = await db.blocks.bulkGet(patches.map((patch) => patch.id))
+    const updates: BlockRecord[] = []
+    const inserts: BlockRecord[] = []
+
+    patches.forEach((patch, position) => {
+      const current = existing[position]
+      if (current) {
+        updates.push(stampUpdate(current, patch))
+      } else {
+        inserts.push(
+          stampNew<BlockRecord>(
+            { ...blockDefaults(), status: 'pending', translatedText: '', ...patch },
+            'blk',
+          ),
+        )
+      }
+    })
+
+    if (updates.length > 0) await db.blocks.bulkPut(updates)
+    if (inserts.length > 0) await db.blocks.bulkAdd(inserts)
+    return patches.length
+  }
+
+  /** Drops blocks on a page that a re-parse no longer produces. */
+  async removeStaleByPage(pageId: string, keepIds: string[]): Promise<number> {
+    const db = getDb()
+    const keep = new Set(keepIds)
+    const keys = await db.blocks.where('pageId').equals(pageId).primaryKeys()
+    const stale = keys.filter((key) => !keep.has(String(key)))
+    if (stale.length > 0) await db.blocks.bulkDelete(stale)
+    return stale.length
   }
 
   async update(id: string, patch: Partial<BlockRecord>): Promise<BlockRecord> {

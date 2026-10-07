@@ -7,6 +7,10 @@
 import type { AppEvent, EventState } from '@/core/events'
 import type { FsmState } from '@/core/fsm'
 import type { ReasonCode, Severity } from '@/core/reasonCodes'
+import type { BBox } from '@/pdf/stableId'
+import type { LineStyle } from '@/pdf/lineGrouping'
+import type { SkipRule } from '@/pdf/skipRules'
+import type { Placeholder } from '@/pdf/placeholders'
 
 export interface BaseRecord {
   id: string
@@ -53,7 +57,22 @@ export interface PageRecord extends BaseRecord {
   ocrStatus: OcrStatus
   renderStatus: RenderStatus
   blockCount: number
+  /** Coarse content class derived from the per-page text coverage. */
+  contentClass: PageContentClass
+  /** Share of the page covered by extractable text, 0..1. */
+  textCoverage: number
+  /** ISO code detected for this page's text (null when unknown). */
+  detectedLanguage: string | null
+  /** Number of visual lines extracted from the text layer. */
+  lineCount: number
+  analysisState: PageAnalysisState
+  /** Confidence (0..100) of the last OCR run, null when not OCR'd. */
+  ocrConfidence: number | null
 }
+
+/** `text` — normal text layer, `scanned` — image only, `mixed` — both, `empty` — nothing. */
+export type PageContentClass = 'text' | 'scanned' | 'mixed' | 'empty'
+export type PageAnalysisState = 'idle' | 'queued' | 'running' | 'done' | 'failed'
 
 export type BlockKind = 'heading' | 'paragraph' | 'list' | 'table' | 'caption' | 'shape'
 export type BlockStatus = 'pending' | 'translated' | 'edited' | 'locked' | 'skipped'
@@ -78,6 +97,28 @@ export interface BlockRecord extends BaseRecord {
   italic: boolean
   status: BlockStatus
   characterCount: number
+  /** Header / footer band versus real body content. */
+  region: BlockRegion
+  alignment: BlockAlignment
+  /** Visual lines backing this block, in reading order. */
+  lines: StoredLine[]
+  /** Skip-rule name when the block must not be translated, else null. */
+  skipRule: SkipRule | null
+  /** `{{n}}` placeholders captured before translation. */
+  placeholders: Placeholder[]
+  /** Bullet / numbering marker (`•`, `1.`) captured from the first line. */
+  listMarker: string | null
+}
+
+export type BlockRegion = 'body' | 'header' | 'footer'
+export type BlockAlignment = 'left' | 'center' | 'right' | 'justified'
+
+/** One visual line as persisted (geometry + portable style). */
+export interface StoredLine {
+  id: string
+  text: string
+  bbox: BBox
+  style: LineStyle
 }
 
 export type TranslationStatus = 'pending' | 'running' | 'done' | 'failed'
@@ -228,4 +269,27 @@ export interface UsageStatsRecord extends BaseRecord {
   tokensIn: number
   tokensOut: number
   costUsd: number
+}
+
+/**
+ * The original PDF bytes, kept locally so thumbnails, background renders and
+ * "re-parse" work after a reload without asking the user for the file again.
+ */
+export interface SourceFileRecord extends BaseRecord {
+  projectId: string
+  name: string
+  size: number
+  mime: string
+  blob: Blob
+  pageCount: number
+  /** Cheap content fingerprint used to prove a re-parse uses the same bytes. */
+  checksum: string
+  /**
+   * Password of an encrypted source, kept only so a reload can re-open the
+   * document without prompting again (parsing and thumbnails run on every
+   * session, not just the one that unlocked it). It lives in this device's
+   * IndexedDB beside the PDF itself; `sourceFiles` is excluded from backups
+   * and never leaves the browser.
+   */
+  password?: string | null
 }

@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { AppDatabase, TABLE_NAMES, setDb } from './db'
 import {
+  BACKUP_EXCLUDED_TABLES,
   BACKUP_FORMAT,
   BACKUP_SCHEMA_VERSION,
   BackupError,
@@ -90,8 +91,37 @@ describe('backup export / import', () => {
     expect(backup.counts.settings).toBe(2)
     expect(backup.counts.cache).toBe(1)
     for (const table of TABLE_NAMES) {
+      if (BACKUP_EXCLUDED_TABLES.includes(table)) {
+        expect(backup.tables[table], table).toBeUndefined()
+        continue
+      }
       expect(Array.isArray(backup.tables[table]), table).toBe(true)
     }
+  })
+
+  it('keeps source PDFs out of the backup and untouched by a replace restore', async () => {
+    await db.sourceFiles.add({
+      id: 'src_1',
+      projectId: 'prj_1',
+      name: 'annual.pdf',
+      size: 4,
+      mime: 'application/pdf',
+      blob: new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46])], { type: 'application/pdf' }),
+      pageCount: 1,
+      checksum: 'deadbeef-4',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      deviceId: 'dev_test',
+      version: 1,
+    })
+
+    const backup = await createBackup()
+    expect(backup.tables.sourceFiles).toBeUndefined()
+    expect(backup.counts.sourceFiles).toBeUndefined()
+
+    const report = await restoreBackup(parseBackup(serializeBackup(backup)), 'replace')
+    expect(report.imported.sourceFiles).toBeUndefined()
+    expect((await db.sourceFiles.get('src_1'))?.name).toBe('annual.pdf')
   })
 
   it('round-trips through JSON', async () => {

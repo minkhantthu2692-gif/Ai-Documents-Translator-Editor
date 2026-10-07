@@ -1,7 +1,11 @@
 /**
- * Phase 1 smoke test — drives the running dev server in headless Chrome over CDP.
+ * Phase 2 smoke test — drives the running dev server in headless Chrome over CDP.
  * Verifies: routes render, responsive breakpoints, theme + language persistence,
- * Dexie data surviving reload, and a UI-level backup export/import round-trip.
+ * the PDF wizard (scanned flagging, password prompt + retry, 300-page analysis),
+ * workspace thumbnails + layout extraction, Dexie data surviving reload, and a
+ * UI-level backup export/import round-trip.
+ *
+ * Requires: `npm run dev` on :5173 and `fixtures/` (see scripts/make-fixtures.mjs).
  */
 import { spawn } from 'node:child_process'
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
@@ -32,6 +36,12 @@ const chrome = spawn(
     '--no-default-browser-check',
     '--disable-gpu',
     '--hide-scrollbars',
+    // The responsive-UI check needs rAF/timers at full rate (headless windows
+    // are otherwise treated as occluded/backgrounded and throttled).
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
+    '--disable-features=CalculateNativeWinOcclusion',
     '--window-size=1440,900',
     'about:blank',
   ],
@@ -250,7 +260,15 @@ try {
             req.onerror = () => rej(req.error?.message || 'open failed')
             req.onsuccess = () => {
               const db = req.result
-              const stores = ['settings', 'events', 'projects', 'cache'].filter(s => db.objectStoreNames.contains(s))
+              const stores = [
+                  'settings',
+                  'events',
+                  'projects',
+                  'sourceFiles',
+                  'pages',
+                  'blocks',
+                  'cache',
+                ].filter(s => db.objectStoreNames.contains(s))
               const out = {}
               const tx = db.transaction(stores, 'readonly')
               let left = stores.length
@@ -285,43 +303,289 @@ try {
     `before=${JSON.stringify(dbBefore?.rows)} after=${JSON.stringify(dbAfter?.rows)}`,
   )
 
-  // 6) Create a project through the wizard (real Dexie write) -------------
+  // 6) Phase 2 — real PDFs through the wizard, then the workspace ---------
+  const FIXTURES = resolve('fixtures')
+
+  const attachFile = async (path) => {
+    const doc = await send('DOM.getDocument', { depth: -1 })
+    const { nodeId } = await send('DOM.querySelector', {
+      nodeId: doc.root.nodeId,
+      selector: 'input[data-testid="file-input"]',
+    })
+    if (!nodeId) return false
+    await send('DOM.setFileInputFiles', { files: [path], nodeId })
+    return true
+  }
+
+  /** Polls a boolean-ish expression until it is truthy. */
+  const waitFor = async (expression, timeoutMs = 30000) => {
+    for (let waited = 0; waited < timeoutMs; waited += 150) {
+      let value = null
+      try {
+        value = await evalJs(expression)
+      } catch {
+        /* page navigating */
+      }
+      if (value) return value
+      await sleep(150)
+    }
+    return null
+  }
+
+  const click = (selector) =>
+    evalJs(
+      `(() => { const el = document.querySelector('${selector}'); if (!el || el.disabled) return false; el.click(); return true })()`,
+    )
+
+  /** Waits until a control exists and is enabled, then clicks it. */
+  const clickWhenReady = async (selector, timeoutMs = 30000) => {
+    const ready = await waitFor(
+      `(() => { const el = document.querySelector('${selector}'); return !!el && !el.disabled })()`,
+      timeoutMs,
+    )
+    if (!ready) return false
+    return click(selector)
+  }
+
+  const setField = (selector, value) =>
+    evalJs(
+      `(() => {
+        const el = document.querySelector('${selector}')
+        if (!el) return false
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+        setter.call(el, ${JSON.stringify(value)})
+        el.dispatchEvent(new Event('input', { bubbles: true }))
+        return true
+      })()`,
+    )
+
+  const statusOf = (id) =>
+    evalJs(
+      `document.querySelector('[data-testid="check-${id}"]')?.getAttribute('data-status') ?? null`,
+    )
+
+  /**
+   * The pre-flight panel renders as soon as the step mounts, but its checks are
+   * only built once every file has been probed. Metadata + the integrity row
+   * appearing together is the honest "analysis finished" signal.
+   */
+  const analysisDone = (timeoutMs = 60000) =>
+    waitFor(
+      `!!document.querySelector('[data-testid="metadata-table"]') && !!document.querySelector('[data-testid="check-integrity"]')`,
+      timeoutMs,
+    )
+
+  const toEnglish = async () => {
+    await evalJs(
+      `(() => { const b = document.querySelector('button[lang="en"]'); if (b) b.click(); return true })()`,
+    )
+    await sleep(300)
+  }
+
+  /** Prints enough DOM state to explain a wait that never succeeded. */
+  const diag = async (label) => {
+    const state = await evalJs(
+      `(() => ({
+        path: location.pathname,
+        rows: [...document.querySelectorAll('[data-testid="file-row"]')].map((r) =>
+          r.innerText.replace(/\\n+/g, ' | ').slice(0, 120),
+        ),
+        panels: ['preflight', 'metadata-table', 'password-modal', 'wizard-next', 'wizard-start']
+          .map((id) => id + '=' + !!document.querySelector('[data-testid="' + id + '"]'))
+          .join(' '),
+        on: [...document.querySelectorAll('button')]
+          .map((b) => (b.getAttribute('data-testid') || '') + (b.disabled ? ':off' : ':on'))
+          .filter((s) => s.startsWith('wizard') || s.startsWith('status') || s.startsWith('password')),
+        tail: document.body.innerText.slice(-450),
+      }))()`,
+    )
+    console.log(`DIAG ${label}: ${JSON.stringify(state)}`)
+  }
+
+  // 6a) A scanned PDF is flagged and offered OCR.
   await goto('/projects/new')
-  await evalJs(
-    `(() => { const b = document.querySelector('button[lang="en"]'); if (b) b.click(); return true })()`,
+  await toEnglish()
+  await attachFile(join(FIXTURES, 'scanned.pdf'))
+  const scannedRows = await waitFor(
+    `document.querySelectorAll('[data-testid="file-row"]').length`,
+    10000,
   )
-  await sleep(400)
+  check('scanned.pdf added to the wizard', scannedRows > 0, `rows=${scannedRows}`)
+  check('wizard advances to the metadata step', await clickWhenReady('[data-testid="wizard-next"]'))
+  const scannedPanel = await waitFor(`!!document.querySelector('[data-testid="preflight"]')`, 30000)
+  if (!scannedPanel) await diag('scanned panel')
+  check('pre-flight panel rendered for scanned.pdf', scannedPanel)
+  const scannedDone = await analysisDone(60000)
+  if (!scannedDone) await diag('scanned analysis')
+  check('scanned.pdf analyzed', scannedDone)
+  const scannedTextLayer = await statusOf('textLayer')
+  check(
+    'scanned PDF flagged (text-layer check is not PASS)',
+    Boolean(scannedTextLayer) && scannedTextLayer !== 'pass',
+    `status=${scannedTextLayer}`,
+  )
+  const ocrOffer = await waitFor(`/no text layer/i.test(document.body.innerText)`, 5000)
+  check('scanned PDF offers OCR', Boolean(ocrOffer))
+
+  // 6b) Password prompt, wrong password, retry with the right one.
+  await goto('/projects/new')
+  await toEnglish()
+  await attachFile(join(FIXTURES, 'encrypted.pdf'))
+  const encryptedRows = await waitFor(
+    `document.querySelectorAll('[data-testid="file-row"]').length`,
+    10000,
+  )
+  check('encrypted.pdf added to the wizard', encryptedRows > 0, `rows=${encryptedRows}`)
+  check('wizard advances to the metadata step', await clickWhenReady('[data-testid="wizard-next"]'))
+  const passwordModal = await waitFor(
+    `!!document.querySelector('[data-testid="password-modal"]')`,
+    20000,
+  )
+  if (!passwordModal) await diag('password modal')
+  check('encrypted PDF prompts for a password', passwordModal)
+  await setField('[data-testid="password-input"]', 'definitely-wrong')
+  await click('[data-testid="password-submit"]')
+  const wrongShown = await waitFor(`/wrong password/i.test(document.body.innerText)`, 20000)
+  check('wrong password is rejected with an explanation', Boolean(wrongShown))
+  await setField('[data-testid="password-input"]', 'secret123')
+  await click('[data-testid="password-submit"]')
+  const unlockedPanel = await waitFor(
+    `!!document.querySelector('[data-testid="preflight"]')`,
+    30000,
+  )
+  if (!unlockedPanel) await diag('unlocked panel')
+  check('correct password unlocks pre-flight', unlockedPanel)
+  const unlockedDone = await analysisDone(60000)
+  if (!unlockedDone) await diag('unlocked analysis')
+  check('encryption flow finished analyzing', unlockedDone)
+  const encryption = await statusOf('encryption')
+  check('encryption check passes after unlocking', encryption === 'pass', `status=${encryption}`)
+
+  // 6c) The 300-page fixture: analyze, Start, thumbnails + layout extraction.
+  await goto('/projects/new')
+  await toEnglish()
   await evalJs(
     `(() => {
-      const input = document.querySelector('input[maxlength="120"]')
-      if (!input) return false
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
-      setter.call(input, 'Smoke test project')
-      input.dispatchEvent(new Event('input', { bubbles: true }))
+      window.__t0 = performance.now()
+      window.__frames = 0
+      window.__maxGap = 0
+      let last = performance.now()
+      const tick = (now) => {
+        window.__frames += 1
+        window.__maxGap = Math.max(window.__maxGap, now - last)
+        last = now
+        requestAnimationFrame(tick)
+      }
+      requestAnimationFrame(tick)
       return true
     })()`,
   )
-  await sleep(300)
-  for (let i = 0; i < 5; i++) {
-    const clicked = await evalJs(
-      `(() => { const b = [...document.querySelectorAll('button')].find(b => /^(Next|Create project)$/.test(b.textContent.trim())); if (!b || b.disabled) return false; b.click(); return true })()`,
-    )
-    await sleep(600)
-    const path = await evalJs('location.pathname')
-    if (String(path).startsWith('/workspace/')) break
-    if (!clicked) break
-  }
-  const createdPath = await evalJs('location.pathname')
-  check(
-    'wizard creates a project and opens workspace',
-    /^\/workspace\/\w+/.test(String(createdPath)),
-    String(createdPath),
+  await attachFile(join(FIXTURES, 'text-300p.pdf'))
+  const bigRows = await waitFor(
+    `document.querySelectorAll('[data-testid="file-row"]').length`,
+    10000,
   )
-  const dbWithProject = await readDb()
+  check('text-300p.pdf added to the wizard', bigRows > 0, `rows=${bigRows}`)
+  check('wizard advances to the metadata step', await clickWhenReady('[data-testid="wizard-next"]'))
+  const panel300 = await waitFor(`!!document.querySelector('[data-testid="preflight"]')`, 60000)
+  if (!panel300) await diag('300-page panel')
+  check('pre-flight panel rendered for text-300p.pdf', panel300)
+  const analyzed300 = await analysisDone(180000)
+  if (!analyzed300) await diag('300-page analysis')
+  check('300-page PDF analyzed', analyzed300)
+  const health = await evalJs(
+    `(() => ({
+      ms: performance.now() - window.__t0,
+      frames: window.__frames,
+      maxGap: window.__maxGap,
+    }))()`,
+  )
+  const fps = health && health.ms > 0 ? (health.frames / health.ms) * 1000 : 0
   check(
-    'project row written to Dexie',
-    (dbWithProject?.rows?.projects ?? 0) === 1,
-    JSON.stringify(dbWithProject?.rows),
+    'main thread stayed responsive while analyzing 300 pages',
+    fps > 10 && (health?.maxGap ?? 99999) < 2000,
+    `fps=${fps.toFixed(1)} maxGap=${Math.round(health?.maxGap ?? -1)}ms over ${Math.round(health?.ms ?? 0)}ms`,
+  )
+  const integrity = await statusOf('integrity')
+  check('integrity check passes', integrity === 'pass', `status=${integrity}`)
+  const metaHasPages = await evalJs(
+    `/300/.test(document.querySelector('[data-testid="metadata-table"]')?.innerText ?? '')`,
+  )
+  check('metadata table reports 300 pages', metaHasPages)
+  const scannedMeta = await evalJs(
+    `(() => {
+      const text = document.body.innerText
+      return /Metadata & pre-flight|metadata/i.test(text) && /PDF version/i.test(text)
+    })()`,
+  )
+  check('document metadata (version, producer…) is shown', scannedMeta)
+  check(
+    'wizard advances to the translate step',
+    await clickWhenReady('[data-testid="wizard-next"]'),
+  )
+  const startReady = await waitFor(
+    `!!(document.querySelector('[data-testid="wizard-start"]:not([disabled])') || document.querySelector('[data-testid="status-start"]:not([disabled])'))`,
+    20000,
+  )
+  check('Start is enabled once blocking checks pass', startReady)
+  await evalJs(
+    `(() => {
+      const el =
+        document.querySelector('[data-testid="wizard-start"]:not([disabled])') ||
+        document.querySelector('[data-testid="status-start"]:not([disabled])')
+      if (!el) return false
+      el.click()
+      return true
+    })()`,
+  )
+  const workspacePath = await waitFor(`/\\/workspace\\//.test(location.pathname)`, 30000)
+  check('Start opens the workspace', workspacePath, String(await evalJs('location.pathname')))
+  const thumbs = await waitFor(`!!document.querySelector('[data-testid="page-thumbs"]')`, 20000)
+  check('page thumbnail panel present', thumbs)
+  const thumbImgs = await waitFor(
+    `document.querySelectorAll('[data-testid="page-thumb-img"]').length`,
+    40000,
+  )
+  check('thumbnails rendered by the analysis worker', thumbImgs > 0, `imgs=${thumbImgs}`)
+  const parseProgress = await waitFor(
+    `(() => {
+      const el = document.querySelector('[data-testid="page-parse-progress"]')
+      if (!el) return false
+      const m = el.innerText.match(/(\\d+)\\s*\\/\\s*(\\d+)/)
+      return m && Number(m[1]) > 0 ? m[0] : false
+    })()`,
+    90000,
+  )
+  check('layout extraction progressing (pages parsed)', parseProgress, String(parseProgress))
+  const dbAfterStart = await readDb()
+  check(
+    'project + source file + pages + blocks written to Dexie',
+    (dbAfterStart?.rows?.projects ?? 0) === 1 &&
+      (dbAfterStart?.rows?.sourceFiles ?? 0) === 1 &&
+      (dbAfterStart?.rows?.pages ?? 0) > 0 &&
+      (dbAfterStart?.rows?.blocks ?? 0) > 0,
+    JSON.stringify(dbAfterStart?.rows),
+  )
+
+  // The queue persists after every item, so a reload must pick the run up again
+  // instead of freezing the panel on a phase nothing is running.
+  const parsedBefore = Number.parseInt(String(parseProgress ?? '0'), 10) || 0
+  const currentWorkspacePath = String(await evalJs('location.pathname'))
+  await goto(currentWorkspacePath)
+  await waitFor(`!!document.querySelector('[data-testid="page-thumbs"]')`, 20000)
+  const resumed = await waitFor(
+    `(() => {
+      const el = document.querySelector('[data-testid="page-parse-progress"]')
+      if (!el) return false
+      const m = el.innerText.match(/(\\d+)\\s*\\/\\s*(\\d+)/)
+      return m && Number(m[1]) > ${parsedBefore} ? m[0] : false
+    })()`,
+    90000,
+  )
+  check(
+    'layout extraction resumes after a reload',
+    Boolean(resumed),
+    `before=${parsedBefore} after=${resumed ?? 'no progress'}`,
   )
 
   // 7) Backup export / import round-trip through the UI -------------------

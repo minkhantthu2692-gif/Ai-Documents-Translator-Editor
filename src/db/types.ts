@@ -90,7 +90,18 @@ export interface BlockRecord extends BaseRecord {
   width: number
   height: number
   fontFamily: string
+  /**
+   * Family extracted from the PDF — `fontFamily` is what renders today, this is
+   * what "Font Family → Original" restores after a manual override.
+   */
+  originalFontFamily: string
   fontSize: number
+  /**
+   * The size extracted from the PDF. `fontSizeMode: 'original'` restores this
+   * after an auto-fit or a manual override — without it, "Original / Auto-fit"
+   * could never go back (Phase 4, schema v6).
+   */
+  originalFontSize: number
   lineHeight: number
   color: string
   bold: boolean
@@ -114,6 +125,57 @@ export interface BlockRecord extends BaseRecord {
   translationFlag: TranslationFlag | null
   /** Epoch ms of the last successful translation, null when never translated. */
   translatedAt: number | null
+  /**
+   * Phase 4 — a pending AI suggestion (re-translate / alternative model) the
+   * reviewer has not accepted or rejected yet. Kept beside the text so a reload
+   * still offers the choice.
+   */
+  suggestedText: string | null
+  suggestedModel: string | null
+  suggestedAt: number | null
+  /**
+   * How `fontSize` was chosen: the value extracted from the PDF (`original`),
+   * a computed auto-fit inside the original bbox (`auto`), or a size the user
+   * typed/picked (`custom`). Drives the Font Size dropdown.
+   */
+  fontSizeMode: FontSizeMode
+  /** True when the rendered text measured taller/wider than the original bbox. */
+  overflow: boolean
+}
+
+export type FontSizeMode = 'original' | 'auto' | 'custom'
+
+/** What a revision row records (drives the history list in the inspector). */
+export type RevisionAction =
+  | 'edit-text'
+  | 'edit-style'
+  | 'find-replace'
+  | 'retranslate'
+  | 'suggest'
+  | 'accept-suggestion'
+  | 'reject-suggestion'
+  | 'lock'
+  | 'unlock'
+  | 'autofit'
+  | 'restore'
+  | 'template'
+
+/**
+ * One undoable per-block change. `before`/`after` hold only the fields the
+ * action touched (a partial BlockRecord patch), so history stays small and a
+ * "restore" can be replayed exactly.
+ */
+export interface RevisionRecord extends BaseRecord {
+  projectId: string
+  blockId: string
+  pageIndex: number
+  action: RevisionAction
+  before: Record<string, unknown>
+  after: Record<string, unknown>
+  /** `user` or the model id that produced the change. */
+  actor: string
+  note: string
+  timestamp: number
 }
 
 export type BlockRegion = 'body' | 'header' | 'footer'

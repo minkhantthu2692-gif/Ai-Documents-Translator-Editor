@@ -57,7 +57,8 @@
     "kB": "kB",
     "mB": "MB",
     "gB": "GB",
-    "percent": "{{value}}%"
+    "percent": "{{value}}%",
+    "saved": "Saved"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -72,7 +73,8 @@
     "closeMenu": "Close navigation menu",
     "skipToContent": "Skip to main content",
     "more": "More",
-    "home": "Home"
+    "home": "Home",
+    "knowledge": "Knowledge"
   },
   "header": {
     "theme": "Theme",
@@ -276,7 +278,9 @@
       "parseProgress": "{{done}} / {{total}} pages parsed",
       "openBlock": "{{count}} blocks"
     },
-    "openTranslate": "Translate"
+    "openTranslate": "Translate",
+    "editorTitle": "Editor",
+    "editorBody": "Original on the left, translation on the right. Click a block to select it, double-click to edit."
   },
   "settings": {
     "title": "Settings",
@@ -664,5 +668,341 @@
     "resumedRun": "Paused run restored ({{count}} batches left)",
     "failedToast": "Translation stopped: {{reason}}",
     "noProject": "No project selected"
+  },
+  "knowledge": {
+    "title": "Knowledge",
+    "subtitle": "Glossary, translation memory and project templates",
+    "tabs": {
+      "glossary": "Glossary",
+      "tm": "Translation memory",
+      "templates": "Templates"
+    },
+    "glossary": {
+      "scopeLabel": "Scope",
+      "scopeAll": "All rows",
+      "scopeGlobal": "Global only",
+      "searchPlaceholder": "Search source or target…",
+      "addTitle": "Add a term",
+      "sourceLabel": "Source term",
+      "targetLabel": "Target term",
+      "notesLabel": "Notes",
+      "caseSensitiveLabel": "Case sensitive",
+      "caseSensitiveDesc": "Treat “API” and “api” as different terms.",
+      "addedTitle": "Term added",
+      "duplicateTitle": "Duplicate term",
+      "duplicateBody": "“{{term}}” already exists in this scope.",
+      "emptyTitle": "No glossary terms yet",
+      "emptyBody": "Add a term above or import a CSV file.",
+      "noResults": "No matching terms",
+      "import": "Import CSV",
+      "export": "Export CSV",
+      "importErrorsTitle": "Some rows could not be read",
+      "importErrorsBody": "{{count}} rows failed to parse and were skipped.",
+      "importDuplicatesTitle": "Duplicate rows skipped",
+      "importDuplicatesBody": "{{count}} rows were already present and were skipped.",
+      "importedTitle": "Import complete",
+      "importedBody": "{{file}}: {{count}} terms imported, {{skipped}} skipped.",
+      "exportedTitle": "Glossary exported",
+      "exportedBody": "{{count}} terms written to glossary.csv.",
+      "validate": "Re-validate project",
+      "validateHint": "Re-checking flags translated blocks that break a glossary term with “glossary-miss”; flagged blocks show a badge in the workspace.",
+      "validateCleanTitle": "Glossary check passed",
+      "validateIssuesTitle": "Glossary check finished",
+      "validateBody": "{{checked}} blocks checked, {{flagged}} flagged, {{cleared}} cleared.",
+      "colSource": "Source",
+      "colTarget": "Target",
+      "colCase": "Case-sensitive",
+      "deleteLabel": "Delete {{term}}",
+      "deleteTitle": "Delete glossary term?",
+      "deleteBody": "“{{term}}” will be removed from this scope."
+    },
+    "tm": {
+      "sourceLang": "Source language",
+      "targetLang": "Target language",
+      "allLanguages": "All languages",
+      "lang": {
+        "en": "English",
+        "my": "Burmese",
+        "zh": "Chinese",
+        "ja": "Japanese",
+        "ar": "Arabic",
+        "hi": "Hindi"
+      },
+      "searchPlaceholder": "Search source or translation…",
+      "colSource": "Source text",
+      "colTarget": "Translation",
+      "colHits": "Uses",
+      "caption": "Top 100 entries by number of uses",
+      "emptyTitle": "No translation memory yet",
+      "emptyBody": "Translated segments are saved here automatically while you work.",
+      "noResults": "No matching entries",
+      "clear": "Clear memory",
+      "clearTitle": "Clear all translation memory?",
+      "clearBody": "Every stored pair will be deleted. This cannot be undone.",
+      "clearedTitle": "Translation memory cleared",
+      "deleteLabel": "Delete this entry",
+      "deleteTitle": "Delete translation memory entry?",
+      "deleteBody": "This pair will be removed and translated again next time."
+    },
+    "templates": {
+      "projectLabel": "Project",
+      "projectPlaceholder": "Select a project",
+      "explainer": "Applying a template presets the project’s glossary and the terminology rules of its translate config.",
+      "emptyProjects": "Create a project first to apply a template.",
+      "qualityLabel": "Quality",
+      "quality": {
+        "basic": "Basic quality",
+        "medium": "Medium quality",
+        "high": "High quality"
+      },
+      "scopeLabel": "Terminology scope",
+      "scope": {
+        "first": "First occurrence on each page",
+        "document": "First occurrence in the document",
+        "every": "Every occurrence"
+      },
+      "previewLabel": "Preset glossary ({{count}} terms)",
+      "appliedBadge": "Applied",
+      "appliedTitle": "Template applied",
+      "appliedBody": "{{name}}: {{added}} terms added, {{skipped}} skipped.",
+      "clear": "Clear template",
+      "clearTitle": "Clear the applied template?",
+      "clearBody": "The glossary rows added by the template will be removed from “{{project}}”.",
+      "clearedTitle": "Template cleared"
+    }
+  },
+  "editor": {
+    "block": {
+      "suggestionBadge": "AI suggestion pending",
+      "overflowBadge": "Overflows the original box",
+      "emptyTitle": "No block selected",
+      "emptyBody": "Click a block on the page to inspect and edit it.",
+      "source": "Original text",
+      "translation": "Translation",
+      "suggestion": "AI suggestion",
+      "suggestionMeta": "{{model}} · {{when}}",
+      "reject": "Discard",
+      "accept": "Accept",
+      "retranslate": "Re-translate",
+      "alternative": "Try another model",
+      "retranslateNoneTitle": "Nothing changed",
+      "retranslateNoneBody": "The model returned the same text (or no model is configured).",
+      "suggestFailedTitle": "Could not update the suggestion",
+      "overflowWarn": "This text is larger than its original box and will clip when exported.",
+      "actions": "Actions",
+      "lock": "Lock block",
+      "lockDesc": "Locking keeps this block out of re-translations and bulk edits.",
+      "lockedHint": "This block is locked.",
+      "confirmApplyTitle": "Overwrite the existing translation?",
+      "confirmApplyBody": "Re-translating replaces the text currently in this block. You can undo it afterwards."
+    },
+    "pageNumber": "Page {{number}}",
+    "originalPane": "Original",
+    "translatedPane": "Translation",
+    "view": {
+      "label": "Page view",
+      "split": "Split",
+      "original": "Original",
+      "translated": "Translated"
+    },
+    "zoom": {
+      "label": "Zoom",
+      "out": "Zoom out",
+      "in": "Zoom in",
+      "reset": "Reset zoom",
+      "value": "{{percent}}%"
+    },
+    "scope": {
+      "label": "Apply to",
+      "block": "Selection",
+      "page": "Page",
+      "document": "Document"
+    },
+    "font": {
+      "familyLabel": "Font family",
+      "sizeLabel": "Font size",
+      "familyHeading": "Font family",
+      "sizeHeading": "Font size",
+      "originalFamily": "Original family",
+      "originalSize": "Original size",
+      "autoFit": "Auto-fit",
+      "bold": "Bold",
+      "italic": "Italic",
+      "color": "Color"
+    },
+    "align": {
+      "label": "Alignment",
+      "left": "Align left",
+      "center": "Align center",
+      "right": "Align right",
+      "justified": "Justify"
+    },
+    "style": {
+      "selectFirstTitle": "Select a block first",
+      "selectFirstBody": "Choose Block, Page or Document as the scope.",
+      "nothingTitle": "Nothing to change",
+      "nothingBody": "These blocks already use that style.",
+      "overflowTitle": "Text overflows the box",
+      "overflowBody": "{{count}} blocks no longer fit their original area.",
+      "overflowCount": "{{count}} overflowing"
+    },
+    "undo": "Undo",
+    "redo": "Redo",
+    "find": {
+      "toggle": "Find",
+      "title": "Find and replace",
+      "queryPlaceholder": "Find text…",
+      "counter": "{{index}} of {{count}}",
+      "previous": "Previous match",
+      "caseSensitive": "Match case",
+      "wholeWord": "Whole word",
+      "replacePlaceholder": "Replace with…",
+      "sourceReadOnly": "Source text matches are read-only",
+      "replace": "Replace",
+      "replaceAll": "Replace all",
+      "replacedTitle": "Replaced",
+      "replacedBody": "{{count}} occurrences replaced"
+    },
+    "retranslate": {
+      "button": "Re-translate",
+      "selection": "Selection",
+      "page": "Current page",
+      "nothingTitle": "Nothing to translate",
+      "nothingBody": "Select some blocks first.",
+      "noPageTitle": "No current page",
+      "noPageBody": "Scroll to a page first.",
+      "doneTitle": "Re-translated",
+      "doneBody": "{{count}} blocks updated.",
+      "failedTitle": "Re-translation failed"
+    },
+    "export": {
+      "button": "Export"
+    },
+    "suggestion": {
+      "acceptedTitle": "Suggestion accepted",
+      "rejectedTitle": "Suggestion discarded"
+    },
+    "status": {
+      "summary": "{{pages}} pages, {{blocks}} blocks, {{matches}} matches, page {{page}}"
+    },
+    "busy": {
+      "retranslate": "Re-translating {{done}}/{{total}}",
+      "apply-style": "Applying style {{done}}/{{total}}",
+      "find": "Searching {{done}}/{{total}}",
+      "template": "Applying template {{done}}/{{total}}",
+      "autosave": "Saving {{done}}/{{total}}"
+    },
+    "cmd": {
+      "editText": "Edit text",
+      "style": "Change style",
+      "retranslate": "Re-translate",
+      "suggest": "Suggest alternative",
+      "accept": "Accept suggestion",
+      "reject": "Discard suggestion",
+      "lock": "Lock block",
+      "unlock": "Unlock block",
+      "restore": "Restore earlier state",
+      "findReplace": "Find and replace"
+    },
+    "inspector": {
+      "title": "Inspector"
+    },
+    "tabs": {
+      "block": "Block",
+      "history": "History",
+      "document": "Document"
+    },
+    "glossary": {
+      "title": "Glossary hits",
+      "honoured": "Applied",
+      "miss": "Missing"
+    },
+    "history": {
+      "title": "Revision history",
+      "emptyTitle": "No revisions yet",
+      "emptyBody": "Changes to this block will be listed here.",
+      "byActor": "by {{actor}}",
+      "more": "Showing the {{count}} most recent revisions"
+    },
+    "document": {
+      "title": "Document statistics",
+      "translated": "Translated",
+      "untranslated": "Untranslated",
+      "overflow": "Overflowing blocks",
+      "suggestions": "Pending suggestions",
+      "locked": "Locked blocks",
+      "template": "Template",
+      "glossaryRows": "Glossary entries"
+    },
+    "action": {
+      "edit-text": "Edit text",
+      "edit-style": "Change style",
+      "find-replace": "Find and replace",
+      "retranslate": "Re-translate",
+      "suggest": "Suggest alternative",
+      "accept-suggestion": "Accept suggestion",
+      "reject-suggestion": "Discard suggestion",
+      "lock": "Lock",
+      "unlock": "Unlock",
+      "autofit": "Auto-fit",
+      "restore": "Restore",
+      "template": "Apply template"
+    }
+  },
+  "export": {
+    "title": "Export document",
+    "asLabel": "Export as",
+    "format": {
+      "pdf": "PDF",
+      "pdf-raster": "Raster PDF",
+      "bilingual-pdf": "Bilingual PDF",
+      "docx": "DOCX",
+      "html": "HTML",
+      "markdown": "Markdown",
+      "text": "Plain text",
+      "epub": "EPUB",
+      "json": "JSON",
+      "csv": "CSV",
+      "tsv": "TSV",
+      "images": "Images"
+    },
+    "group": {
+      "pdf": "PDF files",
+      "documents": "Documents",
+      "data": "Data",
+      "images": "Image files"
+    },
+    "includeOriginal": "Keep the source text next to the translation",
+    "bilingualLabel": "Bilingual layout",
+    "bilingual": {
+      "side-by-side": "Side by side",
+      "interleaved": "Interleaved"
+    },
+    "imageFormatLabel": "Image format",
+    "imageFormat": {
+      "png": "PNG — lossless, larger",
+      "jpg": "JPG — smaller"
+    },
+    "includeImages": "Embed page artwork behind the text",
+    "fileName": "File name",
+    "pdfExplainer": "The PDF keeps real vector text — selectable and searchable — and is produced through the browser’s print dialog using the bundled Myanmar fonts. Choose Raster PDF instead if you need a pixel-exact copy.",
+    "rasterExplainer": "The raster PDF is pixel-exact: every page is an image, so no print dialog is used and there is no text layer — the text cannot be selected or searched, and the file is larger.",
+    "missingFontsTitle": "Missing fonts",
+    "missingFontsBody": "The browser does not have these families. Each one would be replaced with:",
+    "substituteFonts": "Substitute missing fonts",
+    "stage": {
+      "collect": "Collecting the document",
+      "render": "Rendering page artwork",
+      "build": "Building the file",
+      "package": "Packaging",
+      "write": "Writing the file"
+    },
+    "doneTitle": "Export ready",
+    "doneBody": "{{file}} saved — {{kb}} in {{seconds}} s",
+    "failedTitle": "Export failed",
+    "issueTitle": "Export finished with a warning",
+    "issueFontsTitle": "Some fonts were substituted",
+    "issueFontsBody": "Missing families were replaced: {{mappings}}",
+    "summary": "{{pages}} pages · {{blocks}} blocks · {{translated}} translated"
   }
 }

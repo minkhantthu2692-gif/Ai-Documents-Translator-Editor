@@ -89,17 +89,23 @@ export type ParsedBlockPatch = Omit<
   | 'translationConfidence'
   | 'translationFlag'
   | 'translatedAt'
+  | 'suggestedText'
+  | 'suggestedModel'
+  | 'suggestedAt'
 >
 
 /**
  * Layout fields only — what a brand-new row starts with before `id`s exist.
  * The translation-quality fields are added back as `null`: a fresh block has
- * never been translated.
+ * never been translated, and it has no pending AI suggestion either.
  */
 type BlockLayoutFields = Omit<ParsedBlockPatch, 'id' | 'projectId' | 'pageId'> & {
   translationConfidence: null
   translationFlag: null
   translatedAt: null
+  suggestedText: null
+  suggestedModel: null
+  suggestedAt: null
 }
 
 function blockDefaults(): BlockLayoutFields {
@@ -112,7 +118,9 @@ function blockDefaults(): BlockLayoutFields {
     width: 0,
     height: 0,
     fontFamily: 'Noto Sans',
+    originalFontFamily: 'Noto Sans',
     fontSize: 12,
+    originalFontSize: 12,
     lineHeight: 1.5,
     color: '#000000',
     bold: false,
@@ -127,12 +135,22 @@ function blockDefaults(): BlockLayoutFields {
     translationConfidence: null,
     translationFlag: null,
     translatedAt: null,
+    suggestedText: null,
+    suggestedModel: null,
+    suggestedAt: null,
+    fontSizeMode: 'original',
+    overflow: false,
   }
 }
 
 export class BlockRepository {
   listByProject(projectId: string): Promise<BlockRecord[]> {
     return getDb().blocks.where('projectId').equals(projectId).sortBy('order')
+  }
+
+  /** Cheap existence probe — decides whether the editor is worth mounting. */
+  countByProject(projectId: string): Promise<number> {
+    return getDb().blocks.where('projectId').equals(projectId).count()
   }
 
   listByPage(pageId: string): Promise<BlockRecord[]> {

@@ -776,7 +776,364 @@ try {
     check('Data tab reachable', false, 'tab not found')
   }
 
-  // 9) Console hygiene ----------------------------------------------------
+  // 9) Phase 4 — editor, find & replace, export, knowledge ------------------
+  await goto(currentWorkspacePath)
+  const editorMounted = await waitFor(
+    `!!document.querySelector('[data-testid="workspace-editor"]')`,
+    30000,
+  )
+  check('workspace editor mounts for a parsed project', editorMounted)
+
+  const panes = await waitFor(
+    `(() => {
+      const o = document.querySelectorAll('[data-testid="pane-original"]').length
+      const t = document.querySelectorAll('[data-testid="pane-translated"]').length
+      const b = document.querySelectorAll('[data-testid="editor-block"]').length
+      return o > 0 && t > 0 && b > 0 ? { o, t, b } : false
+    })()`,
+    20000,
+  )
+  check(
+    'split view renders both panes with positioned text blocks',
+    Boolean(panes),
+    JSON.stringify(panes),
+  )
+  if (!panes) {
+    const diag = await evalJs(
+      `JSON.stringify((() => {
+        const editor = document.querySelector('[data-testid="workspace-editor"]')
+        const scroller = document.querySelector('[data-testid="workspace-editor"] [data-testid="virtuoso-scroller"]')
+        const heights = []
+        for (let n = editor; n && heights.length < 6; n = n.parentElement) {
+          heights.push(Math.round(n.getBoundingClientRect().height))
+        }
+        return {
+          thumbs: document.querySelectorAll('[data-testid="page-thumb-img"]').length,
+          panesO: document.querySelectorAll('[data-testid="pane-original"]').length,
+          panesT: document.querySelectorAll('[data-testid="pane-translated"]').length,
+          blocks: document.querySelectorAll('[data-testid="editor-block"]').length,
+          virtuoso: !!scroller,
+          heightChain: heights.join('>'),
+          children: editor ? [...editor.children].map((c) => (c.tagName + '.' + String(c.className).slice(0, 24))) : [],
+        }
+      })())`,
+    )
+    check('split view diagnostics', false, String(diag))
+  }
+
+  const blockFont = await evalJs(
+    `getComputedStyle(document.querySelector('[data-testid="editor-block"]')).fontFamily`,
+  )
+  check(
+    'editor blocks fall back to the Myanmar font stack',
+    /Noto Sans Myanmar/.test(String(blockFont)),
+    String(blockFont),
+  )
+
+  // View switch ------------------------------------------------------------
+  check('view switch clickable', await clickWhenReady('[data-testid="view-translated"]'))
+  await sleep(400)
+  const originalHidden = await evalJs(
+    `document.querySelectorAll('[data-testid="pane-original"]').length`,
+  )
+  check(
+    '"translated" view drops the original pane',
+    originalHidden === 0,
+    `count=${originalHidden}`,
+  )
+  await clickWhenReady('[data-testid="view-split"]')
+  check(
+    '"split" view brings the original pane back',
+    await waitFor(`document.querySelectorAll('[data-testid="pane-original"]').length > 0`, 8000),
+  )
+
+  // Selection → inspector ---------------------------------------------------
+  check(
+    'clicking a block selects it',
+    await waitFor(
+      `(() => { const el = document.querySelector('[data-testid="editor-block"]'); if (!el) return false; el.click(); return !!document.querySelector('[data-testid="editor-block"][data-selected="true"]') })()`,
+      10000,
+    ),
+  )
+  check(
+    'inspector opens the Block tab for the selection',
+    await waitFor(`!!document.querySelector('textarea[aria-label="Translation"]')`, 10000),
+  )
+
+  // Style command → undo. `commitCommand` writes to Dexie before the history
+  // stack updates, so every state read has to wait for the async round trip —
+  // and the fixture's first block may already be bold, so compare against the
+  // captured starting value instead of hard-coding one.
+  const boldBefore = await evalJs(
+    `document.querySelector('[data-testid="style-bold"]')?.getAttribute('aria-pressed')`,
+  )
+  check(
+    'bold indicator reflects the selected block',
+    boldBefore === 'true' || boldBefore === 'false',
+    String(boldBefore),
+  )
+  check('bold toggle clickable', await clickWhenReady('[data-testid="style-bold"]'))
+  check(
+    'bold toggles on the selected block',
+    await waitFor(
+      `document.querySelector('[data-testid="style-bold"]')?.getAttribute('aria-pressed') !== ${JSON.stringify(String(boldBefore))}`,
+      8000,
+    ),
+    `from ${boldBefore}`,
+  )
+  check(
+    'undo arms after a command',
+    await waitFor(
+      `!!document.querySelector('[data-testid="undo"]') && !document.querySelector('[data-testid="undo"]').disabled`,
+      8000,
+    ),
+  )
+
+  check('undo clickable', await clickWhenReady('[data-testid="undo"]'))
+  check(
+    'undo reverts the style command',
+    await waitFor(
+      `document.querySelector('[data-testid="style-bold"]')?.getAttribute('aria-pressed') === ${JSON.stringify(String(boldBefore))}`,
+      8000,
+    ),
+    `back to ${boldBefore}`,
+  )
+  check(
+    'undo stack drains back to empty',
+    await waitFor(
+      `!!document.querySelector('[data-testid="undo"]') && document.querySelector('[data-testid="undo"]').disabled`,
+      8000,
+    ),
+  )
+
+  // Text edit → save → reload ----------------------------------------------
+  const MARKER = 'SMOKE-P4'
+  const draftSet = await evalJs(
+    `(() => {
+      const ta = document.querySelector('textarea[aria-label="Translation"]')
+      if (!ta) return false
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+      setter.call(ta, ta.value + ' ${MARKER}')
+      ta.dispatchEvent(new Event('input', { bubbles: true }))
+      return true
+    })()`,
+  )
+  const savedEdit = await evalJs(
+    `(() => {
+      const b = [...document.querySelectorAll('button')].find(
+        (x) => x.textContent.trim() === 'Save' && !x.disabled,
+      )
+      if (!b) return false
+      b.click()
+      return true
+    })()`,
+  )
+  check('translation edit is saved through the command stack', Boolean(draftSet && savedEdit))
+  check(
+    'edited text renders on the translated canvas',
+    await waitFor(
+      `[...document.querySelectorAll('[data-testid="editor-block"]')].some((el) => el.textContent.includes('${MARKER}'))`,
+      10000,
+    ),
+  )
+
+  // Find & replace ----------------------------------------------------------
+  check('find toggle clickable', await clickWhenReady('[data-testid="toggle-find"]'))
+  check(
+    'find & replace bar opens',
+    await waitFor(`!!document.querySelector('[role="search"]')`, 8000),
+  )
+  await evalJs(
+    `(() => {
+      const input = document.querySelector('[role="search"] input')
+      if (!input) return false
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+      setter.call(input, '${MARKER}')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      return true
+    })()`,
+  )
+  const counter = await waitFor(
+    `(() => { const el = document.querySelector('[role="search"]'); return el && /1 of 1/.test(el.innerText) ? el.innerText : false })()`,
+    8000,
+  )
+  check('find reports the single occurrence', Boolean(counter), String(counter))
+
+  await evalJs(
+    `(() => {
+      const input = document.querySelectorAll('[role="search"] input')[1]
+      if (!input) return false
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+      setter.call(input, '${MARKER}-X')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      return true
+    })()`,
+  )
+  const replaceClicked = await evalJs(
+    `(() => {
+      const b = [...document.querySelectorAll('[role="search"] button')].find(
+        (x) => x.textContent.trim() === 'Replace all',
+      )
+      if (!b || b.disabled) return false
+      b.click()
+      return true
+    })()`,
+  )
+  check(
+    'replace-all commits and reports the count',
+    Boolean(replaceClicked) &&
+      (await waitFor(`/occurrences replaced/.test(document.body.innerText)`, 10000)),
+  )
+
+  // Reload keeps the edit (IndexedDB) ---------------------------------------
+  await goto(currentWorkspacePath)
+  await waitFor(`!!document.querySelector('[data-testid="workspace-editor"]')`, 30000)
+  await waitFor(`document.querySelectorAll('[data-testid="editor-block"]').length > 0`, 20000)
+  await evalJs(
+    `(() => { const el = document.querySelector('[data-testid="editor-block"]'); if (!el) return false; el.click(); return true })()`,
+  )
+  const persisted = await waitFor(
+    `(() => { const ta = document.querySelector('textarea[aria-label="Translation"]'); return ta ? ta.value.includes('${MARKER}-X') : false })()`,
+    10000,
+  )
+  check('edits survive a reload (IndexedDB)', Boolean(persisted))
+
+  // Export dialog + a real HTML export ---------------------------------------
+  check('export button clickable', await clickWhenReady('[data-testid="open-export"]'))
+  check(
+    'export dialog renders',
+    await waitFor(
+      `!!document.querySelector('[role="dialog"]') && !!document.querySelector('[data-testid="export-format-html"]')`,
+      10000,
+    ),
+  )
+  check('format menu opens', await clickWhenReady('[data-testid="export-format-html"]'))
+  const menu = await waitFor(
+    `(() => { const m = document.querySelector('[role="menu"]'); return m && /PDF/.test(m.innerText) && /DOCX/.test(m.innerText) ? true : false })()`,
+    8000,
+  )
+  check('format menu lists PDF and DOCX', Boolean(menu))
+  await click('[data-testid="export-format-html"]')
+  await sleep(300)
+
+  const artworkOff = await evalJs(
+    `(() => {
+      const label = [...document.querySelectorAll('label')].find((l) =>
+        /Embed page artwork/.test(l.textContent),
+      )
+      if (!label) return 'no-label'
+      const input = label.querySelector('input[type="checkbox"]')
+      if (!input) return 'no-input'
+      if (input.checked) input.click()
+      return input.checked ? 'still-on' : 'off'
+    })()`,
+  )
+  check('page artwork can be turned off before export', artworkOff === 'off', String(artworkOff))
+
+  // The CDP session is attached to one page target, so the download directory
+  // set up on /settings is gone after these navigations — re-assert it for
+  // this page or Chrome silently drops the export's anchor download.
+  try {
+    await send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: DL_DIR })
+  } catch {
+    await send('Browser.setDownloadBehavior', {
+      behavior: 'allow',
+      downloadPath: DL_DIR,
+      eventsEnabled: true,
+    }).catch(() => {})
+  }
+
+  let seenBefore
+  try {
+    seenBefore = new Set(readdirSync(DL_DIR))
+  } catch {
+    seenBefore = new Set()
+  }
+  check('export runs', await clickWhenReady('[data-testid="export-run"]'))
+  let exportFile = null
+  let exportState = ''
+  for (let i = 0; i < 900 && !exportFile; i += 1) {
+    await sleep(200)
+    try {
+      const found = readdirSync(DL_DIR).filter((f) => f.endsWith('.html') && !seenBefore.has(f))
+      if (found.length) exportFile = join(DL_DIR, found[0])
+    } catch {
+      /* dir not created yet */
+    }
+    if (i % 25 === 0) {
+      exportState = String(
+        await evalJs(
+          `JSON.stringify({
+            progress: document.querySelector('[data-testid="export-progress"]')?.textContent ?? null,
+            summary: /blocks/.test(document.querySelector('[role="dialog"]')?.innerText ?? '')
+              ? 'set'
+              : 'none',
+            running: document.querySelector('[data-testid="export-run"]')?.disabled ?? null,
+            toasts: [...document.querySelectorAll('[role="status"],[role="alert"]')].map((n) =>
+              n.innerText.replace(/\\n+/g, ' | ').slice(0, 120),
+            ),
+          })`,
+        ),
+      )
+    }
+  }
+  const dirListing = (() => {
+    try {
+      return readdirSync(DL_DIR).join(', ')
+    } catch {
+      return '<missing>'
+    }
+  })()
+  check(
+    'HTML export downloads a file',
+    Boolean(exportFile),
+    exportFile ?? `${exportState} dir=[${dirListing}]`,
+  )
+
+  if (exportFile) {
+    const html = readFileSync(exportFile, 'utf8')
+    check('exported HTML keeps the Myanmar font stack', /Noto Sans Myanmar/.test(html))
+    check(
+      'exported HTML lays blocks out per page',
+      /data-page=/.test(html) && /font-size:/.test(html),
+    )
+    check('exported HTML ships no external scripts', !/<script[^>]+src=/.test(html))
+  }
+
+  // Knowledge page ------------------------------------------------------------
+  await goto('/knowledge')
+  const knowledgeTabs = await waitFor(
+    `document.querySelectorAll('[role="tab"]').length >= 3`,
+    10000,
+  )
+  check(
+    'knowledge page renders glossary/TM/template tabs',
+    Boolean(knowledgeTabs),
+    `tabs=${knowledgeTabs}`,
+  )
+  check(
+    'glossary tab content rendered',
+    await waitFor(`/Glossary/.test(document.body.innerText)`, 8000),
+  )
+
+  // Myanmar rendering reference ------------------------------------------------
+  await goto('/dev/myanmar-test')
+  const myanmarFont = await waitFor(
+    `(() => { const p = document.querySelector('p[lang="my"]'); return p ? getComputedStyle(p).fontFamily : false })()`,
+    10000,
+  )
+  check(
+    'Myanmar test page renders with the bundled family',
+    /Noto Sans Myanmar/.test(String(myanmarFont)),
+    String(myanmarFont),
+  )
+  const fontLoaded = await evalJs(
+    `document.fonts.ready.then(() => document.fonts.check('16px "Noto Sans Myanmar"'))`,
+    true,
+  )
+  check('Noto Sans Myanmar webfont is loaded', fontLoaded === true, String(fontLoaded))
+
+  // 10) Console hygiene ---------------------------------------------------
   const realErrors = consoleErrors.filter(
     (e) => !/favicon|Failed to load resource: the server responded with a status of 404/.test(e),
   )

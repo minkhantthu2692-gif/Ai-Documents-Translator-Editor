@@ -11,6 +11,9 @@ import { logMachineEvent } from '@/core/eventLogger'
 import { REASON_CODES } from '@/core/reasonCodes'
 import { projectRepo } from '@/db/repo-projects'
 import { eventRepo } from '@/db/repo-events'
+import { blockRepo } from '@/db/repo-content'
+import { WorkspaceEditor } from '@/pages/workspace/WorkspaceEditor'
+import { WorkspaceInspector } from '@/pages/workspace/WorkspaceInspector'
 import { toast } from '@/stores/toastStore'
 import { cn } from '@/lib/cn'
 import { formatDateTime, formatRelative } from '@/lib/format'
@@ -81,6 +84,12 @@ export function WorkspacePage() {
       projectId ? await eventRepo.list({ projectId, limit: 8 }) : eventRepo.list({ limit: 8 }),
     [projectId],
   )
+  const blockCount = useLiveQuery(
+    async () => (projectId ? await blockRepo.countByProject(projectId) : 0),
+    [projectId],
+    0,
+  )
+  const hasEditor = (blockCount ?? 0) > 0
 
   const machine = machineRef.current
 
@@ -195,6 +204,7 @@ export function WorkspacePage() {
         <PageLayout
           inspector={
             <>
+              {hasEditor && projectId ? <WorkspaceInspector projectId={projectId} /> : null}
               <Card title={t('workspace.projectInfo')}>
                 <dl className="flex flex-col gap-2.5 text-xs">
                   <div className="flex items-start justify-between gap-3">
@@ -251,6 +261,22 @@ export function WorkspacePage() {
             </>
           }
         >
+          {hasEditor && projectId ? (
+            <Card
+              flush
+              className="h-[70vh] min-h-[26rem] overflow-hidden"
+              title={t('workspace.editorTitle')}
+              description={t('workspace.editorBody')}
+            >
+              {/* The card body is a block box (not a flex container), so the
+                  wrapper takes the body's height directly: the editor's split
+                  view needs a definite height to virtualise its page rows. */}
+              <div className="flex h-full min-h-0 flex-col">
+                <WorkspaceEditor projectId={projectId} />
+              </div>
+            </Card>
+          ) : null}
+
           <Card title={t('workspace.pipeline')} description={t('workspace.placeholderBody')}>
             <Stepper
               items={steps}

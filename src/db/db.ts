@@ -9,6 +9,9 @@
  * Version 4 — Phase 3: key-pool fields on `apiKeys` (enabled / cooldown /
  *             usage counters / token buckets) and per-block translation
  *             quality fields (confidence / flag / translatedAt).
+ * Version 5 — Phase 4: `revisions` (per-block history that powers undo/redo
+ *             and the inspector timeline) and the pending AI suggestion fields
+ *             on `blocks`.
  *
  * Dexie runs upgrade hooks only when an existing database is older than the
  * version being installed, so a fresh install applies both schemas in order and
@@ -27,6 +30,7 @@ import type {
   OutboxRecord,
   PageRecord,
   ProjectRecord,
+  RevisionRecord,
   SettingRecord,
   SourceFileRecord,
   TranslationMemoryRecord,
@@ -35,7 +39,7 @@ import type {
 } from './types'
 
 export const DB_NAME = 'aidt'
-export const DB_SCHEMA_VERSION = 4
+export const DB_SCHEMA_VERSION = 6
 
 export const TABLE_NAMES = [
   'projects',
@@ -52,6 +56,7 @@ export const TABLE_NAMES = [
   'apiKeys',
   'usageStats',
   'sourceFiles',
+  'revisions',
 ] as const
 
 /** Tables that existed at schema v2 — the v2 backfill must only touch these. */
@@ -88,6 +93,7 @@ export class AppDatabase extends Dexie {
   apiKeys!: Table<ApiKeyRecord, string>
   usageStats!: Table<UsageStatsRecord, string>
   sourceFiles!: Table<SourceFileRecord, string>
+  revisions!: Table<RevisionRecord, string>
 
   constructor(name = DB_NAME) {
     super(name)
@@ -244,6 +250,75 @@ export class AppDatabase extends Dexie {
             if (block.translationConfidence === undefined) block.translationConfidence = null
             if (block.translationFlag === undefined) block.translationFlag = null
             if (block.translatedAt === undefined) block.translatedAt = null
+          })
+      })
+
+    this.version(5)
+      .stores({
+        projects: 'id, name, status, lastOpenedAt, archivedAt, createdAt, updatedAt',
+        pages: 'id, [projectId+index], projectId, ocrStatus, contentClass, updatedAt',
+        blocks: 'id, [projectId+pageId+order], projectId, pageId, kind, status, region, updatedAt',
+        translations:
+          'id, sourceHash, [projectId+blockId], projectId, blockId, provider, status, updatedAt',
+        glossary: 'id, sourceTerm, targetTerm, projectId, updatedAt',
+        translationMemory: 'id, sourceHash, [sourceLang+targetLang+sourceHash], hits, updatedAt',
+        cache: 'id, [kind+key], kind, expiresAt, lastAccessAt, updatedAt',
+        jobs: 'id, state, type, projectId, startedAt, updatedAt',
+        events: 'id, timestamp, severity, reasonCode, state, updatedAt',
+        outbox: 'id, [entity+entityId], nextAttemptAt, updatedAt',
+        settings: 'id, group, updatedAt',
+        apiKeys: 'id, provider, status, updatedAt',
+        usageStats: 'id, [provider+model+day], day, provider, updatedAt',
+        sourceFiles: 'id, projectId, updatedAt',
+        revisions: 'id, [projectId+blockId], projectId, blockId, timestamp, updatedAt',
+      })
+      .upgrade(async (tx) => {
+        // Backfill the Phase 4 fields on rows written before v5.
+        await tx
+          .table('blocks')
+          .toCollection()
+          .modify((block: Record<string, unknown>) => {
+            if (block.suggestedText === undefined) block.suggestedText = null
+            if (block.suggestedModel === undefined) block.suggestedModel = null
+            if (block.suggestedAt === undefined) block.suggestedAt = null
+            if (block.fontSizeMode === undefined) block.fontSizeMode = 'original'
+            if (block.overflow === undefined) block.overflow = false
+          })
+      })
+
+    this.version(6)
+      .stores({
+        projects: 'id, name, status, lastOpenedAt, archivedAt, createdAt, updatedAt',
+        pages: 'id, [projectId+index], projectId, ocrStatus, contentClass, updatedAt',
+        blocks: 'id, [projectId+pageId+order], projectId, pageId, kind, status, region, updatedAt',
+        translations:
+          'id, sourceHash, [projectId+blockId], projectId, blockId, provider, status, updatedAt',
+        glossary: 'id, sourceTerm, targetTerm, projectId, updatedAt',
+        translationMemory: 'id, sourceHash, [sourceLang+targetLang+sourceHash], hits, updatedAt',
+        cache: 'id, [kind+key], kind, expiresAt, lastAccessAt, updatedAt',
+        jobs: 'id, state, type, projectId, startedAt, updatedAt',
+        events: 'id, timestamp, severity, reasonCode, state, updatedAt',
+        outbox: 'id, [entity+entityId], nextAttemptAt, updatedAt',
+        settings: 'id, group, updatedAt',
+        apiKeys: 'id, provider, status, updatedAt',
+        usageStats: 'id, [provider+model+day], day, provider, updatedAt',
+        sourceFiles: 'id, projectId, updatedAt',
+        revisions: 'id, [projectId+blockId], projectId, blockId, timestamp, updatedAt',
+      })
+      .upgrade(async (tx) => {
+        // The extracted size is what "Font size → Original" restores, so it has
+        // to survive the first manual/auto-fit override of `fontSize`.
+        await tx
+          .table('blocks')
+          .toCollection()
+          .modify((block: Record<string, unknown>) => {
+            if (typeof block.originalFontSize !== 'number') {
+              block.originalFontSize = typeof block.fontSize === 'number' ? block.fontSize : 12
+            }
+            if (typeof block.originalFontFamily !== 'string') {
+              block.originalFontFamily =
+                typeof block.fontFamily === 'string' ? block.fontFamily : 'Noto Sans'
+            }
           })
       })
   }

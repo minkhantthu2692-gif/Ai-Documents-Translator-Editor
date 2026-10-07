@@ -8,6 +8,7 @@ import { glossaryRepo, translationMemoryRepo } from './repo-knowledge'
 import { jobRepo } from './repo-jobs'
 import { outboxRepo } from './repo-outbox'
 import { projectRepo } from './repo-projects'
+import { revisionRepo } from './repo-revisions'
 import { settingsRepo } from './repo-settings'
 import { sourceFileRepo } from './repo-sourceFiles'
 import { usageRepo } from './repo-usage'
@@ -27,6 +28,7 @@ export const repos = {
   usage: usageRepo,
   outbox: outboxRepo,
   sourceFiles: sourceFileRepo,
+  revisions: revisionRepo,
 }
 
 export {
@@ -44,4 +46,5 @@ export {
   usageRepo,
   outboxRepo,
   sourceFileRepo,
+  revisionRepo,
 }

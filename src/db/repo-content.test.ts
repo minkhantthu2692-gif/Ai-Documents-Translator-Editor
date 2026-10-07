@@ -22,7 +22,9 @@ function patch(
     width: 120,
     height: 14,
     fontFamily: 'Noto Sans',
+    originalFontFamily: 'Noto Sans',
     fontSize: 12,
+    originalFontSize: 12,
     lineHeight: 1.7,
     color: '#000000',
     bold: false,
@@ -34,6 +36,8 @@ function patch(
     skipRule: null,
     placeholders: [],
     listMarker: null,
+    fontSizeMode: 'original',
+    overflow: false,
     ...overrides,
   }
 }

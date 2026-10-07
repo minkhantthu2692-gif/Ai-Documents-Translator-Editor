@@ -214,7 +214,9 @@ function toBlockPatch(
     width: block.bbox.w,
     height: block.bbox.h,
     fontFamily: block.fontFamily,
+    originalFontFamily: block.fontFamily,
     fontSize: block.fontSize,
+    originalFontSize: block.fontSize,
     lineHeight: block.lineSpacing,
     color: block.color,
     bold: block.bold,
@@ -226,6 +228,10 @@ function toBlockPatch(
     skipRule: block.skipRule,
     placeholders: block.placeholders,
     listMarker: block.listMarker,
+    // A re-parse re-reads the PDF: any auto-fit/manual size and any overflow
+    // warning from the previous layout are stale the moment geometry changes.
+    fontSizeMode: 'original',
+    overflow: false,
   }
 }
 

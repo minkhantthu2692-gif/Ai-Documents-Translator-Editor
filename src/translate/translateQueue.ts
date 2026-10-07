@@ -275,7 +275,7 @@ function interleave(groups: TranslateJob[][]): TranslateJob[] {
   return out
 }
 
-async function loadGlossary(projectId: string): Promise<GlossarySpec[]> {
+export async function loadGlossary(projectId: string): Promise<GlossarySpec[]> {
   const [globalEntries, projectEntries] = await Promise.all([
     glossaryRepo.list(null),
     glossaryRepo.list(projectId),
@@ -707,7 +707,7 @@ async function executeBatch(job: TranslateJob, run: ActiveRun, signal: AbortSign
   }
 }
 
-async function persistKeyStates(states: PersistedKeyState[]): Promise<void> {
+export async function persistKeyStates(states: PersistedKeyState[]): Promise<void> {
   if (states.length === 0) return
   useTranslateStore.getState().setKeyStates(states)
   try {

@@ -7,6 +7,7 @@ import { WorkspacePage } from '@/pages/WorkspacePage'
 import { TranslatePage } from '@/pages/TranslatePage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { LogsPage } from '@/pages/LogsPage'
+import { KnowledgePage } from '@/pages/KnowledgePage'
 import { MyanmarTestPage } from '@/pages/MyanmarTestPage'
 
 export function App() {
@@ -20,6 +21,7 @@ export function App() {
         <Route path="workspace/:projectId" element={<WorkspacePage />} />
         <Route path="translate/:projectId" element={<TranslatePage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="knowledge" element={<KnowledgePage />} />
         <Route path="logs" element={<LogsPage />} />
         <Route path="dev/myanmar-test" element={<MyanmarTestPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

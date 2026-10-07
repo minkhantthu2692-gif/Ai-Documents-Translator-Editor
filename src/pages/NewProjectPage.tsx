@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Badge,
   Button,
@@ -24,6 +25,9 @@ import { REASON_CODES, type ReasonCode } from '@/core/reasonCodes'
 import { toast } from '@/stores/toastStore'
 import { projectRepo } from '@/db/repo-projects'
 import { sourceFileRepo } from '@/db/repo-sourceFiles'
+import { apiKeyRepo, type ApiKeySummary } from '@/db/repo-apiKeys'
+import { SETTING_KEYS, settingsRepo } from '@/db/repo-settings'
+import { defaultModelFor, freeTierLimits, type ProviderId } from '@/config/models.config'
 import { checkPdfFile, isFileSizeWarning } from '@/pdf/fileValidation'
 import { AnalysisCancelled, AnalysisError, analysisClient } from '@/pdf/analysisClient'
 import { closeDocument, isDocumentOpen, openDocument, persistProbe } from '@/pdf/projectAnalysis'
@@ -53,14 +57,6 @@ const LANGUAGES: Array<{ value: string; label: string; native: string }> = [
   { value: 'id', label: 'Indonesian', native: 'Bahasa Indonesia' },
   { value: 'hi', label: 'Hindi', native: 'हिन्दी' },
 ]
-
-/**
- * Free-tier limits handed to the quota check. Deliberately unset in Phase 2:
- * no AI provider is configured yet (apiKey/provider checks are pending too), so
- * inventing a limit here would block Start on every large document. Phase 3
- * replaces this with the limits of the configured provider.
- */
-const FREE_TIER = { maxRequests: 0, maxTokens: 0 }
 
 type FileStatus = 'queued' | 'analyzing' | 'ready' | 'password' | 'error'
 
@@ -433,6 +429,11 @@ export function NewProjectPage() {
       toast('info', t('newProject.ocrOfferAction'), t('newProject.ocrToggle'))
       return
     }
+    // A missing/rejected API key is fixed in Settings → AI Providers.
+    if (check.fix?.kind === 'navigation') {
+      navigate('/settings')
+      return
+    }
     const action = check.fix
       ? isMy
         ? check.fix.labelMy
@@ -591,6 +592,48 @@ export function NewProjectPage() {
     return estimateTranslationWork(characters, blocks)
   }, [files])
 
+  /** Real provider state: which key/provider/model the wizard pre-flight uses. */
+  const [activeProvider, setActiveProvider] = useState<ProviderId>('gemini')
+  const [activeModel, setActiveModel] = useState('')
+  const apiKeys = useLiveQuery(() => apiKeyRepo.list(), [], [] as ApiKeySummary[])
+
+  useEffect(() => {
+    void (async () => {
+      const [storedProvider, storedModel, keys] = await Promise.all([
+        settingsRepo.get<string>(SETTING_KEYS.provider, ''),
+        settingsRepo.get<string>(SETTING_KEYS.model, ''),
+        apiKeyRepo.list(),
+      ])
+      const enabled = keys.filter((key) => key.enabled !== false)
+      const active = (storedProvider || 'gemini') as ProviderId
+      // Fall back to the first provider that actually holds a key, so pre-flight
+      // reports a usable provider/model pair instead of a provider nobody can call.
+      const withKey = enabled.some((key) => key.provider === active)
+        ? active
+        : ((enabled[0]?.provider as ProviderId | undefined) ?? active)
+      setActiveProvider(withKey)
+      setActiveModel(storedModel || defaultModelFor(withKey))
+    })()
+  }, [])
+
+  const providerState = useMemo(() => {
+    const keys = (apiKeys ?? []).filter(
+      (key) => key.provider === activeProvider && key.enabled !== false,
+    )
+    const usable = keys.filter((key) => key.status !== 'invalid')
+    const status =
+      usable.length === 0
+        ? keys.length > 0
+          ? 'invalid'
+          : 'none'
+        : usable.every((key) => key.status === 'quota')
+          ? 'quota'
+          : usable.some((key) => key.status === 'cooling' && key.cooldownUntil > Date.now())
+            ? 'cooling'
+            : 'valid'
+    return { status, count: usable.length } as const
+  }, [apiKeys, activeProvider])
+
   const checks = useMemo<PreflightCheck[]>(() => {
     // While a file is still queued or analysed the panel waits instead of guessing.
     if (files.length === 0 || waiting) return []
@@ -616,14 +659,24 @@ export function NewProjectPage() {
       }),
       sourceLang,
       targetLang,
-      apiKeyStatus: 'stub',
-      provider: null,
-      model: null,
-      aiReady: false,
-      freeTier: FREE_TIER,
+      apiKeyStatus: providerState.status,
+      provider: activeProvider,
+      model: activeModel || null,
+      aiReady: true,
+      freeTier: freeTierLimits(activeProvider, activeModel),
       estimate,
     })
-  }, [files, waiting, sourceLang, targetLang, runOcr, estimate])
+  }, [
+    files,
+    waiting,
+    sourceLang,
+    targetLang,
+    runOcr,
+    estimate,
+    providerState,
+    activeProvider,
+    activeModel,
+  ])
 
   const readyToStart = checks.length > 0 && isReadyToStart(checks)
   const readyProbe = files.find((file) => file.status === 'ready' && file.probe)?.probe ?? null

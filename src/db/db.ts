@@ -6,6 +6,9 @@
  *             the sync metadata (deviceId / version / updatedAt) on legacy rows.
  * Version 3 — adds `sourceFiles` (the original PDF bytes) and backfills the
  *             Phase 2 analysis fields on existing pages/blocks.
+ * Version 4 — Phase 3: key-pool fields on `apiKeys` (enabled / cooldown /
+ *             usage counters / token buckets) and per-block translation
+ *             quality fields (confidence / flag / translatedAt).
  *
  * Dexie runs upgrade hooks only when an existing database is older than the
  * version being installed, so a fresh install applies both schemas in order and
@@ -32,7 +35,7 @@ import type {
 } from './types'
 
 export const DB_NAME = 'aidt'
-export const DB_SCHEMA_VERSION = 3
+export const DB_SCHEMA_VERSION = 4
 
 export const TABLE_NAMES = [
   'projects',
@@ -198,6 +201,49 @@ export class AppDatabase extends Dexie {
             if (!Array.isArray(block.placeholders)) block.placeholders = []
             if (block.listMarker === undefined) block.listMarker = null
             if (typeof block.updatedAt !== 'number') block.updatedAt = now
+          })
+      })
+
+    this.version(4)
+      .stores({
+        projects: 'id, name, status, lastOpenedAt, archivedAt, createdAt, updatedAt',
+        pages: 'id, [projectId+index], projectId, ocrStatus, contentClass, updatedAt',
+        blocks: 'id, [projectId+pageId+order], projectId, pageId, kind, status, region, updatedAt',
+        translations:
+          'id, sourceHash, [projectId+blockId], projectId, blockId, provider, status, updatedAt',
+        glossary: 'id, sourceTerm, targetTerm, projectId, updatedAt',
+        translationMemory: 'id, sourceHash, [sourceLang+targetLang+sourceHash], hits, updatedAt',
+        cache: 'id, [kind+key], kind, expiresAt, lastAccessAt, updatedAt',
+        jobs: 'id, state, type, projectId, startedAt, updatedAt',
+        events: 'id, timestamp, severity, reasonCode, state, updatedAt',
+        outbox: 'id, [entity+entityId], nextAttemptAt, updatedAt',
+        settings: 'id, group, updatedAt',
+        apiKeys: 'id, provider, status, updatedAt',
+        usageStats: 'id, [provider+model+day], day, provider, updatedAt',
+        sourceFiles: 'id, projectId, updatedAt',
+      })
+      .upgrade(async (tx) => {
+        // Backfill the Phase 3 key-pool and translation-quality fields.
+        await tx
+          .table('apiKeys')
+          .toCollection()
+          .modify((key: Record<string, unknown>) => {
+            if (typeof key.enabled !== 'boolean') key.enabled = true
+            if (typeof key.cooldownUntil !== 'number') key.cooldownUntil = 0
+            if (key.cooldownReason === undefined) key.cooldownReason = null
+            if (typeof key.requests !== 'number') key.requests = 0
+            if (typeof key.tokensIn !== 'number') key.tokensIn = 0
+            if (typeof key.tokensOut !== 'number') key.tokensOut = 0
+            if (key.lastUsedAt === undefined) key.lastUsedAt = null
+            if (key.buckets === undefined) key.buckets = null
+          })
+        await tx
+          .table('blocks')
+          .toCollection()
+          .modify((block: Record<string, unknown>) => {
+            if (block.translationConfidence === undefined) block.translationConfidence = null
+            if (block.translationFlag === undefined) block.translationFlag = null
+            if (block.translatedAt === undefined) block.translatedAt = null
           })
       })
   }

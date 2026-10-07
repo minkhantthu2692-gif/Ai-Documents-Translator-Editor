@@ -80,11 +80,27 @@ export class PageRepository {
  */
 export type ParsedBlockPatch = Omit<
   BlockRecord,
-  'createdAt' | 'updatedAt' | 'deviceId' | 'version' | 'status' | 'translatedText'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'deviceId'
+  | 'version'
+  | 'status'
+  | 'translatedText'
+  | 'translationConfidence'
+  | 'translationFlag'
+  | 'translatedAt'
 >
 
-/** Layout fields only — what a brand-new row starts with before `id`s exist. */
-type BlockLayoutFields = Omit<ParsedBlockPatch, 'id' | 'projectId' | 'pageId'>
+/**
+ * Layout fields only — what a brand-new row starts with before `id`s exist.
+ * The translation-quality fields are added back as `null`: a fresh block has
+ * never been translated.
+ */
+type BlockLayoutFields = Omit<ParsedBlockPatch, 'id' | 'projectId' | 'pageId'> & {
+  translationConfidence: null
+  translationFlag: null
+  translatedAt: null
+}
 
 function blockDefaults(): BlockLayoutFields {
   return {
@@ -108,6 +124,9 @@ function blockDefaults(): BlockLayoutFields {
     skipRule: null,
     placeholders: [],
     listMarker: null,
+    translationConfidence: null,
+    translationFlag: null,
+    translatedAt: null,
   }
 }
 
@@ -225,6 +244,17 @@ export class TranslationRepository {
 
   async findByHash(sourceHash: string): Promise<TranslationRecord | undefined> {
     return getDb().translations.where('sourceHash').equals(sourceHash).first()
+  }
+
+  /**
+   * One record per block, so re-running a translation overwrites instead of
+   * piling up duplicates (the queue re-reads this before every write).
+   */
+  async findByBlock(projectId: string, blockId: string): Promise<TranslationRecord | undefined> {
+    return getDb()
+      .translations.where('[projectId+blockId]')
+      .equals([projectId, blockId] as never)
+      .first()
   }
 
   async upsert(

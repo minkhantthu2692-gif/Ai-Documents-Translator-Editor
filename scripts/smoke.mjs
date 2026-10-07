@@ -402,6 +402,63 @@ try {
     console.log(`DIAG ${label}: ${JSON.stringify(state)}`)
   }
 
+  // 5b) Phase 3 — an API key must exist before the wizard can Start -------
+  // Pre-flight validates real keys now, so configure one before the wizard:
+  // sealing happens in the browser (AES-GCM), the plaintext never leaves the
+  // page and is never rendered.
+  await goto('/settings?tab=providers')
+  await toEnglish()
+  const providersTab = await waitFor(
+    `!!document.querySelector('[data-testid="providers-tab"]')`,
+    15000,
+  )
+  check('AI Providers tab renders', providersTab)
+
+  const providerCards = await evalJs(
+    `['gemini','openrouter','groq','openai'].filter(id => !!document.querySelector('[data-testid="provider-' + id + '"]')).length`,
+  )
+  check('all four provider cards render', providerCards === 4, `cards=${providerCards}`)
+
+  check(
+    'vault (optional passphrase) form present',
+    await evalJs(`!!document.querySelector('[data-testid="vault-passphrase"]')`),
+    'vault-passphrase',
+  )
+
+  const badges = await evalJs(
+    `(() => { const el = document.querySelector('[data-testid="model-badges"]'); return el ? el.innerText : '' })()`,
+  )
+  check(
+    'model row shows free/context/PDF badges',
+    /Free|PDF|Context/.test(String(badges)),
+    String(badges).replace(/\s+/g, ' ').slice(0, 120),
+  )
+
+  await setField('[data-testid="new-secret-gemini"]', 'sk-test-1234567890')
+  await sleep(200)
+  await setField('[data-testid="new-nickname-gemini"]', 'Smoke key')
+  await sleep(200)
+  await clickWhenReady('[data-testid="add-key-gemini"]')
+  const masked = await waitFor(
+    `(() => { const el = document.querySelector('[data-testid="key-masked"]'); return el && /••/.test(el.innerText) ? el.innerText.trim() : false })()`,
+    15000,
+  )
+  check('API key stored and shown masked', Boolean(masked), String(masked))
+
+  const keyRow = await evalJs(
+    `(() => { const rows = [...document.querySelectorAll('li[data-testid^="key-"]')]; return rows.length ? rows[0].innerText.replace(/\\s+/g, ' ') : '' })()`,
+  )
+  check(
+    'key row shows health badge and usage counters',
+    /Healthy|Not tested|Cooling|Invalid|Quota|Disabled/.test(String(keyRow)),
+    String(keyRow).slice(0, 140),
+  )
+  check(
+    'secret never appears in the DOM',
+    (await evalJs(`document.body.innerText.includes('sk-test-1234567890')`)) === false,
+    'plaintext check',
+  )
+
   // 6a) A scanned PDF is flagged and offered OCR.
   await goto('/projects/new')
   await toEnglish()
@@ -588,7 +645,62 @@ try {
     `before=${parsedBefore} after=${resumed ?? 'no progress'}`,
   )
 
-  // 7) Backup export / import round-trip through the UI -------------------
+  // 7) Phase 3: translate page -------------------------------------------
+  const translateHref = await evalJs(
+    `(() => { const b = document.querySelector('[data-testid="open-translate"]'); const a = b ? b.closest('a') : null; return a ? a.getAttribute('href') : null })()`,
+  )
+  check(
+    'workspace exposes a Translate entry point',
+    /\/translate\//.test(String(translateHref)),
+    String(translateHref),
+  )
+
+  // Translate page --------------------------------------------------------
+  await goto(String(translateHref || '/translate/missing'))
+  const translateUi = await waitFor(
+    `!!document.querySelector('[data-testid="translate-status"]') && !!document.querySelector('[data-testid="translate-progress"]')`,
+    20000,
+  )
+  check('translate page renders status + progress panels', translateUi)
+
+  const controls = await evalJs(
+    `['provider-select','model-select','source-language','target-language','quality-select','scope-select'].filter(id => !!document.querySelector('[data-testid="' + id + '"]')).length`,
+  )
+  check('provider/model/language/quality controls present', controls === 6, `found=${controls}`)
+
+  check(
+    'sample-line test control present',
+    await evalJs(`!!document.querySelector('[data-testid="sample-test"]')`),
+    'sample-test',
+  )
+
+  const languageCount = await evalJs(
+    `document.querySelector('[data-testid="target-language"]')?.options.length ?? 0`,
+  )
+  check(
+    'target language dropdown lists 40+ languages',
+    languageCount >= 40,
+    `count=${languageCount}`,
+  )
+
+  const coverageCard = await waitFor(
+    `!!document.querySelector('[data-testid="coverage-card"]')`,
+    10000,
+  )
+  check('coverage report section rendered', coverageCard)
+
+  const startBtn = await waitFor(
+    `(() => { const b = document.querySelector('[data-testid="status-start"]'); return b ? { text: b.textContent.trim(), disabled: b.disabled } : false })()`,
+    10000,
+  )
+  check('Start control present on the translate page', Boolean(startBtn), JSON.stringify(startBtn))
+  check(
+    'Start enabled once a key and languages are configured',
+    Boolean(startBtn) && startBtn.disabled === false,
+    JSON.stringify(startBtn),
+  )
+
+  // 8) Backup export / import round-trip through the UI -------------------
   await goto('/settings')
   await evalJs(
     `(() => { const b = document.querySelector('button[lang="en"]'); if (b) b.click(); return true })()`,
@@ -664,7 +776,7 @@ try {
     check('Data tab reachable', false, 'tab not found')
   }
 
-  // 7) Console hygiene ----------------------------------------------------
+  // 9) Console hygiene ----------------------------------------------------
   const realErrors = consoleErrors.filter(
     (e) => !/favicon|Failed to load resource: the server responded with a status of 404/.test(e),
   )

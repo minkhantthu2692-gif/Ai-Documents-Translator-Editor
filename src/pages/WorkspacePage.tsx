@@ -154,11 +154,20 @@ export function WorkspacePage() {
           ) : null
         }
         actions={
-          <Link to="/projects">
-            <Button variant="ghost" size="sm">
-              {t('workspace.backToProjects')}
-            </Button>
-          </Link>
+          <>
+            {projectId && project ? (
+              <Link to={`/translate/${projectId}`}>
+                <Button variant="primary" size="sm" data-testid="open-translate">
+                  {t('workspace.openTranslate')}
+                </Button>
+              </Link>
+            ) : null}
+            <Link to="/projects">
+              <Button variant="ghost" size="sm">
+                {t('workspace.backToProjects')}
+              </Button>
+            </Link>
+          </>
         }
       />
 

@@ -108,6 +108,12 @@ export interface BlockRecord extends BaseRecord {
   placeholders: Placeholder[]
   /** Bullet / numbering marker (`•`, `1.`) captured from the first line. */
   listMarker: string | null
+  /** 0..1 heuristic quality of the last successful translation (null = none). */
+  translationConfidence: number | null
+  /** Flag from the last translation pass (null = clean). */
+  translationFlag: TranslationFlag | null
+  /** Epoch ms of the last successful translation, null when never translated. */
+  translatedAt: number | null
 }
 
 export type BlockRegion = 'body' | 'header' | 'footer'
@@ -122,6 +128,10 @@ export interface StoredLine {
 }
 
 export type TranslationStatus = 'pending' | 'running' | 'done' | 'failed'
+
+/** Non-fatal problem worth surfacing in the coverage report. */
+export type TranslationFlag =
+  'low-confidence' | 'kept-original' | 'glossary-miss' | 'placeholder-miss' | 'retried'
 
 export interface TranslationRecord extends BaseRecord {
   projectId: string
@@ -246,6 +256,24 @@ export interface SettingRecord {
 
 export type ApiKeyStatus = 'unknown' | 'valid' | 'invalid' | 'cooling' | 'quota'
 
+/** Why a key is in cooldown (drives the reason code shown in the Status Panel). */
+export type CooldownReason = 'rate_limit' | 'quota' | 'server' | 'network'
+
+/** One fixed-window token bucket (RPM / TPM / RPD). */
+export interface BucketState {
+  /** Requests (or tokens, for the TPM bucket) allowed per window. */
+  limit: number
+  used: number
+  /** Epoch ms when the window resets. */
+  resetAt: number
+}
+
+export interface KeyBuckets {
+  rpm: BucketState
+  tpm: BucketState
+  rpd: BucketState
+}
+
 export interface ApiKeyRecord extends BaseRecord {
   provider: string
   label: string
@@ -256,6 +284,18 @@ export interface ApiKeyRecord extends BaseRecord {
   statusDetail: string
   lastCheckedAt: number | null
   models: string[]
+  /** Disabled keys stay sealed but never receive traffic. */
+  enabled: boolean
+  /** Epoch ms until which the key must not be used (0 = no cooldown). */
+  cooldownUntil: number
+  cooldownReason: CooldownReason | null
+  /** Lifetime counters (least-used rotation + the settings card). */
+  requests: number
+  tokensIn: number
+  tokensOut: number
+  lastUsedAt: number | null
+  /** Token-bucket position, persisted so a refresh keeps its windows. */
+  buckets: KeyBuckets | null
 }
 
 export interface UsageStatsRecord extends BaseRecord {

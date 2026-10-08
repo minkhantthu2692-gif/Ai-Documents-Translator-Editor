@@ -59,6 +59,11 @@ export interface OpenMessage {
   keys: ApiKeyRecord[]
   /** Session passphrase for vault-protected keys (memory only, never stored). */
   passphrase?: string | null
+  /**
+   * Device secret for device-bound rows (memory only, never stored). Workers
+   * cannot read localStorage, so the main thread ships it with the sealed rows.
+   */
+  deviceSecret?: string | null
 }
 
 export interface CancelMessage {
@@ -189,6 +194,8 @@ export interface RunnerSession {
   keys: ApiKeyRecord[]
   /** Vault passphrase (memory only) — needed to open sealed rows. */
   passphrase?: string | null
+  /** Device secret (memory only) — opens device-bound rows in the worker. */
+  deviceSecret?: string | null
 }
 
 export interface RunnerRequest extends RunnerSession {

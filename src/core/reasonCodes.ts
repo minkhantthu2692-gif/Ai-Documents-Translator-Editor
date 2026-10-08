@@ -11,6 +11,7 @@ export type ReasonCode =
   | 'PDF_CORRUPTED'
   | 'NO_TEXT_LAYER'
   | 'NO_API_KEY'
+  | 'KEYS_LOCKED'
   | 'INVALID_KEY'
   | 'ALL_KEYS_COOLING_DOWN'
   | 'QUOTA_EXHAUSTED'
@@ -101,6 +102,18 @@ export const REASON_CODES: Record<ReasonCode, ReasonCodeDefinition> = {
     fixActions: [
       act('add_key', 'navigation', 'Add API key', 'API သော့ ထည့်ရန်'),
       act('open_settings', 'navigation', 'Open Settings', 'ဆက်တင်များ ဖွင့်ရန်'),
+    ],
+  },
+  KEYS_LOCKED: {
+    code: 'KEYS_LOCKED',
+    severity: 'error',
+    messageMy: 'API သော့များ သော့ခတ်ထားနေသဖြင့် ဖွင့်၍ မရပါ။',
+    messageEn: 'Your API keys are locked and could not be opened.',
+    technicalHint:
+      'worker unseal failed for every key row (vault passphrase not in memory, or rows restored from another device)',
+    fixActions: [
+      act('open_settings', 'navigation', 'Open Settings', 'ဆက်တင်များ ဖွင့်ရန်'),
+      act('add_key', 'navigation', 'Add API key', 'API သော့ ထည့်ရန်'),
     ],
   },
   INVALID_KEY: {

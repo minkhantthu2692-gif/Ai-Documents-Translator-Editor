@@ -352,7 +352,12 @@ export function TranslatePage() {
   }
 
   function handleFix() {
-    if (failure && (failure.reasonCode === 'NO_API_KEY' || failure.reasonCode === 'INVALID_KEY')) {
+    if (
+      failure &&
+      (failure.reasonCode === 'NO_API_KEY' ||
+        failure.reasonCode === 'KEYS_LOCKED' ||
+        failure.reasonCode === 'INVALID_KEY')
+    ) {
       navigate('/settings')
       return
     }

@@ -668,6 +668,22 @@ const REASON_EXTRAS: Partial<Record<ReasonCode, { explanation: Localized; steps:
       },
     ],
   },
+  KEYS_LOCKED: {
+    explanation: {
+      en: 'The keys exist but could not be unlocked: the vault passphrase is not in this session, or the rows were restored from another device. Re-enter the passphrase in Settings → AI Providers, or add the key again.',
+      my: 'သော့များ ရှိသော်လည်း ဖွင့်၍မရပါ — ဗောက်စ်စကားဝှက် ဤအချိန်တွင်မရှိ သို့မဟုတ် အခြားစက်မှ ပြန်သွင်းထားသော်ကြောင့်။ Settings → AI Providers တွင် စကားဝှက် ပြန်ထည့်ပါ သို့မဟုတ် သော့အသစ် ထည့်ပါ။',
+    },
+    steps: [
+      {
+        en: 'Open Settings → AI Providers and re-enter your vault passphrase.',
+        my: 'Settings → AI Providers ဖွင့်ပြီး ဗောက်စ်စကားဝှက် ပြန်ထည့်ပါ။',
+      },
+      {
+        en: 'If the passphrase is lost, add the key again — old sealed rows cannot be read without it.',
+        my: 'စကားဝှက် ပျောက်ပါက သော့အသစ် ထည့်ပါ — စကားဝှက်မပါဘဲ အဟောင်းကို ဖတ်၍မရပါ။',
+      },
+    ],
+  },
   QUOTA_EXHAUSTED: {
     explanation: {
       en: 'The provider counted your requests against its limit. The pool cools keys down automatically; you can also reduce the batch size so usage spreads out over time.',

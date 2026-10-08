@@ -85,6 +85,18 @@ class WorkerRunner implements TranslateRunner {
     if (message.kind === 'opened') {
       const entry = this.pending.get(message.id)
       this.pending.delete(message.id)
+      if (message.keyCount === 0) {
+        // Rows exist (startTranslate rejects an empty set) but none could be
+        // opened — a locked vault or a lost device key. Failing here beats
+        // limping into a run where every batch dies with NO_API_KEY.
+        entry?.reject(
+          new TranslationRunError(
+            'KEYS_LOCKED',
+            'The stored API keys could not be opened (vault passphrase not in memory, or keys restored from another device)',
+          ),
+        )
+        return
+      }
       entry?.resolve({
         result: emptyResult(message.id),
         states: [],
@@ -132,6 +144,7 @@ class WorkerRunner implements TranslateRunner {
         limits: session.limits,
         keys: session.keys,
         passphrase: session.passphrase ?? null,
+        deviceSecret: session.deviceSecret ?? null,
       })
     })
   }

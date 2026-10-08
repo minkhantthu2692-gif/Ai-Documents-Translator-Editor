@@ -4,7 +4,8 @@
  *
  * Responsibilities:
  *  - unseal the API keys once per session (WebCrypto, PBKDF2) and keep the
- *    plaintext in this thread only;
+ *    plaintext in this thread only — device-bound rows use the device secret
+ *    shipped over postMessage, because workers cannot read localStorage;
  *  - own the key pool: rotation, token buckets, cooldowns, backoff;
  *  - run the batch engine (prompts → request → strict validation → retry
  *    ladder → terminology/glossary post-processing);
@@ -89,10 +90,14 @@ function reasonFor(error: unknown): { reasonCode: ReasonCode; message: string } 
 async function seedFromRow(
   row: OpenMessage['keys'][number],
   passphrase?: string | null,
+  deviceSecret?: string | null,
 ): Promise<KeySeed> {
   let secret: string | null = null
   try {
-    secret = await openText(decodeSealed(row.cipher), passphrase ?? undefined)
+    // Workers cannot read localStorage (Storage is Window-only), so
+    // device-bound rows open with the device secret the main thread ships
+    // in the open message — passphrase still wins when one is set.
+    secret = await openText(decodeSealed(row.cipher), passphrase ?? deviceSecret ?? undefined)
   } catch {
     // A key sealed with a passphrase we do not have is simply unusable here.
     secret = null
@@ -126,7 +131,9 @@ async function handleOpen(message: OpenMessage): Promise<void> {
   const nextPool = new KeyPool({ strategy: message.config.strategy })
   nextPool.configureLimits(message.limits)
   const seeds = await Promise.all(
-    message.keys.map((row) => seedFromRow(row, message.passphrase ?? null)),
+    message.keys.map((row) =>
+      seedFromRow(row, message.passphrase ?? null, message.deviceSecret ?? null),
+    ),
   )
   nextPool.setKeys(seeds)
   pool = nextPool

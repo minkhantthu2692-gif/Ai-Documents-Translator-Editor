@@ -22,6 +22,7 @@
  * progress store and the event log.
  */
 
+import { readDeviceSecret } from '@/core/crypto'
 import { logEvent } from '@/core/eventLogger'
 import { vaultPassphrase } from '@/core/vault'
 import { JobQueue, type QueueEvent, type QueuePhase, type QueueSnapshot } from '@/core/jobQueue'
@@ -866,7 +867,15 @@ export async function startTranslate(
   publish(run)
 
   try {
-    await runner.open({ sessionId, config, models, limits, keys, passphrase: vaultPassphrase() })
+    await runner.open({
+      sessionId,
+      config,
+      models,
+      limits,
+      keys,
+      passphrase: vaultPassphrase(),
+      deviceSecret: readDeviceSecret(),
+    })
   } catch (error) {
     active = null
     const reasonCode: ReasonCode =

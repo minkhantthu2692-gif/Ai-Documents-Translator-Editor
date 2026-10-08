@@ -58,6 +58,18 @@ export function destroyDeviceSecret(): void {
   removeRaw(SECRET_KEY)
 }
 
+/**
+ * Read-only view of this profile's device secret — never creates one.
+ *
+ * The main thread hands it to the translation worker over postMessage when a
+ * run opens, because the Storage API is Window-only: a worker cannot read
+ * `localStorage` and would otherwise derive keys from a freshly generated
+ * (wrong) secret, silently failing to open every device-bound row.
+ */
+export function readDeviceSecret(): string | null {
+  return readRaw(SECRET_KEY)
+}
+
 function subtle(): SubtleCrypto {
   const value = crypto?.subtle
   if (!value) throw new Error('WebCrypto SubtleCrypto is unavailable in this context')

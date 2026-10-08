@@ -3,7 +3,7 @@
 import { getDb } from './db'
 import { stampNew, stampUpdate } from './repo-common'
 import { enqueueDelete } from '@/sync/hooks'
-import type { BlockRecord, PageRecord, TranslationRecord } from './types'
+import { pageNeedsOcr, type BlockRecord, type PageRecord, type TranslationRecord } from './types'
 
 export class PageRepository {
   listByProject(projectId: string): Promise<PageRecord[]> {
@@ -21,12 +21,19 @@ export class PageRepository {
       .first()
   }
 
-  /** Pages whose layout has not been extracted yet (parse queue input). */
-  listUnparsed(projectId: string): Promise<PageRecord[]> {
+  /**
+   * Pages whose layout has not been extracted yet (parse queue input).
+   * `ocrPending` also returns scanned/mixed pages that still owe recognition —
+   * their text extraction is done, but the page is not usable until OCR is.
+   */
+  listUnparsed(projectId: string, options: { ocrPending?: boolean } = {}): Promise<PageRecord[]> {
     return getDb()
       .pages.where('projectId')
       .equals(projectId)
-      .filter((page) => page.analysisState !== 'done')
+      .filter(
+        (page) =>
+          page.analysisState !== 'done' || (options.ocrPending === true && pageNeedsOcr(page)),
+      )
       .toArray()
   }
 

@@ -41,6 +41,7 @@ import {
 import { startParse } from '@/pdf/parseQueue'
 import type { ProbeResult } from '@/pdf/pdfExtract'
 import { isOcrAvailable, isOcrLanguageSupported } from '@/ocr/ocrClient'
+import { setOcrEnabled } from '@/pdf/ocr/ocrPipeline'
 
 /** Language names are shown in their own language (proper nouns). */
 const LANGUAGES: Array<{ value: string; label: string; native: string }> = [
@@ -526,6 +527,9 @@ export function NewProjectPage() {
           password: file.password,
         })
         await persistProbe(project.id, probe)
+        // The wizard's "Run OCR" choice must outlive the wizard: the parse
+        // queue reads it back for every window and every later session.
+        await setOcrEnabled(project.id, runOcr)
         startParse(project.id, file.pageCount)
         projectIds.push(project.id)
         logEvent({

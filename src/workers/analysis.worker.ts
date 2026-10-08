@@ -71,7 +71,9 @@ const renderQueue: RenderEntry[] = []
 const renderByKey = new Map<string, RenderEntry>()
 let rendering = false
 
-const renderKey = (fileId: string, pageIndex: number): string => `${fileId}#${pageIndex}`
+/** Supersede only an identical render — scale and mode identify the consumer. */
+const renderKey = (fileId: string, pageIndex: number, scale: number, mode: string): string =>
+  `${fileId}#${pageIndex}#${scale}#${mode}`
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -288,7 +290,7 @@ async function handleExtract(request: ExtractRequest): Promise<void> {
 }
 
 function handleRender(request: RenderRequest): void {
-  const key = renderKey(request.fileId, request.pageIndex)
+  const key = renderKey(request.fileId, request.pageIndex, request.scale, request.mode)
   const stale = renderByKey.get(key)
   if (stale) {
     // A newer request for the same page supersedes the older one.
@@ -328,7 +330,7 @@ async function drainRenders(): Promise<void> {
 }
 
 async function runRender(entry: RenderEntry): Promise<void> {
-  const key = renderKey(entry.fileId, entry.pageIndex)
+  const key = renderKey(entry.fileId, entry.pageIndex, entry.scale, entry.mode)
   const open = requireDoc(entry.fileId)
   if (!open) {
     renderByKey.delete(key)

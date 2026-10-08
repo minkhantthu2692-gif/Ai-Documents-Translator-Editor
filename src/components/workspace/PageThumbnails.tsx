@@ -6,7 +6,12 @@ import { Badge, Button, EmptyState, Progress, type BadgeTone } from '@/component
 import type { QueueSnapshot } from '@/core/jobQueue'
 import { pageRepo } from '@/db/repo-content'
 import { sourceFileRepo } from '@/db/repo-sourceFiles'
-import type { PageAnalysisState, PageContentClass, PageRecord } from '@/db/types'
+import {
+  pageNeedsOcr,
+  type PageAnalysisState,
+  type PageContentClass,
+  type PageRecord,
+} from '@/db/types'
 import { analysisClient } from '@/pdf/analysisClient'
 import {
   cancelParse,
@@ -103,7 +108,7 @@ function useThumbnail(fileId: string | null, pageIndex: number): string | null {
 
     return () => {
       mounted = false
-      if (!settled.current) analysisClient.cancelRender(fileId, pageIndex)
+      if (!settled.current) analysisClient.cancelRender(fileId, pageIndex, THUMB_SCALE, 'thumbnail')
     }
   }, [fileId, key, pageIndex])
 
@@ -113,7 +118,7 @@ function useThumbnail(fileId: string | null, pageIndex: number): string | null {
 function PageCard({ page, fileId }: { page: PageRecord; fileId: string | null }) {
   const { t } = useTranslation()
   const url = useThumbnail(fileId, page.index)
-  const needsOcr = page.contentClass === 'scanned' && page.ocrStatus !== 'done'
+  const needsOcr = pageNeedsOcr(page)
 
   return (
     <article

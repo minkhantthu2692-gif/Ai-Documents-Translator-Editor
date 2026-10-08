@@ -84,7 +84,7 @@ export function usePageUrl(
 
     return () => {
       alive = false
-      if (!settled) analysisClient.cancelRender(fileId, pageIndex)
+      if (!settled) analysisClient.cancelRender(fileId, pageIndex, PAGE_IMAGE_SCALE, mode)
     }
   }, [fileId, key, pageIndex, mode])
 

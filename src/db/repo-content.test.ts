@@ -110,4 +110,42 @@ describe('content repositories', () => {
     const owed = await pageRepo.listUnparsed('prj_1')
     expect(owed.map((page) => page.index)).toEqual([1, 2])
   })
+
+  it('keeps OCR-pending scanned pages in the queue while recognition is owed', async () => {
+    // Extracted (done) but still image-only: the window must run again after
+    // a reload — unless the user opted out (flag off) or OCR already ran.
+    await pageRepo.upsert({
+      projectId: 'prj_1',
+      index: 0,
+      analysisState: 'done',
+      contentClass: 'scanned',
+      ocrStatus: 'failed',
+    })
+    await pageRepo.upsert({
+      projectId: 'prj_1',
+      index: 1,
+      analysisState: 'done',
+      contentClass: 'scanned',
+      ocrStatus: 'done',
+    })
+    await pageRepo.upsert({
+      projectId: 'prj_1',
+      index: 2,
+      analysisState: 'done',
+      contentClass: 'mixed',
+      ocrStatus: 'idle',
+    })
+    await pageRepo.upsert({
+      projectId: 'prj_1',
+      index: 3,
+      analysisState: 'done',
+      contentClass: 'text',
+      ocrStatus: 'idle',
+    })
+
+    expect((await pageRepo.listUnparsed('prj_1')).map((page) => page.index)).toEqual([])
+    expect(
+      (await pageRepo.listUnparsed('prj_1', { ocrPending: true })).map((page) => page.index),
+    ).toEqual([0, 2])
+  })
 })

@@ -74,6 +74,17 @@ export interface PageRecord extends BaseRecord {
 export type PageContentClass = 'text' | 'scanned' | 'mixed' | 'complex' | 'empty'
 export type PageAnalysisState = 'idle' | 'queued' | 'running' | 'done' | 'failed'
 
+/**
+ * True when a page's content lives (partly) in images and OCR has not
+ * finished yet — the parse queue uses it to keep such pages "unparsed"
+ * until recognition succeeds, so a reload mid-OCR resumes exactly there.
+ */
+export function pageNeedsOcr(page: Pick<PageRecord, 'contentClass' | 'ocrStatus'>): boolean {
+  return (
+    (page.contentClass === 'scanned' || page.contentClass === 'mixed') && page.ocrStatus !== 'done'
+  )
+}
+
 export type BlockKind = 'heading' | 'paragraph' | 'list' | 'table' | 'caption' | 'shape'
 export type BlockStatus = 'pending' | 'translated' | 'edited' | 'locked' | 'skipped'
 

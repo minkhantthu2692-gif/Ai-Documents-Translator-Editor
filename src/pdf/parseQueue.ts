@@ -19,6 +19,8 @@ import { pageRepo } from '@/db/repo-content'
 import { projectRepo } from '@/db/repo-projects'
 import { settingsRepo } from '@/db/repo-settings'
 import { AnalysisError, analysisClient } from './analysisClient'
+import { isOcrEnabled, runWindowOcr } from './ocr/ocrPipeline'
+import { mergeOcrBlocks } from './ocr/ocrStructure'
 import {
   ensureProjectDocument,
   loadMargins,
@@ -63,16 +65,38 @@ async function runJob(job: ParseJob, signal: AbortSignal): Promise<void> {
     loadMargins(job.projectId),
   ])
 
+  const ctx = {
+    sourceLang: project?.sourceLang ?? 'en',
+    targetLang: project?.targetLang ?? 'my',
+  }
   const pages = await analysisClient.extract(fileId, job.pageIndexes, {
-    ctx: {
-      sourceLang: project?.sourceLang ?? 'en',
-      targetLang: project?.targetLang ?? 'my',
-    },
+    ctx,
     headerTexts: margins.headers,
     footerTexts: margins.footers,
     convertZawgyi: analysis?.convertZawgyi ?? false,
     signal,
   })
+
+  // Scanned / mixed pages get their image text recognised in the same window,
+  // before persistence, so one write carries the full page content.
+  const ocrResults = await runWindowOcr({
+    projectId: job.projectId,
+    fileId,
+    pageIndexes: job.pageIndexes,
+    sourceLang: ctx.sourceLang,
+    ctx,
+    headerTexts: margins.headers,
+    footerTexts: margins.footers,
+    convertZawgyi: analysis?.convertZawgyi ?? false,
+    signal,
+  })
+  for (const page of pages) {
+    const ocr = ocrResults.get(page.pageIndex)
+    if (!ocr) continue
+    page.blocks = mergeOcrBlocks(page.blocks, ocr.content.blocks)
+    page.charCount += ocr.content.charCount
+    page.lineCount += ocr.content.lineCount
+  }
 
   await persistExtractedPages(job.projectId, pages)
 }
@@ -252,7 +276,15 @@ export async function ensurePagesExtracted(
   pageIndexes?: number[],
 ): Promise<number> {
   activeProjectId = projectId
-  const targets = pageIndexes ?? (await pageRepo.listUnparsed(projectId)).map((page) => page.index)
+  // OCR-pending pages are "unparsed" too while the user hasn't opted out —
+  // that is what makes a reload mid-OCR (or after a network failure) resume.
+  const targets =
+    pageIndexes ??
+    (
+      await pageRepo.listUnparsed(projectId, {
+        ocrPending: await isOcrEnabled(projectId),
+      })
+    ).map((page) => page.index)
   return enqueueJobs(windowsFor(projectId, targets), true)
 }
 

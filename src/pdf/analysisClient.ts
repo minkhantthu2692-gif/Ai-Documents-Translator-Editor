@@ -63,7 +63,13 @@ function unexpected(event: AnalysisEvent): Error {
   return new AnalysisError('PDF_CORRUPTED', `unexpected reply: ${event.kind}`)
 }
 
-const renderKey = (fileId: string, pageIndex: number): string => `${fileId}#${pageIndex}`
+/**
+ * One render per `(file, page, scale, mode)`: two consumers rendering the
+ * same page at different sizes (a thumbnail vs. the page image vs. an OCR
+ * pass) must not supersede each other — only an identical repeat does.
+ */
+const renderKey = (fileId: string, pageIndex: number, scale: number, mode: string): string =>
+  `${fileId}#${pageIndex}#${scale}#${mode}`
 
 class AnalysisClient {
   private worker: Worker | null = null
@@ -222,7 +228,7 @@ class AnalysisClient {
     mode: 'thumbnail' | 'background',
     options: { signal?: AbortSignal } = {},
   ): Promise<Blob> {
-    const key = renderKey(fileId, pageIndex)
+    const key = renderKey(fileId, pageIndex, scale, mode)
     const id = this.nextId()
     this.renderInFlight.set(key, id)
     try {
@@ -239,8 +245,8 @@ class AnalysisClient {
    * page scrolled out of the prefetch window). The worker reports it back as
    * `cancelled`, which settles the matching promise.
    */
-  cancelRender(fileId: string, pageIndex: number): void {
-    const id = this.renderInFlight.get(renderKey(fileId, pageIndex))
+  cancelRender(fileId: string, pageIndex: number, scale: number, mode: string): void {
+    const id = this.renderInFlight.get(renderKey(fileId, pageIndex, scale, mode))
     if (!id || !this.worker) return
     this.worker.postMessage({ kind: 'cancel', id } satisfies AnalysisRequest)
   }

@@ -19,6 +19,7 @@
 
 import workerUrl from 'tesseract.js/dist/worker.min.js?url'
 import { cacheRepo } from '@/db/repo-cache'
+import type { OcrPageData } from './ocrTypes'
 
 /** App language code → tesseract traineddata code. */
 export const TESSERACT_LANG: Record<string, string> = {
@@ -74,7 +75,7 @@ interface TesseractWorkerLike {
     image: Blob | OffscreenCanvas | string,
     options?: { rectangle?: { left: number; top: number; width: number; height: number } },
     output?: Record<string, boolean>,
-  ): Promise<{ data: { text?: string; confidence?: number } }>
+  ): Promise<{ data: { text?: string; confidence?: number; blocks?: OcrPageData['blocks'] } }>
   terminate(): Promise<unknown>
 }
 
@@ -157,6 +158,12 @@ export interface OcrResult {
   text: string
   /** Mean confidence 0..100 from tesseract. */
   confidence: number
+  /**
+   * Structured blocks → paragraphs → lines (pixel bboxes) so the caller can
+   * rebuild geometry — always requested, so a cached result and a fresh one
+   * have the same shape.
+   */
+  blocks: OcrPageData | null
   langs: string[]
   ms: number
 }
@@ -172,12 +179,13 @@ export async function recognizeOcr(
   const result = await active.recognize(
     image,
     options.rectangle ? { rectangle: options.rectangle } : undefined,
-    { text: true, blocks: false, hocr: false, tsv: false, pdf: false },
+    { text: true, blocks: true, hocr: false, tsv: false, pdf: false },
   )
   const text = result.data.text ?? ''
   return {
     text: text.trim(),
     confidence: Math.max(0, Math.min(100, Math.round(result.data.confidence ?? 0))),
+    blocks: result.data.blocks ? { blocks: result.data.blocks } : null,
     langs: wanted,
     ms: Date.now() - started,
   }

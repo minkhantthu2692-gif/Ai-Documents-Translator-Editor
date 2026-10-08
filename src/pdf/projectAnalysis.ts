@@ -14,7 +14,7 @@ import { blockRepo, pageRepo, type ParsedBlockPatch } from '@/db/repo-content'
 import { sourceFileRepo } from '@/db/repo-sourceFiles'
 import { settingsRepo } from '@/db/repo-settings'
 import { analysisClient, AnalysisError, type OpenOutcome } from './analysisClient'
-import type { ContentTally } from './pageClassify'
+import { classHasTextLayer, type ContentTally } from './pageClassify'
 import type { FontStats } from './pdfOps'
 import type { ExtractedPage, ProbeResult } from './pdfExtract'
 
@@ -167,7 +167,7 @@ export async function persistProbe(
       width: page.width,
       height: page.height,
       rotation: page.rotation,
-      hasTextLayer: page.contentClass === 'text' || page.contentClass === 'mixed',
+      hasTextLayer: classHasTextLayer(page.contentClass),
       textCharacterCount: page.charCount,
       contentClass: page.contentClass,
       textCoverage: page.textCoverage,

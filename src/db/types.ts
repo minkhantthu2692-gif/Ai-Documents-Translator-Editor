@@ -71,7 +71,7 @@ export interface PageRecord extends BaseRecord {
 }
 
 /** `text` — normal text layer, `scanned` — image only, `mixed` — both, `empty` — nothing. */
-export type PageContentClass = 'text' | 'scanned' | 'mixed' | 'empty'
+export type PageContentClass = 'text' | 'scanned' | 'mixed' | 'complex' | 'empty'
 export type PageAnalysisState = 'idle' | 'queued' | 'running' | 'done' | 'failed'
 
 export type BlockKind = 'heading' | 'paragraph' | 'list' | 'table' | 'caption' | 'shape'

@@ -1,0 +1,80 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [6 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Length 1877 >>
+stream
+BT
+/F1 9 Tf
+0 0 0 rg
+1 0 0 1 40 740 Tm (Column filler line 1 of body words) Tj
+1 0 0 1 40 726 Tm (Column filler line 2 of body words) Tj
+1 0 0 1 40 712 Tm (Column filler line 3 of body words) Tj
+1 0 0 1 40 698 Tm (Column filler line 4 of body words) Tj
+1 0 0 1 40 684 Tm (Column filler line 5 of body words) Tj
+1 0 0 1 40 670 Tm (Column filler line 6 of body words) Tj
+1 0 0 1 40 656 Tm (Column filler line 7 of body words) Tj
+1 0 0 1 40 642 Tm (Column filler line 8 of body words) Tj
+1 0 0 1 40 628 Tm (Column filler line 9 of body words) Tj
+1 0 0 1 40 614 Tm (Column filler line 10 of body words) Tj
+1 0 0 1 226 740 Tm (Column filler line 1 of body words) Tj
+1 0 0 1 226 726 Tm (Column filler line 2 of body words) Tj
+1 0 0 1 226 712 Tm (Column filler line 3 of body words) Tj
+1 0 0 1 226 698 Tm (Column filler line 4 of body words) Tj
+1 0 0 1 226 684 Tm (Column filler line 5 of body words) Tj
+1 0 0 1 226 670 Tm (Column filler line 6 of body words) Tj
+1 0 0 1 226 656 Tm (Column filler line 7 of body words) Tj
+1 0 0 1 226 642 Tm (Column filler line 8 of body words) Tj
+1 0 0 1 226 628 Tm (Column filler line 9 of body words) Tj
+1 0 0 1 226 614 Tm (Column filler line 10 of body words) Tj
+1 0 0 1 412 740 Tm (Column filler line 1 of body words) Tj
+1 0 0 1 412 726 Tm (Column filler line 2 of body words) Tj
+1 0 0 1 412 712 Tm (Column filler line 3 of body words) Tj
+1 0 0 1 412 698 Tm (Column filler line 4 of body words) Tj
+1 0 0 1 412 684 Tm (Column filler line 5 of body words) Tj
+1 0 0 1 412 670 Tm (Column filler line 6 of body words) Tj
+1 0 0 1 412 656 Tm (Column filler line 7 of body words) Tj
+1 0 0 1 412 642 Tm (Column filler line 8 of body words) Tj
+1 0 0 1 412 628 Tm (Column filler line 9 of body words) Tj
+1 0 0 1 412 614 Tm (Column filler line 10 of body words) Tj
+ET
+BT
+/F2 40 Tf
+0.75 0.75 0.75 rg
+0.7071 0.7071 -0.7071 0.7071 120 360 Tm (DRAFT COPY) Tj
+ET
+
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Title (Complex layout sample) /Creator (make-fixtures.mjs) /Producer (make-fixtures.mjs) /CreationDate (D:20260115093000+06'30') /ModDate (D:20260320174500+06'30') >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000218 00000 n 
+0000000320 00000 n 
+0000002249 00000 n 
+0000002385 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R /Info 7 0 R >>
+startxref
+2571
+%%EOF

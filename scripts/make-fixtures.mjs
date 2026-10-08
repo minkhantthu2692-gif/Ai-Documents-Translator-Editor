@@ -9,6 +9,7 @@
  *   fixtures/scanned.pdf     3 pages of raster images, no text layer at all
  *   fixtures/mixed.pdf       page 1 = image + text, page 2 = plain text
  *   fixtures/encrypted.pdf   3 pages, RC4 40-bit (V1/R2), password "secret123"
+ *   fixtures/complex.pdf     1 page, three text columns + rotated watermark
  *
  * Everything is written by hand (xref offsets computed exactly) so the script
  * only depends on node:crypto for MD5. Content is ASCII so a latin-1 stream
@@ -368,6 +369,46 @@ function buildMixedPdf() {
 }
 
 /* ------------------------------------------------------------------ */
+/* A "complex layout" page: three columns of text plus a rotated        */
+/* watermark crossing them — reading order cannot be trusted.           */
+/* ------------------------------------------------------------------ */
+
+function buildComplexPdf() {
+  const writer = new PdfWriter()
+  const pagesNum = addPagesObject(writer)
+  const regular = writer.add(FONT_REGULAR)
+  const bold = writer.add(FONT_BOLD)
+  const resources = `/Font << /F1 ${regular} 0 R /F2 ${bold} 0 R >>`
+
+  const parts = ['BT\n', '/F1 9 Tf\n', '0 0 0 rg\n']
+  // Three columns (x = 40 / 226 / 412, ~160pt wide, 24pt gutters), ten
+  // aligned lines each: enough for the recursive column detector.
+  for (const x of [40, 226, 412]) {
+    for (let row = 0; row < 10; row += 1) {
+      const y = 740 - row * 14
+      parts.push(`1 0 0 1 ${x} ${y} Tm (Column filler line ${row + 1} of body words) Tj\n`)
+    }
+  }
+  parts.push('ET\n')
+  // Diagonal watermark: rotated text whose box crosses every column.
+  parts.push('BT\n/F2 40 Tf\n0.75 0.75 0.75 rg\n')
+  parts.push('0.7071 0.7071 -0.7071 0.7071 120 360 Tm (DRAFT COPY) Tj\n')
+  parts.push('ET\n')
+
+  const stream = writer.addStream('', Buffer.from(parts.join(''), 'latin1'))
+  const page = addPage(writer, pagesNum, resources, stream)
+  finalizePages(writer, pagesNum, [page])
+  writer.setInfo({
+    Title: 'Complex layout sample',
+    Creator: 'make-fixtures.mjs',
+    Producer: 'make-fixtures.mjs',
+    CreationDate: "D:20260115093000+06'30'",
+    ModDate: "D:20260320174500+06'30'",
+  })
+  return writer.render()
+}
+
+/* ------------------------------------------------------------------ */
 /* RC4 40-bit encryption (standard security handler, V1 / R2)          */
 /* ------------------------------------------------------------------ */
 
@@ -485,6 +526,7 @@ const outputs = [
   ['scanned.pdf', buildScannedPdf(3)],
   ['mixed.pdf', buildMixedPdf()],
   ['encrypted.pdf', buildEncryptedPdf(3)],
+  ['complex.pdf', buildComplexPdf()],
 ]
 for (const [name, buffer] of outputs) {
   writeFileSync(join(OUT, name), buffer)

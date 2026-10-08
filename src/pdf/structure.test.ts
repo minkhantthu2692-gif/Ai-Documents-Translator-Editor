@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  countColumns,
   detectRepeatingMargins,
   normalizeMarginText,
   structurePage,
@@ -210,5 +211,36 @@ describe('normalizeMarginText', () => {
     expect(normalizeMarginText('Annual Report 2026')).toBe('annual report #')
     expect(normalizeMarginText('Page  12')).toBe('page #')
     expect(normalizeMarginText('  Mixed   Spacing ')).toBe('mixed spacing')
+  })
+})
+
+describe('countColumns', () => {
+  /** Ten aligned lines at each x offset (130pt wide → ≥8pt gutters between columns). */
+  const at = (...xs: number[]): GroupedLine[] =>
+    xs.flatMap((x, column) =>
+      Array.from({ length: 10 }, (_, row) =>
+        line(`Column ${column + 1} line ${row + 1}`, { x, y: 500 + row * 16, w: 130, h: 14 }),
+      ),
+    )
+
+  it('reports one column for a single block of lines', () => {
+    expect(countColumns(at(72), 612)).toBe(1)
+    expect(countColumns(at(72, 100), 612)).toBe(1) // same column, slight indent
+  })
+
+  it('reports two columns for the newspaper split', () => {
+    expect(countColumns(at(40, 330), 612)).toBe(2)
+  })
+
+  it('recurses to three and four columns', () => {
+    expect(countColumns(at(40, 226, 412), 612)).toBe(3)
+    expect(countColumns(at(30, 170, 310, 450), 612)).toBe(4)
+  })
+
+  it('never exceeds the cap and ignores tiny samples', () => {
+    expect(countColumns(at(30, 170, 310, 450), 612, 2)).toBe(2)
+    expect(countColumns(at(40, 226, 412).slice(0, 4), 612)).toBe(1)
+    expect(countColumns([], 612)).toBe(1)
+    expect(countColumns(at(40, 226, 412), 0)).toBe(1)
   })
 })

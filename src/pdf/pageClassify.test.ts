@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   MIN_TEXT_CHARS,
   MIN_TEXT_COVERAGE,
+  classHasTextLayer,
   classifyPage,
   coverageOf,
   emptyTally,
@@ -72,6 +73,28 @@ describe('classifyPage', () => {
     expect(classifyPage({ charCount: 2, textCoverage: 0, imageCount: 0 })).toBe('text')
   })
 
+  it('lets a complex layout outrank text and mixed', () => {
+    const complex = { score: 0.95, reasons: ['columns3' as const], complex: true }
+    expect(
+      classifyPage({ charCount: 900, textCoverage: 0.2, imageCount: 0, layout: complex }),
+    ).toBe('complex')
+    expect(
+      classifyPage({ charCount: 900, textCoverage: 0.05, imageCount: 2, layout: complex }),
+    ).toBe('complex')
+    // A non-complex verdict keeps the ordinary classes.
+    const simple = { score: 0.1, reasons: [], complex: false }
+    expect(classifyPage({ charCount: 900, textCoverage: 0.2, imageCount: 0, layout: simple })).toBe(
+      'text',
+    )
+  })
+
+  it('keeps scanned pages scanned even when the layout scores complex', () => {
+    const complex = { score: 1, reasons: ['overlap' as const], complex: true }
+    expect(classifyPage({ charCount: 0, textCoverage: 0, imageCount: 3, layout: complex })).toBe(
+      'scanned',
+    )
+  })
+
   it('keeps the thresholds exported for the UI copy', () => {
     expect(MIN_TEXT_CHARS).toBeGreaterThan(0)
     expect(MIN_TEXT_COVERAGE).toBeGreaterThan(0)
@@ -79,11 +102,21 @@ describe('classifyPage', () => {
   })
 })
 
+describe('classHasTextLayer', () => {
+  it('is true for text, mixed and complex, false otherwise', () => {
+    expect(classHasTextLayer('text')).toBe(true)
+    expect(classHasTextLayer('mixed')).toBe(true)
+    expect(classHasTextLayer('complex')).toBe(true)
+    expect(classHasTextLayer('scanned')).toBe(false)
+    expect(classHasTextLayer('empty')).toBe(false)
+  })
+})
+
 describe('tallyPages', () => {
   it('counts every class and reports the OCR workload', () => {
-    const tally = tallyPages(['text', 'scanned', 'scanned', 'mixed', 'empty', 'text'])
-    expect(tally).toEqual({ text: 2, scanned: 2, mixed: 1, empty: 1 })
+    const tally = tallyPages(['text', 'scanned', 'scanned', 'mixed', 'complex', 'empty', 'text'])
+    expect(tally).toEqual({ text: 2, scanned: 2, mixed: 1, complex: 1, empty: 1 })
     expect(pagesNeedingOcr(tally)).toBe(2)
-    expect(emptyTally()).toEqual({ text: 0, scanned: 0, mixed: 0, empty: 0 })
+    expect(emptyTally()).toEqual({ text: 0, scanned: 0, mixed: 0, complex: 0, empty: 0 })
   })
 })

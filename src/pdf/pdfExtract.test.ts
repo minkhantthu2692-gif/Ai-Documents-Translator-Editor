@@ -85,7 +85,7 @@ describe('text-300p.pdf', () => {
     expect(progress).toHaveLength(300)
     expect(progress[progress.length - 1]).toBe(300)
 
-    expect(summary.tally).toEqual({ text: 300, scanned: 0, mixed: 0, empty: 0 })
+    expect(summary.tally).toEqual({ text: 300, scanned: 0, mixed: 0, complex: 0, empty: 0 })
     expect(summary.textLayerPages).toBe(300)
     expect(summary.ocrNeededPages).toBe(0)
     expect(summary.totalChars).toBeGreaterThan(50_000)
@@ -180,7 +180,7 @@ describe('scanned.pdf', () => {
     const result = await probeDocument(doc)
 
     expect(result.probes).toHaveLength(3)
-    expect(result.summary.tally).toEqual({ text: 0, scanned: 3, mixed: 0, empty: 0 })
+    expect(result.summary.tally).toEqual({ text: 0, scanned: 3, mixed: 0, complex: 0, empty: 0 })
     expect(result.summary.ocrNeededPages).toBe(3)
     expect(result.summary.textLayerPages).toBe(0)
     expect(result.summary.totalChars).toBe(0)
@@ -200,7 +200,7 @@ describe('mixed.pdf', () => {
     const result = await probeDocument(doc)
 
     expect(result.probes.map((probe) => probe.contentClass)).toEqual(['mixed', 'text'])
-    expect(result.summary.tally).toEqual({ text: 1, scanned: 0, mixed: 1, empty: 0 })
+    expect(result.summary.tally).toEqual({ text: 1, scanned: 0, mixed: 1, complex: 0, empty: 0 })
     expect(result.summary.textLayerPages).toBe(2)
     expect(result.summary.ocrNeededPages).toBe(0)
     expect(result.summary.totalImages).toBe(1)
@@ -209,6 +209,29 @@ describe('mixed.pdf', () => {
     const extracted = await extractPage(page, { pageIndex: 0 })
     expect(extracted.blocks.length).toBeGreaterThan(1)
     expect(extracted.blocks.some((block) => block.text.includes('deployment pipeline'))).toBe(true)
+  })
+})
+
+describe('complex.pdf', () => {
+  it('classifies the three-column watermark page as complex', async () => {
+    const doc = await open('complex.pdf')
+    const result = await probeDocument(doc)
+
+    expect(result.probes).toHaveLength(1)
+    const probe = result.probes[0]
+    expect(probe.contentClass).toBe('complex')
+    expect(probe.layout.complex).toBe(true)
+    expect(probe.layout.reasons).toContain('columns3')
+    expect(result.summary.tally).toEqual({ text: 0, scanned: 0, mixed: 0, complex: 1, empty: 0 })
+    // A complex page still has a usable text layer — OCR is not required.
+    expect(result.summary.textLayerPages).toBe(1)
+    expect(result.summary.ocrNeededPages).toBe(0)
+
+    // The text itself must still extract (reading order is the tricky part).
+    const page = await doc.getPage(1)
+    const extracted = await extractPage(page, { pageIndex: 0 })
+    expect(extracted.blocks.length).toBeGreaterThan(1)
+    expect(extracted.blocks.some((block) => block.text.includes('Column filler line'))).toBe(true)
   })
 })
 

@@ -19,6 +19,7 @@ import type { PageContentClass } from '@/db/types'
 import { detectLanguage } from '@/core/langDetect'
 import { ensureUnicode, zawgyiProbability } from '@/core/zawgyi'
 import { classifyPage, coverageOf, emptyTally, type ContentTally } from './pageClassify'
+import { analyzeLayout, itemBoxesOf, type LayoutComplexity } from './layoutComplexity'
 import {
   groupItemsIntoLines,
   type GroupedLine,
@@ -298,6 +299,8 @@ export interface PageProbe {
   formFieldCount: number
   lineCount: number
   contentClass: PageContentClass
+  /** Layout-complexity verdict driving the `complex` class. */
+  layout: LayoutComplexity
   detectedLanguage: string | null
   detectedConfidence: number
 }
@@ -394,7 +397,13 @@ export async function probeDocument(
 
     const pageText = prepared.items.map((item) => item.str).join(' ')
     const detection = pageText.trim().length >= 20 ? detectLanguage(pageText) : null
-    const contentClass = classifyPage({ charCount, textCoverage, imageCount })
+    const layout = analyzeLayout(lines, {
+      pageWidth: prepared.width,
+      pageRotation: prepared.rotation,
+      imageCount,
+      itemBoxes: itemBoxesOf(prepared.items),
+    })
+    const contentClass = classifyPage({ charCount, textCoverage, imageCount, layout })
 
     const formFieldCount = prepared.annotations.filter(
       (annotation) => typeof annotation.fieldType === 'string' && annotation.fieldType.length > 0,
@@ -412,6 +421,7 @@ export async function probeDocument(
       formFieldCount,
       lineCount: lines.length,
       contentClass,
+      layout,
       detectedLanguage: detection?.lang ?? null,
       detectedConfidence: Math.round((detection?.confidence ?? 0) * 100) / 100,
     })
@@ -455,7 +465,7 @@ export async function probeDocument(
       zawgyiProbability: Math.round(zawgyi * 100) / 100,
       convertZawgyi: zawgyi >= 0.5,
       tally,
-      textLayerPages: tally.text + tally.mixed,
+      textLayerPages: tally.text + tally.mixed + tally.complex,
       ocrNeededPages: tally.scanned,
       totalChars,
       totalImages,

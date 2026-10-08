@@ -165,6 +165,23 @@ export function detectColumns(lines: GroupedLine[], pageWidth: number): ColumnSp
 }
 
 /**
+ * Counts the page's text columns (1..maxColumns) by recursively re-splitting
+ * each side with the same two-way detector — a clean split into two columns
+ * is tried again per side, which recovers three- and four-column layouts.
+ * `structurePage` deliberately keeps the plain two-way split (left column
+ * fully before right); this count only feeds layout-complexity scoring.
+ * The cap is applied at the end so unbalanced splits cannot undercount.
+ */
+export function countColumns(lines: GroupedLine[], pageWidth: number, maxColumns = 4): number {
+  if (maxColumns <= 1 || lines.length < 6 || pageWidth <= 0) return 1
+  const { columns } = detectColumns(lines, pageWidth)
+  if (columns.length === 1) return 1
+  let count = 0
+  for (const column of columns) count += countColumns(column, pageWidth, maxColumns)
+  return Math.min(count, maxColumns)
+}
+
+/**
  * Leading inside a paragraph: the smallest recurring positive gap, which stays
  * stable whether the page has two lines or two hundred. Falls back to the
  * median of every gap when nothing is tighter than one text line.
@@ -223,6 +240,11 @@ function splitRow(line: GroupedLine): CellSplit {
   const allShort = cells.every((cell) => cell.length <= 60)
   const wideGap = /\s{3,}|\t/.test(raw) || raw.includes('  ')
   return { isTable: allShort && wideGap && cells.length >= 2, cells }
+}
+
+/** Exposed for layout-complexity scoring (probe-time table presence). */
+export function looksLikeTableRow(line: GroupedLine): boolean {
+  return splitRow(line).isTable
 }
 
 function alignmentOf(lines: BlockLine[], pageWidth: number): BlockAlignment {

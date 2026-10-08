@@ -859,6 +859,10 @@ export function NewProjectPage() {
                       label={t('newProject.metaMixedPages')}
                       value={String(readyProbe.summary.tally.mixed)}
                     />
+                    <MetaRow
+                      label={t('newProject.metaComplexPages')}
+                      value={String(readyProbe.summary.tally.complex)}
+                    />
                   </dl>
 
                   {readyProbe.summary.ocrNeededPages > 0 ? (

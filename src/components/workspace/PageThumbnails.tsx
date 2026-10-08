@@ -35,6 +35,7 @@ const CLASS_TONE: Record<PageContentClass, BadgeTone> = {
   text: 'info',
   scanned: 'warning',
   mixed: 'primary',
+  complex: 'primary',
   empty: 'neutral',
 }
 
@@ -42,6 +43,7 @@ const CLASS_LABEL: Record<PageContentClass, string> = {
   text: 'workspace.pages.classText',
   scanned: 'workspace.pages.classScanned',
   mixed: 'workspace.pages.classMixed',
+  complex: 'workspace.pages.classComplex',
   empty: 'workspace.pages.classEmpty',
 }
 

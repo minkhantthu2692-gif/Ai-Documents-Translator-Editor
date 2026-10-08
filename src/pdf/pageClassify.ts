@@ -1,18 +1,23 @@
 /**
  * Page content classification.
  *
- * Turns the raw signals a page produces (text layer, coverage, painted images)
- * into the coarse class the rest of the app acts on:
+ * Turns the raw signals a page produces (text layer, coverage, painted
+ * images, layout complexity) into the coarse class the rest of the app acts
+ * on:
  *
  *   `text`    — a usable text layer, translate directly
  *   `scanned` — images only, OCR required before translation
  *   `mixed`   — text layer *and* images (figures, half-scanned pages)
+ *   `complex` — usable text layer, but a layout that breaks reading order
+ *               (multi-column, stacked text boxes, rotated text): extract
+ *               as text, treat structure with care
  *   `empty`   — nothing on the page at all
  *
  * Pure functions so the thresholds can be unit-tested without pdf.js.
  */
 
 import type { PageContentClass } from '@/db/types'
+import type { LayoutComplexity } from './layoutComplexity'
 
 export interface PageSignal {
   /** Non-whitespace characters found in the text layer. */
@@ -21,6 +26,8 @@ export interface PageSignal {
   textCoverage: number
   /** Painted image operations on the page. */
   imageCount: number
+  /** Layout analysis; a `complex` verdict outranks `text` / `mixed`. */
+  layout?: LayoutComplexity
 }
 
 /**
@@ -54,10 +61,20 @@ export function classifyPage(signal: PageSignal): PageContentClass {
   const text = hasTextLayer(signal)
   const images = signal.imageCount > 0
 
-  if (text) return images ? 'mixed' : 'text'
+  if (text) {
+    // A complex layout outranks `mixed`: the text layer is still the
+    // extraction source, but reading order cannot be trusted.
+    if (signal.layout?.complex) return 'complex'
+    return images ? 'mixed' : 'text'
+  }
   if (images) return 'scanned'
   // A handful of stray characters (or nothing at all) with no image.
   return signal.charCount > 0 ? 'text' : 'empty'
+}
+
+/** True when the class carries a usable text layer (no OCR needed first). */
+export function classHasTextLayer(contentClass: PageContentClass): boolean {
+  return contentClass === 'text' || contentClass === 'mixed' || contentClass === 'complex'
 }
 
 /** Aggregated counters used by the pre-flight summary. */
@@ -65,11 +82,12 @@ export interface ContentTally {
   text: number
   scanned: number
   mixed: number
+  complex: number
   empty: number
 }
 
 export function emptyTally(): ContentTally {
-  return { text: 0, scanned: 0, mixed: 0, empty: 0 }
+  return { text: 0, scanned: 0, mixed: 0, complex: 0, empty: 0 }
 }
 
 export function tallyPages(classes: Iterable<PageContentClass>): ContentTally {

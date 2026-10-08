@@ -404,19 +404,28 @@ export type ApiKeyStatus = 'unknown' | 'valid' | 'invalid' | 'cooling' | 'quota'
 /** Why a key is in cooldown (drives the reason code shown in the Status Panel). */
 export type CooldownReason = 'rate_limit' | 'quota' | 'server' | 'network'
 
-/** One fixed-window token bucket (RPM / TPM / RPD). */
+/** One fixed-window token bucket (RPM / TPM / RPD / TPD). */
 export interface BucketState {
-  /** Requests (or tokens, for the TPM bucket) allowed per window. */
+  /** Requests (or tokens, for the TPM/TPD bucket) allowed per window. */
   limit: number
   used: number
   /** Epoch ms when the window resets. */
   resetAt: number
 }
 
+/**
+ * The durable daily/monthly ledger for one quota unit.
+ *
+ * `tpd` was added after `rpm`/`tpm`/`rpd`; a record written before it simply
+ * has no `tpd` and the pool treats that as "daily token allowance unknown"
+ * (`limit === 0`), never as zero.
+ */
 export interface KeyBuckets {
   rpm: BucketState
   tpm: BucketState
   rpd: BucketState
+  /** Tokens per day. `limit === 0` = unknown, so nothing is blocked on it. */
+  tpd: BucketState
 }
 
 export interface ApiKeyRecord extends BaseRecord {

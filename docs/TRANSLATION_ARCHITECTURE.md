@@ -182,19 +182,21 @@ fitsToday  = requests ≤ rpd && tokens ≤ tpd
 - **Shipped in Phase A** (§5.1): `looksLikeQuota` consults the body text for 429 too, so `QUOTA_EXHAUSTED` is actually reported. `providers/http.test.ts` pins the Gemini (`RESOURCE_EXHAUSTED`), OpenAI (`insufficient_quota`) and Groq bodies.
 - Add a **daily request ledger** per `(provider, model)` in settings so the forecast is compared against *observed* consumption, not just the bundled `rpd`.
 
-### Layer 5 — key scheduling: multi-key is optional, never required
+### Layer 5 — key scheduling: multi-key is optional, never required ✅ shipped (D1)
 
-Existing behaviour already satisfies the requirement for per-key quotas: a single key works, `pick()` filters by capacity, rotation happens on 429. What is missing is **quota scope**:
+Existing behaviour already satisfies the requirement for per-key quotas: a single key works, `pick()` filters by capacity, rotation happens on 429. What was missing was **quota scope** — and without it the pool was quietly violating the "do not assume more keys = more quota" rule.
 
-```ts
-// models.config.ts ModelSpec / ProviderMeta
-quotaScope?: 'per-key' | 'per-provider'   // default 'per-key'
-```
+`ModelSpec.quotaScope?: 'per-key' | 'per-provider'` (default `'per-key'`):
 
-- `per-key` (most providers, and OpenAI-compatible custom endpoints): each key owns its own rpm/tpm/rpd buckets — additive. Current behaviour, correct.
-- `per-provider` (Groq free tier is org-scoped; Gemini AI Studio is project-scoped): the pool keeps **one shared bucket per provider** across all its keys, so adding a second key improves *throughput* (more rpm in parallel) but does **not** multiply the daily allowance.
+- `per-key` — each key owns its own `rpm`/`tpm`/`rpd`/`tpd` buckets. True for Google AI Studio keys (per project) and OpenRouter keys (per account).
+- `per-provider` — **every key of the provider is handed the same bucket objects**, so the allowance is counted once however many keys the user configured. Groq's free tier is organisation-scoped, so this is the case that matters: two keys from one org share one 1K rpd / 8K tpm / 200K tpd budget.
 
-This directly encodes "do not assume more keys = more quota". Selection preference order stays: capacity-fit → `least-used`/round-robin → earliest-available. Nothing in the design requires a second key: with one key the pool is a degenerate case of the same algorithm, and `startTranslate` continues to accept exactly one.
+Sharing the *whole* allowance is the deliberate, conservative reading. Groq publishes rpm at the org level too, so a second key buys **failover, not throughput** — and where a provider did allow extra parallelism, counting it once only makes the scheduler more patient, never more optimistic. `configureLimits` re-points every key at one bucket set when the scope flips on, and seeding a shared set takes the **widest** key state (max `used`, latest `resetAt`), so switching a per-key pool into provider scope can never under-count what the org has already spent and walk into a 429.
+
+Selection preference order is unchanged: capacity-fit → `least-used`/round-robin → earliest-available. Nothing requires a second key: with one key the pool is a degenerate case of the same algorithm, and `startTranslate` continues to accept exactly one.
+
+**Daily token ledger (`tpd`).** `KeyBuckets` gains a fourth bucket. Groq publishes a 200K/day token allowance that the pool previously ignored entirely — so a large document would spend its whole day budget while the request counter still looked healthy. `tpd` is now checked in `hasCapacity`, rolled in `consume`, exposed as `tpdRemaining` (`null` = the provider publishes no such limit), and persisted with the rest. `limit === 0` means *unknown*, never zero: an unknown daily allowance blocks nothing. Records written before the ledger shipped restore cleanly (the field is simply absent → unknown), so this is a transparent migration.
+
 
 ### Layer 6 — context continuity across chunks ✅ shipped (§5.3)
 
@@ -250,7 +252,7 @@ Each phase is independently shippable, gated by `tsc · eslint · prettier · vi
 | **A ✅ shipped** | `BudgetProfile` + script-aware estimator + calibration + the 429-quota classification fix | `translate/budget.ts`, `translate/tokenEstimate.ts`, `translate/batching.ts`, `providers/http.ts`, `translate/engine.ts`, `translate/translateQueue.ts`, `workers/translation.worker.ts` | Fixes the root cause. Largest accuracy gain, smallest blast radius. |
 | **B ✅ shipped** | Structure-aware chunker (logical units, heading/caption binding, oversized-line rescue) | `translate/batching.ts`, `translate/types.ts`, `translate/engine.ts` | Turns correct budgets into *well-formed* requests. |
 | **C ✅ shipped** | Context continuity (heading chain, terminology reseed on restore, rolling glossary) | `translate/prompts.ts`, `translate/translateQueue.ts`, `translate/types.ts`, `translate/terminology.ts`, `translate/rollingGlossary.ts` | Quality at scale, cheap. |
-| **D** | Quota scope, daily ledger, forecast UI (and the `preflight` alignment), integrity verification | `config/models.config.ts`, `translate/keyPool.ts`, `pdf/preflight.ts`, `translate/coverage.ts` | Makes multi-key honest and large runs observable. |
+| **D** | **D1 ✅ shipped** quota scope + daily token ledger · **D2 pending** forecast alignment + integrity verification | `config/models.config.ts`, `translate/keyPool.ts`, `translate/protocol.ts`, `db/types.ts`, `pdf/preflight.ts`, `translate/integrity.ts` | Makes multi-key honest and large runs observable. |
 
 ### 5.1 Phase A — what shipped
 

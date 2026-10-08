@@ -21,6 +21,26 @@ export type ProviderId = 'gemini' | 'openrouter' | 'groq' | 'openai'
 
 export type QualityTier = 'basic' | 'standard' | 'premium'
 
+/**
+ * Whether a model's free-tier limits are counted **per key** or **shared by
+ * every key of the provider**.
+ *
+ * This is the difference between "I have two keys" and "I have twice the
+ * quota" — and they are not the same thing. Groq's free tier is
+ * organisation-scoped: two keys minted from the same org draw on one 1K rpd /
+ * 8K tpm / 200K tpd budget. Scheduling each key against its own buckets would
+ * happily spend 2K requests against a 1K limit and burn half the run on 429s a
+ * single key would never have hit.
+ *
+ *  - `'per-key'` (default) — each key has its own allowance. True for Google
+ *    AI Studio keys (per project) and for OpenRouter keys (per account).
+ *  - `'per-provider'` — every key of the provider draws on **one** set of
+ *    buckets, so the allowance is counted once however many keys the user
+ *    configured. Adding a second key then buys nothing, which is the honest
+ *    answer: it improves failover, not throughput.
+ */
+export type QuotaScope = 'per-key' | 'per-provider'
+
 export interface ModelSpec {
   id: string
   label: string
@@ -35,6 +55,11 @@ export interface ModelSpec {
   tpm: number
   /** Tokens per day on the free tier (estimate); omitted = unknown. */
   tpd?: number
+  /**
+   * Whether the limits above are per key or shared by every key of the
+   * provider. See {@link QuotaScope}; defaults to `'per-key'`.
+   */
+  quotaScope?: QuotaScope
   qualityTier: QualityTier
   /** Usable without a paid plan (`:free` routes count as free). */
   free: boolean
@@ -86,7 +111,8 @@ export const PROVIDERS: ProviderMeta[] = [
     getKeyUrl: 'https://console.groq.com/keys',
     docsUrl: 'https://console.groq.com/docs/models',
     customBaseUrl: false,
-    freeTierNote: 'Developer free tier with per-minute and per-day rate limits.',
+    freeTierNote:
+      'Developer free tier with per-minute and per-day rate limits. The free allowance is per *organisation*: a second key from the same org adds failover, not quota.',
   },
   {
     id: 'openai',
@@ -258,6 +284,9 @@ export const MODELS: ModelSpec[] = [
     rpd: 1_000,
     tpm: 8_000,
     tpd: 200_000,
+    /* Groq's free tier is organisation-scoped: every key of the same org
+     * draws on ONE budget, so a second key must not double the allowance. */
+    quotaScope: 'per-provider',
     qualityTier: 'premium',
     free: true,
     recommendedForPdf: true,
@@ -272,6 +301,7 @@ export const MODELS: ModelSpec[] = [
     rpd: 1_000,
     tpm: 8_000,
     tpd: 200_000,
+    quotaScope: 'per-provider',
     qualityTier: 'basic',
     free: true,
     notes: 'Fastest free option — half the token cost of120B.',
@@ -285,6 +315,7 @@ export const MODELS: ModelSpec[] = [
     rpd: 1_000,
     tpm: 8_000,
     tpd: 200_000,
+    quotaScope: 'per-provider',
     qualityTier: 'standard',
     free: true,
     verifyAvailability: true,
@@ -299,6 +330,7 @@ export const MODELS: ModelSpec[] = [
     rpd: 1_000,
     tpm: 8_000,
     tpd: 200_000,
+    quotaScope: 'per-provider',
     qualityTier: 'standard',
     free: true,
     verifyAvailability: true,

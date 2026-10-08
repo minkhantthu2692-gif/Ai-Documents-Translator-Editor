@@ -20,8 +20,9 @@
 
 import type { RateLimitInfo } from '@/providers/rateLimit'
 import type { BucketState, CooldownReason, KeyBuckets } from '@/db/types'
+import type { QuotaScope } from '@/config/models.config'
 
-export type { BucketState, CooldownReason, KeyBuckets }
+export type { BucketState, CooldownReason, KeyBuckets, QuotaScope }
 
 export type KeyHealthState = 'healthy' | 'cooling-down' | 'invalid' | 'quota-exhausted' | 'disabled'
 
@@ -76,6 +77,8 @@ export interface KeyUsageSnapshot {
   /** Requests left in the current minute/day (null = unknown). */
   rpmRemaining: number | null
   rpdRemaining: number | null
+  /** Tokens left today (null when the provider publishes no daily allowance). */
+  tpdRemaining: number | null
   /** The key has a usable secret in memory. */
   loaded: boolean
 }
@@ -92,10 +95,21 @@ export interface KeyPoolOptions {
   quotaFallbackMs?: number
 }
 
+/**
+ * The allowance a run schedules against.
+ *
+ * `quotaScope` decides *how many* allowances there are: `'per-key'` gives every
+ * key its own copy, `'per-provider'` gives the whole provider one copy that all
+ * of its keys share. `tpd` is the daily token ledger — `0` means the provider
+ * does not publish one, which must never block a request.
+ */
 export interface LimitConfig {
   rpm: number
   tpm: number
   rpd: number
+  /** Tokens per day; `0` = unknown. */
+  tpd: number
+  quotaScope: QuotaScope
 }
 
 interface KeyState {
@@ -119,7 +133,18 @@ interface KeyState {
 const MINUTE_MS = 60_000
 const DAY_MS = 24 * 60 * MINUTE_MS
 
-export const DEFAULT_LIMITS: LimitConfig = { rpm: 30, tpm: 100_000, rpd: 1_000 }
+/**
+ * `tpd: 0` is deliberate: an unknown daily token allowance must not block
+ * anything. `quotaScope` defaults to `'per-key'`, the optimistic reading that
+ * is true for Google AI Studio and OpenRouter keys.
+ */
+export const DEFAULT_LIMITS: LimitConfig = {
+  rpm: 30,
+  tpm: 100_000,
+  rpd: 1_000,
+  tpd: 0,
+  quotaScope: 'per-key',
+}
 
 function emptyBucket(limit: number, now: number, windowMs: number): BucketState {
   return { limit, used: 0, resetAt: now + windowMs }
@@ -167,6 +192,11 @@ export class KeyPool {
   /** Replaces the key set (a run starts, or the settings tab edits a key). */
   setKeys(seeds: KeySeed[]): void {
     const seen = new Set<string>()
+    const now = this.nowFn()
+    // One bucket set for the whole provider, so that N keys of the same org
+    // draw on ONE allowance instead of N copies of it.
+    const shared = this.limits.quotaScope === 'per-provider' ? this.sharedBuckets(seeds, now) : null
+
     for (const seed of seeds) {
       seen.add(seed.id)
       const existing = this.keys.get(seed.id)
@@ -175,30 +205,27 @@ export class KeyPool {
         existing.enabled = seed.enabled
         existing.nickname = seed.nickname
         if (seed.secret) existing.secret = seed.secret
+        // Re-point rather than mutate, so a scope change never leaves two keys
+        // sharing a bucket that one of them used to own alone.
+        existing.buckets = this.bucketsFor(seed, shared)
         continue
       }
-      const persisted = seed.persisted
-      const now = this.nowFn()
       this.keys.set(seed.id, {
         seed,
         secret: seed.secret,
         enabled: seed.enabled,
         nickname: seed.nickname,
-        buckets: persisted?.buckets ?? {
-          rpm: emptyBucket(this.limits.rpm, now, MINUTE_MS),
-          tpm: emptyBucket(this.limits.tpm, now, MINUTE_MS),
-          rpd: emptyBucket(this.limits.rpd, now, DAY_MS),
-        },
-        cooldownUntil: persisted?.cooldownUntil ?? 0,
-        cooldownReason: persisted?.cooldownReason ?? null,
-        invalid: persisted?.status === 'invalid',
-        invalidDetail: persisted?.statusDetail ?? '',
+        buckets: this.bucketsFor(seed, shared),
+        cooldownUntil: seed.persisted?.cooldownUntil ?? 0,
+        cooldownReason: seed.persisted?.cooldownReason ?? null,
+        invalid: seed.persisted?.status === 'invalid',
+        invalidDetail: seed.persisted?.statusDetail ?? '',
         failures: 0,
-        requests: persisted?.requests ?? 0,
-        tokensIn: persisted?.tokensIn ?? 0,
-        tokensOut: persisted?.tokensOut ?? 0,
-        lastUsedAt: persisted?.lastUsedAt ?? 0,
-        lastCheckedAt: persisted?.lastCheckedAt ?? null,
+        requests: seed.persisted?.requests ?? 0,
+        tokensIn: seed.persisted?.tokensIn ?? 0,
+        tokensOut: seed.persisted?.tokensOut ?? 0,
+        lastUsedAt: seed.persisted?.lastUsedAt ?? 0,
+        lastCheckedAt: seed.persisted?.lastCheckedAt ?? null,
       })
     }
     for (const id of [...this.keys.keys()]) {
@@ -206,13 +233,88 @@ export class KeyPool {
     }
   }
 
-  /** Applies model-configured limits (bucket ceilings follow the model). */
+  /**
+   * Buckets for one key.
+   *
+   * A provider-scoped pool hands every key the **same object**, which is what
+   * makes the allowance counted once however many keys the user configured.
+   * A per-key pool restores each key's own ledger field by field, so a record
+   * written before `tpd` existed simply has no daily token ledger yet.
+   */
+  private bucketsFor(seed: KeySeed, shared: KeyBuckets | null): KeyBuckets {
+    if (shared) return shared
+    const buckets = seed.persisted?.buckets
+    const now = this.nowFn()
+    return {
+      rpm: buckets?.rpm ?? emptyBucket(this.limits.rpm, now, MINUTE_MS),
+      tpm: buckets?.tpm ?? emptyBucket(this.limits.tpm, now, MINUTE_MS),
+      rpd: buckets?.rpd ?? emptyBucket(this.limits.rpd, now, DAY_MS),
+      tpd: buckets?.tpd ?? emptyBucket(this.limits.tpd, now, DAY_MS),
+    }
+  }
+
+  /**
+   * One bucket set standing for the whole provider, seeded from the **widest**
+   * key state.
+   *
+   * Taking the max is the conservative direction: if the user switches a
+   * per-key pool into provider scope, seeding from any single key would
+   * believe the org had spent less than it really has and walk into a 429.
+   */
+  private sharedBuckets(seeds: KeySeed[], now: number): KeyBuckets {
+    const widest = (
+      pick: (buckets: KeyBuckets) => BucketState | undefined,
+      limit: number,
+      windowMs: number,
+    ): BucketState => {
+      let used = 0
+      let resetAt = now + windowMs
+      let ceiling = limit
+      for (const seed of seeds) {
+        const bucket = seed.persisted?.buckets ? pick(seed.persisted.buckets) : undefined
+        if (!bucket) continue
+        if (bucket.used > used) used = bucket.used
+        if (bucket.resetAt > resetAt) resetAt = bucket.resetAt
+        if (bucket.limit > ceiling) ceiling = bucket.limit
+      }
+      return { limit: ceiling, used, resetAt }
+    }
+    return {
+      rpm: widest((buckets) => buckets.rpm, this.limits.rpm, MINUTE_MS),
+      tpm: widest((buckets) => buckets.tpm, this.limits.tpm, MINUTE_MS),
+      rpd: widest((buckets) => buckets.rpd, this.limits.rpd, DAY_MS),
+      tpd: widest((buckets) => buckets.tpd, this.limits.tpd, DAY_MS),
+    }
+  }
+
+  /** True when every key already draws on one and the same bucket set. */
+  private sharesBuckets(): boolean {
+    const sets = [...this.keys.values()].map((key) => key.buckets)
+    return sets.length < 2 || sets.every((set) => set === sets[0])
+  }
+
+  /**
+   * Applies model-configured limits (bucket ceilings follow the model).
+   *
+   * Safe in either order with `setKeys`: the worker configures first, but a
+   * settings change can arrive mid-session. Switching *into* provider scope
+   * re-points every key at one bucket set; switching *out of* it is left alone
+   * rather than silently splitting a shared ledger into optimistic copies.
+   */
   configureLimits(limits: Partial<LimitConfig>): void {
     this.limits = { ...this.limits, ...limits }
+    if (this.limits.quotaScope === 'per-provider' && !this.sharesBuckets()) {
+      const shared = this.sharedBuckets(
+        [...this.keys.values()].map((key) => key.seed),
+        this.nowFn(),
+      )
+      for (const key of this.keys.values()) key.buckets = shared
+    }
     for (const key of this.keys.values()) {
       key.buckets.rpm.limit = this.limits.rpm
       key.buckets.tpm.limit = this.limits.tpm
       key.buckets.rpd.limit = this.limits.rpd
+      key.buckets.tpd.limit = this.limits.tpd
     }
   }
 
@@ -241,10 +343,15 @@ export class KeyPool {
 
   /** Eligible keys with at least one bucket slot left, in strategy order. */
   private hasCapacity(key: KeyState, requests: number, tokens: number, now: number): boolean {
-    const { rpm, tpm, rpd } = key.buckets
+    const { rpm, tpm, rpd, tpd } = key.buckets
     if (rpm.used + requests > rpm.limit && now < rpm.resetAt) return false
     if (rpd.used + requests > rpd.limit && now < rpd.resetAt) return false
     if (tokens > 0 && tpm.used + tokens > tpm.limit && now < tpm.resetAt) return false
+    // Daily token ledger. `limit === 0` means the provider publishes no daily
+    // token allowance — unknown must never be read as zero and block the run.
+    if (tokens > 0 && tpd.limit > 0 && tpd.used + tokens > tpd.limit && now < tpd.resetAt) {
+      return false
+    }
     return true
   }
 
@@ -293,6 +400,13 @@ export class KeyPool {
       if (tokenEstimate > 0 && key.buckets.tpm.used + tokenEstimate > key.buckets.tpm.limit) {
         candidates.push(key.buckets.tpm.resetAt)
       }
+      if (
+        tokenEstimate > 0 &&
+        key.buckets.tpd.limit > 0 &&
+        key.buckets.tpd.used + tokenEstimate > key.buckets.tpd.limit
+      ) {
+        candidates.push(key.buckets.tpd.resetAt)
+      }
       for (const candidate of candidates) {
         if (candidate <= now) continue
         if (earliest === null || candidate < earliest) earliest = candidate
@@ -320,7 +434,12 @@ export class KeyPool {
     }
     roll(key.buckets.rpm, MINUTE_MS, 1)
     roll(key.buckets.rpd, DAY_MS, 1)
-    if (tokens > 0) roll(key.buckets.tpm, MINUTE_MS, tokens)
+    if (tokens > 0) {
+      roll(key.buckets.tpm, MINUTE_MS, tokens)
+      // The daily ledger is kept accurate even when the ceiling is unknown, so
+      // a limit that arrives later does not start from a false zero.
+      roll(key.buckets.tpd, DAY_MS, tokens)
+    }
     key.requests += 1
     key.lastUsedAt = now
     key.lastCheckedAt = now
@@ -476,6 +595,10 @@ export class KeyPool {
       key.buckets.rpd.resetAt > now
         ? key.buckets.rpd.limit - key.buckets.rpd.used
         : key.buckets.rpd.limit
+    const tpdWindow =
+      key.buckets.tpd.resetAt > now
+        ? key.buckets.tpd.limit - key.buckets.tpd.used
+        : key.buckets.tpd.limit
     return {
       id: key.seed.id,
       nickname: key.nickname,
@@ -491,6 +614,8 @@ export class KeyPool {
       lastUsedAt: key.lastUsedAt,
       rpmRemaining: Math.max(0, rpmWindow),
       rpdRemaining: Math.max(0, rpdWindow),
+      // `null` when the provider publishes no daily token allowance.
+      tpdRemaining: key.buckets.tpd.limit > 0 ? Math.max(0, tpdWindow) : null,
       loaded: Boolean(key.secret),
     }
   }
@@ -525,6 +650,7 @@ export class KeyPool {
         rpm: { ...key.buckets.rpm },
         tpm: { ...key.buckets.tpm },
         rpd: { ...key.buckets.rpd },
+        tpd: { ...key.buckets.tpd },
       },
     }
   }

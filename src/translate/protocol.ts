@@ -13,7 +13,7 @@
 
 import type { ReasonCode } from '@/core/reasonCodes'
 import type { ApiKeyRecord } from '@/db/types'
-import type { PersistedKeyState } from './keyPool'
+import type { LimitConfig, PersistedKeyState } from './keyPool'
 import type {
   BatchRunResult,
   GlossarySpec,
@@ -24,11 +24,15 @@ import type {
 
 export type WaitingReason = 'ALL_KEYS_COOLING_DOWN' | 'QUOTA_EXHAUSTED'
 
-export interface KeyLimits {
-  rpm: number
-  tpm: number
-  rpd: number
-}
+/**
+ * The model-configured allowance a run schedules against.
+ *
+ * `tpd` is the daily token ledger (`0` = the provider publishes no such limit,
+ * which must never block a request). `quotaScope` says whether this budget is
+ * per key or shared by every key of the provider — Groq's free tier is
+ * organisation-scoped, so a second key buys failover, not throughput.
+ */
+export type KeyLimits = LimitConfig
 
 /** Everything a session needs to translate one batch. */
 export interface RunMessage {

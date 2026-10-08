@@ -52,7 +52,7 @@ import {
   TranslationRunError,
   translationRunner,
 } from './translationClient'
-import { estimateTokens, type PersistedKeyState } from './keyPool'
+import { estimateTokens, type LimitConfig, type PersistedKeyState } from './keyPool'
 import type { RunnerHooks, TranslateRunner } from './protocol'
 import { resetTokenScale } from './tokenEstimate'
 import { lookupTranslation, storeTranslation } from './tm'
@@ -118,7 +118,7 @@ export interface ActiveRun {
   sessionId: string
   config: TranslateRunConfig
   models: string[]
-  limits: { rpm: number; tpm: number; rpd: number }
+  limits: LimitConfig
   keys: ApiKeyRecord[]
   glossary: GlossarySpec[]
   /**
@@ -401,9 +401,17 @@ export function modelChain(config: TranslateRunConfig): string[] {
   return chain
 }
 
-export function limitsFor(config: TranslateRunConfig): { rpm: number; tpm: number; rpd: number } {
+export function limitsFor(config: TranslateRunConfig): LimitConfig {
   const spec = modelSpec(config.provider, config.model)
-  return { rpm: spec?.rpm ?? 30, tpm: spec?.tpm ?? 100_000, rpd: spec?.rpd ?? 1_000 }
+  return {
+    rpm: spec?.rpm ?? 30,
+    tpm: spec?.tpm ?? 100_000,
+    rpd: spec?.rpd ?? 1_000,
+    // An unknown model has no known daily token allowance. `0` keeps the pool
+    // from blocking on a limit nobody published.
+    tpd: spec?.tpd ?? 0,
+    quotaScope: spec?.quotaScope ?? 'per-key',
+  }
 }
 
 /* ------------------------------------------------------------------ */

@@ -6,7 +6,13 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { ApiKeyRepository } from '@/db/repo-apiKeys'
-import { estimateTokens, KeyPool, type KeyPoolOptions, type KeySeed } from './keyPool'
+import {
+  estimateTokens,
+  KeyPool,
+  type KeyBuckets,
+  type KeyPoolOptions,
+  type KeySeed,
+} from './keyPool'
 
 /** The exact argument `apiKeyRepo.applyPoolState` persists (type-level proof). */
 type ApplyPoolStateArg = Parameters<ApiKeyRepository['applyPoolState']>[0]
@@ -256,6 +262,185 @@ describe('invalid keys and exhaustion', () => {
     pool.setKeys([seed('key-a')])
     expect(pool.isExhausted(T0)).toBe(false)
     expect(pool.hasUsableKey()).toBe(true)
+  })
+})
+
+describe('quota scope', () => {
+  it('per-provider: every key of the org draws on ONE daily allowance', () => {
+    const { pool } = harness()
+    pool.configureLimits({ rpd: 3, quotaScope: 'per-provider' })
+    pool.setKeys([seed('key-a'), seed('key-b')])
+
+    // Three requests fit. The fourth fails because the *org* is out, not
+    // because either key individually is — two keys must not buy 2x quota.
+    for (let index = 0; index < 3; index += 1) {
+      const lease = pool.pick(0, T0)
+      expect(lease).not.toBeNull()
+      pool.reportSuccess((lease as { keyId: string }).keyId, { now: T0 })
+    }
+    expect(pool.pick(0, T0)).toBeNull()
+  })
+
+  it('per-key (default): each key still draws on its own allowance', () => {
+    const { pool } = harness()
+    pool.configureLimits({ rpd: 1 })
+    pool.setKeys([seed('key-a'), seed('key-b')])
+
+    for (const id of ['key-a', 'key-b']) {
+      expect(pool.pick(0, T0)?.keyId).toBe(id)
+      pool.reportSuccess(id, { now: T0 })
+    }
+    expect(pool.pick(0, T0)).toBeNull()
+  })
+
+  it('per-provider: the shared ledger is persisted for every key', () => {
+    const { pool } = harness()
+    pool.configureLimits({ rpd: 5, quotaScope: 'per-provider' })
+    pool.setKeys([seed('key-a'), seed('key-b')])
+
+    const lease = pool.pick(0, T0)
+    pool.reportSuccess((lease as { keyId: string }).keyId, { now: T0 })
+
+    expect(pool.persisted('key-a')?.buckets.rpd.used).toBe(1)
+    expect(pool.persisted('key-b')?.buckets.rpd.used).toBe(1)
+  })
+
+  it('per-provider: a restored pool resumes from the org ledger', () => {
+    const persisted = {
+      id: 'key-a',
+      enabled: true,
+      status: 'valid' as const,
+      statusDetail: '',
+      cooldownUntil: 0,
+      cooldownReason: null,
+      lastCheckedAt: T0,
+      requests: 1,
+      tokensIn: 0,
+      tokensOut: 0,
+      lastUsedAt: T0,
+      buckets: {
+        rpm: { limit: 30, used: 0, resetAt: T0 + MINUTE },
+        tpm: { limit: 8_000, used: 0, resetAt: T0 + MINUTE },
+        rpd: { limit: 2, used: 1, resetAt: T0 + DAY },
+        tpd: { limit: 200_000, used: 0, resetAt: T0 + DAY },
+      },
+    }
+    const { pool } = harness()
+    pool.configureLimits({ rpd: 2, quotaScope: 'per-provider' })
+    pool.setKeys([seed('key-a', { persisted }), seed('key-b')])
+
+    // One request left — and the second key spends it, proving key-b draws on
+    // the ledger key-a already filled rather than on a fresh copy of it.
+    expect(pool.pick(0, T0)).not.toBeNull()
+    pool.reportSuccess('key-b', { now: T0 })
+    expect(pool.pick(0, T0)).toBeNull()
+  })
+
+  it('per-provider: seeding from the widest key never under-counts usage', () => {
+    const wide = {
+      id: 'key-a',
+      enabled: true,
+      status: 'valid' as const,
+      statusDetail: '',
+      cooldownUntil: 0,
+      cooldownReason: null,
+      lastCheckedAt: T0,
+      requests: 0,
+      tokensIn: 0,
+      tokensOut: 0,
+      lastUsedAt: 0,
+      buckets: {
+        rpm: { limit: 30, used: 0, resetAt: T0 + MINUTE },
+        tpm: { limit: 8_000, used: 0, resetAt: T0 + MINUTE },
+        rpd: { limit: 2, used: 1, resetAt: T0 + DAY },
+        tpd: { limit: 200_000, used: 0, resetAt: T0 + DAY },
+      },
+    }
+    const { pool } = harness()
+    pool.configureLimits({ rpd: 2, quotaScope: 'per-provider' })
+    pool.setKeys([seed('key-a', { persisted: wide }), seed('key-b')])
+
+    // key-b alone looks empty; the org is not. The conservative reading wins.
+    expect(pool.usage('key-b')?.rpdRemaining).toBe(1)
+  })
+})
+
+describe('daily token ledger (tpd)', () => {
+  it('blocks a request once the day’s token allowance is spent', () => {
+    const { pool } = harness()
+    pool.configureLimits({ tpd: 1_000 })
+    pool.setKeys([seed('key-a')])
+    pool.reportSuccess('key-a', { tokensIn: 900, now: T0 })
+
+    // 900 used, 100 left.
+    expect(pool.pick(200, T0)).toBeNull()
+    expect(pool.availableAt(200, T0)).toBeGreaterThan(T0)
+    expect(pool.pick(50, T0)).not.toBeNull()
+  })
+
+  it('an unknown daily allowance (limit 0) never blocks', () => {
+    const { pool } = harness()
+    // tpm has to be out of the way: it is a real limit and would block first.
+    pool.configureLimits({ tpm: 10_000_000, tpd: 0 })
+    pool.setKeys([seed('key-a')])
+    pool.reportSuccess('key-a', { tokensIn: 1_000_000, now: T0 })
+
+    expect(pool.pick(100, T0)).not.toBeNull()
+    expect(pool.usage('key-a')?.tpdRemaining).toBeNull()
+  })
+
+  it('counts tokens into the daily ledger alongside the per-minute one', () => {
+    const { pool } = harness()
+    pool.configureLimits({ tpm: 10_000, tpd: 10_000 })
+    pool.setKeys([seed('key-a')])
+    pool.reportSuccess('key-a', { tokensIn: 250, now: T0 })
+
+    expect(pool.usage('key-a')?.tpdRemaining).toBe(9_750)
+  })
+
+  it('rolls the daily ledger over when the day ends', () => {
+    const { pool } = harness()
+    pool.configureLimits({ tpd: 1_000 })
+    pool.setKeys([seed('key-a')])
+    pool.reportSuccess('key-a', { tokensIn: 1_000, now: T0 })
+    expect(pool.pick(10, T0)).toBeNull()
+
+    pool.reportSuccess('key-a', { tokensIn: 10, now: T0 + DAY + 1 })
+    expect(pool.usage('key-a')?.tpdRemaining).toBe(990)
+  })
+
+  it('restores a bucket record written before the ledger existed', () => {
+    // A record from before `tpd` shipped: no daily ledger key at all.
+    const legacyBuckets = {
+      rpm: { limit: 30, used: 0, resetAt: T0 + MINUTE },
+      tpm: { limit: 8_000, used: 0, resetAt: T0 + MINUTE },
+      rpd: { limit: 1_000, used: 4, resetAt: T0 + DAY },
+    } as unknown as KeyBuckets
+
+    const { pool } = harness()
+    pool.setKeys([
+      seed('key-a', {
+        persisted: {
+          id: 'key-a',
+          enabled: true,
+          status: 'valid',
+          statusDetail: '',
+          cooldownUntil: 0,
+          cooldownReason: null,
+          lastCheckedAt: T0,
+          requests: 4,
+          tokensIn: 0,
+          tokensOut: 0,
+          lastUsedAt: T0,
+          buckets: legacyBuckets,
+        },
+      }),
+    ])
+
+    // Unknown, not zero — so nothing is blocked and the other ledgers survived.
+    expect(pool.usage('key-a')?.tpdRemaining).toBeNull()
+    expect(pool.usage('key-a')?.rpdRemaining).toBe(996)
+    expect(pool.pick(500, T0)).not.toBeNull()
   })
 })
 

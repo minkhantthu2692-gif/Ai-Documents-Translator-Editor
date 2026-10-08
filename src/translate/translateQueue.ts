@@ -39,6 +39,12 @@ import { usageRepo } from '@/db/repo-usage'
 import type { ApiKeyRecord, BlockRecord, TranslationFlag } from '@/db/types'
 import { useTranslateStore } from '@/stores/translateStore'
 import { BATCH_DEFAULTS, buildBatches } from './batching'
+import {
+  createRollingGlossary,
+  promoteLearnedTerms,
+  rollingBudgetFor,
+  type RollingGlossary,
+} from './rollingGlossary'
 import { computeBudget } from './budget'
 import { AdaptiveLimiter, RateMeter } from './concurrency'
 import {
@@ -50,6 +56,7 @@ import { estimateTokens, type PersistedKeyState } from './keyPool'
 import type { RunnerHooks, TranslateRunner } from './protocol'
 import { resetTokenScale } from './tokenEstimate'
 import { lookupTranslation, storeTranslation } from './tm'
+import { annotatedTerms } from './terminology'
 import type {
   BatchLine,
   GlossarySpec,
@@ -84,6 +91,17 @@ export interface TranslatePlan {
   pageTotals: Map<number, number>
   /** Lines already translated per page (resume keeps its position). */
   pageDone: Map<number, number>
+  /**
+   * `seenPage`/`seenDocument` rebuilt from what is already translated.
+   *
+   * A restore starts both sets empty, which would make a document-scope run
+   * annotate a term for a second time and a page-scope run repeat a page's
+   * first annotation. Seeding them here keeps the occurrence rules true across
+   * restarts.
+   */
+  terminologySeed: { seenPage: Map<number, Set<string>>; seenDocument: Set<string> }
+  /** Token ceiling for glossary entries learned during the run (Layer 6.4). */
+  rollingGlossaryBudget: number
 }
 
 export interface StartOutcome {
@@ -103,6 +121,12 @@ export interface ActiveRun {
   limits: { rpm: number; tpm: number; rpd: number }
   keys: ApiKeyRecord[]
   glossary: GlossarySpec[]
+  /**
+   * Rolling-glossary state (Layer 6.4): a `source → target` pair the run has
+   * produced consistently is promoted into `glossary` for the rest of the run,
+   * so the last chunk is held to the wording the first chunks established.
+   */
+  rolling: RollingGlossary
   jobId: string
   epoch: number
   startedAt: number
@@ -182,6 +206,13 @@ function textOf(line: BatchLine | undefined): string {
   return line ? line.text : ''
 }
 
+/** The nearest heading above a line — the section its batch belongs to. */
+interface SectionRef {
+  source: string
+  /** Empty until the heading itself has been translated. */
+  translated: string
+}
+
 /**
  * Builds every batch of a project in reading order. Pages are independent, so
  * batches are interleaved across pages: with concurrency 3 three different
@@ -236,27 +267,59 @@ export async function buildTranslatePlan(
   const pageDone = new Map<number, number>()
   const perPage: TranslateJob[][] = []
 
+  // Section titles carry across pages: a document whose first heading sits on
+  // page 3 still means something on page 4.
+  let carriedSection: SectionRef | null = null
+  const seedPage = new Map<number, Set<string>>()
+  const seedDocument = new Set<string>()
+
   for (const page of pages) {
     // Image-text translation off → OCR-derived pages are out of scope.
     if (!config.translateImages && !page.hasTextLayer) continue
 
     const pageBlocks = (byPage.get(page.id) ?? []).sort((a, b) => a.order - b.order)
     const lines: BatchLine[] = []
+    /** The section above each line, so a batch inherits its first line's. */
+    const sectionOf = new Map<string, SectionRef | null>()
     let doneOnPage = 0
 
     for (const block of pageBlocks) {
       const kind = classifyBlock(block)
+
       if (kind === 'skip') {
         skipped += 1
-        continue
-      }
-      if (kind === 'done') {
+      } else if (kind === 'done') {
         doneOnPage += 1
-        continue
+      } else {
+        const line = toLine(block)
+        line.pageIndex = page.index
+        lines.push(line)
+        // A heading sits in the section above itself and opens a new one for
+        // every line after it — record first, advance second.
+        sectionOf.set(line.id, carriedSection)
       }
-      const line = toLine(block)
-      line.pageIndex = page.index
-      lines.push(line)
+
+      // What the page already carries fixes the occurrence scope for everything
+      // still to come. Skipped-but-translated lines count too: their annotation
+      // is in the document. `todo` does not — it is about to be rewritten.
+      if (kind !== 'todo' && config.terminologyScope !== 'every' && block.translatedText) {
+        for (const key of annotatedTerms(block.translatedText, block.sourceText)) {
+          seedDocument.add(key)
+          let onPage = seedPage.get(page.index)
+          if (!onPage) {
+            onPage = new Set<string>()
+            seedPage.set(page.index, onPage)
+          }
+          onPage.add(key)
+        }
+      }
+
+      if (block.kind === 'heading' && block.sourceText.trim().length > 0) {
+        carriedSection = {
+          source: block.sourceText.trim(),
+          translated: block.translatedText.trim(),
+        }
+      }
     }
 
     const onPageTotal = lines.length + doneOnPage
@@ -270,23 +333,34 @@ export async function buildTranslatePlan(
       maxLines,
       maxTokens: budget.fillTargetTokens,
     })
-    const jobs: TranslateJob[] = batches.map((batch, position) => ({
-      id: batch.id,
-      projectId,
-      pageIndex: page.index,
-      batch,
-      context: {
+    const jobs: TranslateJob[] = batches.map((batch, position) => {
+      const section = batch.lines.length > 0 ? sectionOf.get(batch.lines[0].id) : null
+      const context: PromptContext = {
         before:
           position > 0
             ? textOf(batches[position - 1].lines[batches[position - 1].lines.length - 1])
             : '',
         after: position + 1 < batches.length ? textOf(batches[position + 1].lines[0]) : '',
-      },
-    }))
+      }
+      if (section) {
+        context.section = section.source
+        if (section.translated) context.sectionTranslation = section.translated
+      }
+      return { id: batch.id, projectId, pageIndex: page.index, batch, context }
+    })
     perPage.push(jobs)
   }
 
-  return { jobs: interleave(perPage), total, alreadyDone, skipped, pageTotals, pageDone }
+  return {
+    jobs: interleave(perPage),
+    total,
+    alreadyDone,
+    skipped,
+    pageTotals,
+    pageDone,
+    terminologySeed: { seenPage: seedPage, seenDocument: seedDocument },
+    rollingGlossaryBudget: rollingBudgetFor(budget.contentBudgetTokens),
+  }
 }
 
 /** Round-robin across pages so the concurrency limit is actually used. */
@@ -553,6 +627,16 @@ async function persistLines(
       confidence: entry.confidence,
     })
   }
+
+  promoteLearnedTerms(
+    run.rolling,
+    run.glossary,
+    entries.map((entry) => ({
+      text: entry.text,
+      sourceText: entry.line.text,
+      confidence: entry.confidence,
+    })),
+  )
 
   await usageRepo.record({
     provider: config.provider,
@@ -855,6 +939,7 @@ export async function startTranslate(
     limits,
     keys,
     glossary,
+    rolling: createRollingGlossary(glossary, plan.rollingGlossaryBudget),
     jobId: '',
     epoch,
     startedAt: Date.now(),
@@ -869,8 +954,8 @@ export async function startTranslate(
     pageIndex: null,
     pageTotals: plan.pageTotals,
     pageDone: new Map(plan.pageDone),
-    seenPage: new Map(),
-    seenDocument: new Set(),
+    seenPage: plan.terminologySeed.seenPage,
+    seenDocument: plan.terminologySeed.seenDocument,
     meter: new RateMeter(),
     limiter: new AdaptiveLimiter(),
     activeKey: null,

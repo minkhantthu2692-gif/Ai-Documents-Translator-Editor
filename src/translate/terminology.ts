@@ -62,6 +62,20 @@ function keyOf(inner: string): string {
   return inner.trim().toLowerCase()
 }
 
+/**
+ * True when the text inside an annotation is a term the *source* line actually
+ * contains — the single predicate that decides an annotation is ours to manage
+ * rather than an ordinary parenthetical. Shared by the normaliser and by the
+ * two readers below, so they can never disagree about what counts.
+ *
+ * `sourceLower` is pre-lowered by the caller (it is called once per match).
+ */
+function innerIsFromSource(inner: string, sourceLower: string): boolean {
+  if (!innerIsTerm(inner)) return false
+  const needle = inner.trim().toLowerCase()
+  return needle.length > 0 && sourceLower.includes(needle)
+}
+
 /** Replaces full-width brackets and unifies the annotation brackets. */
 export function normalizeBrackets(text: string): string {
   let out = text
@@ -78,12 +92,7 @@ export function normalizeTerminology(text: string, options: NormalizeOptions): N
   const normalized = normalizeBrackets(text)
   const sourceLower = (options.sourceText ?? '').toLowerCase()
 
-  const isOriginal = (inner: string): boolean => {
-    if (!innerIsTerm(inner)) return false
-    if (!options.sourceText) return false
-    const needle = inner.trim().toLowerCase()
-    return needle.length > 0 && sourceLower.includes(needle)
-  }
+  const isOriginal = (inner: string): boolean => innerIsFromSource(inner, sourceLower)
 
   const kept: string[] = []
   const removed: string[] = []
@@ -124,6 +133,75 @@ export function normalizeTerminology(text: string, options: NormalizeOptions): N
   )
 
   return { text: out, kept, removed }
+}
+
+/** One source-derived `Translated(Original)` annotation found in a line. */
+interface FoundAnnotation {
+  /** The translated term standing in front of the parenthesis. */
+  targetTerm: string
+  /** The original term inside the parenthesis. */
+  sourceTerm: string
+}
+
+/**
+ * Walks `text` for annotations whose inner term comes from `sourceText`.
+ *
+ * Read-only counterpart of `normalizeTerminology`: it applies exactly the same
+ * `innerIsFromSource` predicate but changes nothing, so callers can inspect
+ * what a finished translation already established.
+ */
+function walkAnnotations(text: string, sourceText?: string): FoundAnnotation[] {
+  if (!text || !sourceText) return []
+  const normalized = normalizeBrackets(text)
+  const sourceLower = sourceText.toLowerCase()
+  const found: FoundAnnotation[] = []
+
+  for (const match of normalized.matchAll(ANNOTATION)) {
+    const before = match[1]
+    const inner = match[3]
+    // An annotation with nothing in front of it is not a term annotation.
+    if (!before || before.trim().length === 0) continue
+    if (!innerIsFromSource(inner, sourceLower)) continue
+    found.push({ targetTerm: before.trim(), sourceTerm: inner.trim() })
+  }
+  return found
+}
+
+/**
+ * Lowercase keys of the original terms already annotated in `text`.
+ *
+ * This is how a resumed run **re-seeds** `seenPage`/`seenDocument`: the sets are
+ * rebuilt from Dexie on every restore, so without this a document-scope run
+ * restarted halfway through would annotate the same term a second time.
+ */
+export function annotatedTerms(text: string, sourceText?: string): string[] {
+  const keys: string[] = []
+  for (const { sourceTerm } of walkAnnotations(text, sourceText)) {
+    const key = keyOf(sourceTerm)
+    if (!keys.includes(key)) keys.push(key)
+  }
+  return keys
+}
+
+/**
+ * `source → target` pairs a translation actually produced.
+ *
+ * Feeds the rolling glossary (Layer 6): a term the model chose and then kept
+ * choosing is a term worth *enforcing* for the rest of the run. Pairs are only
+ * reported when the original term really occurs in the source, so an ordinary
+ * parenthetical can never be promoted into the glossary.
+ */
+export function extractTermPairs(
+  text: string,
+  sourceText?: string,
+): Array<{ sourceTerm: string; targetTerm: string }> {
+  const pairs: Array<{ sourceTerm: string; targetTerm: string }> = []
+  for (const { sourceTerm, targetTerm } of walkAnnotations(text, sourceText)) {
+    if (!targetTerm) continue
+    if (pairs.some((pair) => pair.sourceTerm === sourceTerm)) continue
+    pairs.push({ sourceTerm, targetTerm })
+  }
+  return pairs
 }
 
 export interface GlossaryOutcome {

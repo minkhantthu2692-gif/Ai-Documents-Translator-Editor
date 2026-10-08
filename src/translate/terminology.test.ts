@@ -5,7 +5,9 @@
 import { describe, expect, it } from 'vitest'
 import { ensureUnicode, isLikelyZawgyi } from '@/core/zawgyi'
 import {
+  annotatedTerms,
   enforceGlossary,
+  extractTermPairs,
   keepOriginalWhenUnusable,
   normalizeBrackets,
   normalizeTerminology,
@@ -213,5 +215,52 @@ describe('postProcessTranslation', () => {
     expect(repair.wasZawgyi).toBe(false)
     expect(repair.converted).toBe(false)
     expect(repair.text).toBe(outcome.text)
+  })
+})
+
+describe('annotatedTerms (what a restored run re-seeds)', () => {
+  it('returns the lowercased keys already annotated in a translated line', () => {
+    const source = 'Apple pie and Orange juice'
+    const text = 'ပန်းသီး(Apple) ပိုနှင့် လိမ္မော်(Orange) ဖျော်ရည်'
+
+    expect(annotatedTerms(text, source)).toEqual(['apple', 'orange'])
+  })
+
+  it('ignores a parenthetical whose inner text is not in the source', () => {
+    expect(annotatedTerms('ကွန်ပျူတာ(computer)', 'Apple pie')).toEqual([])
+  })
+
+  it('needs a source line — without one there is nothing to verify against', () => {
+    expect(annotatedTerms('ပန်းသီး(apple)')).toEqual([])
+    expect(annotatedTerms('', 'apple pie')).toEqual([])
+  })
+
+  it('de-duplicates a term annotated twice on the same line', () => {
+    const text = 'ပန်းသီး(apple) နှင့် ပန်းသီး(apple) တူညီသည်'
+
+    expect(annotatedTerms(text, 'apple and apple again')).toEqual(['apple'])
+  })
+})
+
+describe('extractTermPairs (what the rolling glossary learns)', () => {
+  it('reads Translated(Original) as a target→source pair', () => {
+    const pairs = extractTermPairs('သော့(key) ကို သိမ်းပါ', 'Store the key')
+
+    expect(pairs).toEqual([{ sourceTerm: 'key', targetTerm: 'သော့' }])
+  })
+
+  it('never learns from a parenthetical the source does not contain', () => {
+    expect(extractTermPairs('ကွန်ပျူတာ(computer)', 'Store the key')).toEqual([])
+  })
+
+  it('keeps the first target chosen for a term annotated twice', () => {
+    const pairs = extractTermPairs('သော့(key) နှင့် သော့(key)', 'key and key')
+
+    expect(pairs).toHaveLength(1)
+    expect(pairs[0].sourceTerm).toBe('key')
+  })
+
+  it('finds no pairs in an unannotated line', () => {
+    expect(extractTermPairs('သော့ ကို သိမ်းပါ', 'Store the key')).toEqual([])
   })
 })

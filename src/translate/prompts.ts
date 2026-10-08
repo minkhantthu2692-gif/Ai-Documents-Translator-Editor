@@ -77,10 +77,17 @@ export interface SystemPromptOptions {
   fromImage?: boolean
 }
 
+/**
+ * Hard cap on how many glossary entries one prompt may carry. `glossaryBlock`
+ * truncates past it, and the rolling glossary refuses to grow past it too — one
+ * number, two consumers.
+ */
+export const GLOSSARY_CAP = 200
+
 function glossaryBlock(glossary: GlossarySpec[]): string {
   if (glossary.length === 0) return ''
   const lines = glossary
-    .slice(0, 200)
+    .slice(0, GLOSSARY_CAP)
     .map((entry) => `- "${entry.sourceTerm}" = "${entry.targetTerm}"`)
     .join('\n')
   return `Glossary (use these exact target terms whenever the source term appears):
@@ -138,12 +145,18 @@ export function systemPrompt(options: SystemPromptOptions): string {
 /** The numbered user message carrying the actual lines. */
 export function userPrompt(batch: TranslationBatch, context?: PromptContext | null): string {
   const parts: string[] = []
-  if (context && (context.before || context.after)) {
-    const contextLines: string[] = []
-    if (context.before) contextLines.push(`Previous line (context only): ${context.before}`)
-    if (context.after) contextLines.push(`Next line (context only): ${context.after}`)
-    parts.push(contextLines.join('\n'))
+  // Section first: it is the cheapest and most useful of the context lines, and
+  // it still applies when a batch happens to sit at a page boundary where there
+  // is no neighbouring line to offer.
+  const contextLines: string[] = []
+  if (context?.section) contextLines.push(`Section heading (context only): ${context.section}`)
+  if (context?.sectionTranslation && context.sectionTranslation !== context.section) {
+    contextLines.push(`Already translated as (context only): ${context.sectionTranslation}`)
   }
+  if (context?.before) contextLines.push(`Previous line (context only): ${context.before}`)
+  if (context?.after) contextLines.push(`Next line (context only): ${context.after}`)
+  if (contextLines.length > 0) parts.push(contextLines.join('\n'))
+
   const lines = batch.lines
     .map((line, index) => `${index + 1}. [id=${line.id}] ${line.text}`)
     .join('\n')

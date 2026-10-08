@@ -72,7 +72,7 @@ Phase A replaced the flat constant with the model's real budget and made it a
 - `minLines: 15` was a **floor consulted before the token budget**, so a page of long lines could push a batch far past budget — **fixed in Phase A** (§5.1);
 - a single oversized line had no path at all: if the model answered it badly the line silently kept its source text — **fixed in Phase B** (§5.2), which cuts it at sentence/row boundaries in the ladder's last resort;
 - `BlockKind` (`heading | paragraph | list | table | caption | shape`, `db/types.ts:88`) was **never consulted** — a table was split at an arbitrary line boundary and a heading could be stranded at the end of a batch — **fixed in Phase B** (§5.2);
-- only **one** neighbour line is passed as context (`translateQueue.ts:258-264`, `prompts.ts:141-146`), which is thin for consistency over hundreds of pages — **open, Phase C**.
+- ~~only **one** neighbour line is passed as context~~ — **fixed in Phase C** (§5.3): every batch also carries the nearest enclosing heading and, when known, its translation.
 
 ### 1.4 The second direction of the size problem
 
@@ -163,7 +163,7 @@ This is self-correcting within a handful of requests regardless of language, so 
 3. **`subdivide(unit)`** cuts a unit that alone exceeds `maxLines`/`maxTokens` at *line* boundaries. A line that alone exceeds the budget is still sent whole — there is nothing to cut it against, and the ladder owns it (point 4).
 4. **Pack units**, not lines: a batch may only end on a unit boundary, and `maxTokens` remains a hard budget. Order is never changed and no line is ever duplicated or dropped.
 5. **Oversized / badly-answered single line** → in the ladder's last resort, `splitLineForRetry` cuts it at the boundaries its own structure implies (table/list at `\n`, prose at sentence ends) into fragments with derived ids `` `${parentId}#s${n}` ``, sends them as **one** request, and `reassemble()` joins the results back under the parent id. Validation, review, post-processing and `persistLines` never see a fragment.
-6. **Context enrichment**: each batch still carries `{ before, after }`, **plus** the nearest enclosing heading and its translation (`sectionDigest`) — **open, Phase C**.
+6. **Context enrichment** ✅: each batch carries `{ before, after }` **plus** the nearest enclosing heading above it and, when already known, its translation — `PromptContext.section` / `.sectionTranslation`, tracked per line across pages while the plan is built (§5.3).
 
 The `splitBatch`/`splitToLines` rungs, the `#l<n>` id convention and `batchValidation` are untouched — `resume.test.ts` still holds.
 
@@ -196,14 +196,16 @@ quotaScope?: 'per-key' | 'per-provider'   // default 'per-key'
 
 This directly encodes "do not assume more keys = more quota". Selection preference order stays: capacity-fit → `least-used`/round-robin → earliest-available. Nothing in the design requires a second key: with one key the pool is a degenerate case of the same algorithm, and `startTranslate` continues to accept exactly one.
 
-### Layer 6 — context continuity across chunks
+### Layer 6 — context continuity across chunks ✅ shipped (§5.3)
 
-Long documents lose coherence when each request sees only 25 lines. Cheap mitigations, in priority order:
+Long documents lose coherence when each request sees only ~25 lines. Mitigations, in the order they were built:
 
-1. **Heading chain** (Layer 3.4) — the nearest heading + its translation, always included. Highest value per token.
-2. **TM reuse** — already present (`lookupTranslation` at `translateQueue.ts:568-599` writes via `storeTranslation`), so repeated terms stay consistent across chunks and restarts. Keep.
-3. **Terminology sets** — `seenPage`/`seenDocument` already flow into every request (`translateQueue.ts:692-699`). Keep; ensure they are also seeded on restore so a resumed run doesn't forget document-wide terms learned before the restart.
-4. **Rolling glossary** — promote high-frequency TM hits into the injected glossary for the remainder of the run (still capped at `glossaryBlock`'s 200 entries).
+1. **Heading chain** ✅ — the nearest heading *above* a batch plus, when it is already known, its translation. Every batch carries `PromptContext.section` / `.sectionTranslation`, rendered first in the user prompt so the model anchors on it before the neighbour lines. Sections are tracked per line while the plan is built and carried **across pages** (`buildTranslatePlan`), so a document whose first heading is on page 3 still means something on page 4. A heading line itself is given the section *above* it — it opens a new section rather than sitting in its own.
+2. **TM reuse** ✅ — `lookupTranslation` reads and `storeTranslation` writes, so a line that repeats verbatim costs nothing and stays identical across chunks and restarts.
+3. **Terminology sets** ✅ — `seenPage`/`seenDocument` flow into every request, and are now **re-seeded from Dexie on every plan build** (`annotatedTerms`, `terminology.ts`). Previously a restore started both sets empty, so a document-scope run restarted halfway would annotate the same term twice and a page-scope run would repeat a page's first annotation. Skipped-but-translated blocks count (their annotation is in the document); `todo` blocks do not (they are about to be rewritten).
+4. **Rolling glossary** ✅ — `src/translate/rollingGlossary.ts`. A `source → target` pair the run produced via a source-derived annotation is counted; after **3 consistent choices** it is promoted into `run.glossary`, which is already sent **per request** (`glossary: run.glossary`), so the change reaches the very next batch. Guarded four ways because a learned entry is *enforced*: never a term the user's own glossary owns; never past `GLOSSARY_CAP` entries or the token ceiling below; never a term the model disagreed with about (disagreement **drops the evidence** rather than picking a winner); never learned from a result with `confidence < 0.7`.
+
+**Why the ceiling is in tokens, not entries.** The glossary lives in the *system prompt*, and `promptOverheadTokens` is measured from the real `systemPrompt(...)` — so growth during a run would break the window invariant. The fill ratio uses only `FILL_RATIO` (85%) of the content budget, leaving 15% unused; learning is bounded to **10% of that same slack** (`ROLLING_GLOSSARY_SHARE`, capped in absolute terms at 512 tokens). `promptOverheadTokens + fillTargetTokens + maxOutputTokens ≤ contextWindow` therefore stays true however much a 350-page run picks up, and — because the budget is only *reserved* by the fill ratio, never re-measured — a run that learns nothing pays nothing for the feature.
 
 ### Layer 7 — merge integrity verification
 
@@ -247,7 +249,7 @@ Each phase is independently shippable, gated by `tsc · eslint · prettier · vi
 |---|---|---|---|
 | **A ✅ shipped** | `BudgetProfile` + script-aware estimator + calibration + the 429-quota classification fix | `translate/budget.ts`, `translate/tokenEstimate.ts`, `translate/batching.ts`, `providers/http.ts`, `translate/engine.ts`, `translate/translateQueue.ts`, `workers/translation.worker.ts` | Fixes the root cause. Largest accuracy gain, smallest blast radius. |
 | **B ✅ shipped** | Structure-aware chunker (logical units, heading/caption binding, oversized-line rescue) | `translate/batching.ts`, `translate/types.ts`, `translate/engine.ts` | Turns correct budgets into *well-formed* requests. |
-| **C** | Context continuity (heading chain, rolling glossary, terminology reseeding on restore) | `translate/prompts.ts`, `translate/translateQueue.ts`, `translate/tm.ts` | Quality at scale, cheap. |
+| **C ✅ shipped** | Context continuity (heading chain, terminology reseed on restore, rolling glossary) | `translate/prompts.ts`, `translate/translateQueue.ts`, `translate/types.ts`, `translate/terminology.ts`, `translate/rollingGlossary.ts` | Quality at scale, cheap. |
 | **D** | Quota scope, daily ledger, forecast UI (and the `preflight` alignment), integrity verification | `config/models.config.ts`, `translate/keyPool.ts`, `pdf/preflight.ts`, `translate/coverage.ts` | Makes multi-key honest and large runs observable. |
 
 ### 5.1 Phase A — what shipped
@@ -345,3 +347,70 @@ invariants in `resume.test.ts`. Order preservation is still pinned by
 **Known limitation:** the sentence splitter is deliberately naive (it does not
 know about abbreviations such as `Mr.`), because a fragment boundary is never a
 content boundary — the pieces are rejoined before anything downstream sees them.
+
+### 5.3 Phase C — what shipped
+
+Phases A and B made each request well formed. Phase C makes the **40th** request
+remember what the **1st** established.
+
+**`PromptContext.section` / `.sectionTranslation`** (`types.ts`). `buildTranslatePlan`
+already walks every page's blocks in reading order, so it tracks the nearest
+heading while it goes and records the section *above* each line into a
+`Map<lineId, SectionRef>`. Each batch then inherits the section of **its first
+line** — the heading that encloses it — and that map is seeded from the previous
+page's last heading, so sections carry across page boundaries. A heading line
+itself is given the section above it: it opens a new section, it does not sit in
+its own.
+
+`userPrompt` renders the section **before** the neighbour lines
+(`Section heading (context only): …`, then `Already translated as (context only): …`
+when the heading already has a translation — which is exactly the resume case).
+This is the cheapest mitigation in Layer 6 at roughly ten tokens a batch, and it
+is what stops a heading stranded at the end of a batch from leaving its body
+untranslated without a section title.
+
+**`terminology.annotatedTerms(text, sourceText)`.** A read-only twin of
+`normalizeTerminology`: same `innerIsFromSource` predicate, no mutation. The
+predicate was extracted so the two can never disagree about what counts as *our*
+annotation versus an ordinary parenthetical. `buildTranslatePlan` now calls it
+over every already-translated block and hands the result to `startTranslate` as
+`plan.terminologySeed`, which fills `run.seenPage`/`run.seenDocument` instead of
+the empty `Map`/`Set` a restore used to start with. Without this a document-scope
+run restarted halfway would annotate a term a second time, and a page-scope run
+would repeat a page's first annotation. Skipped-but-translated blocks are
+included (their annotation is in the document); `todo` blocks are not (they are
+about to be rewritten).
+
+**`translate/rollingGlossary.ts`** (new). `persistLines` is already the single
+place a translated line is accepted, and `run.glossary` is already sent
+*per request* — so learning needs no plumbing. After each batch,
+`promoteLearnedTerms` walks the annotations the run itself produced
+(`terminology.extractTermPairs`), and a `source → target` pair chosen **3 times
+consistently** is appended to `run.glossary` and reaches the very next request.
+
+A learned entry is *enforced* — `enforceGlossary` can rewrite later lines and
+raise `glossary-miss` — so it is guarded four ways:
+
+| Guard | Why |
+|---|---|
+| never a term the user's glossary owns (`userKeys`) | the user's wording always wins |
+| never past `GLOSSARY_CAP` entries or the token ceiling | see below |
+| never a term the model disagreed with about | disagreement **drops the evidence** instead of picking a winner; an enforced guess is worse than no enforcement |
+| never learned from `confidence < 0.7` | do not enforce what was not trusted |
+
+**The ceiling is in tokens, not entries.** The glossary lives in the *system
+prompt*, whose length is measured once into `promptOverheadTokens` — so mid-run
+growth would silently break the window invariant. The fill ratio uses 85% of the
+content budget, leaving 15% slack; learning is bounded to **10% of that same
+slack** (`ROLLING_GLOSSARY_SHARE`, absolute cap 512 tokens). The invariant
+`promptOverhead + fillTarget + maxOutput ≤ contextWindow` therefore survives
+however much a 350-page run learns, and because the slack already existed, a run
+that learns nothing pays **nothing** for the feature — no requests are made
+longer.
+
+**What Phase C did not change:** `tm.ts` (TM reuse was already correct),
+`enforceGlossary`, `budget.ts`, `batching.ts`, the queue's persistence model, or
+any of the resume invariants. Learned glossary entries are **in-memory for the
+run's lifetime** — persisting them would write into the user's own glossary
+table, and they are re-learned within a handful of batches after a restart.
+

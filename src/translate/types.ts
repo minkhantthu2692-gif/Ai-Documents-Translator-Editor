@@ -201,6 +201,17 @@ export interface PromptContext {
   before: string
   /** Next source line of the same page. */
   after: string
+  /**
+   * Nearest heading *above* this batch — the section its lines belong to.
+   *
+   * A batch is only ~25 lines, so without this the model has no idea which part
+   * of the document it is in; a heading that led the previous batch is a whole
+   * request away. Costs ~10 tokens and buys most of the consistency a much
+   * larger neighbour window would.
+   */
+  section?: string
+  /** That heading's translation, when it is already known (a resumed run). */
+  sectionTranslation?: string
 }
 
 export interface QualitySpec {

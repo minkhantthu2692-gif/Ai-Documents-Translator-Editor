@@ -10,6 +10,12 @@ interface ImportMetaEnv {
   readonly VITE_APPS_SCRIPT_TOKEN?: string
   /** Phase 5 — base URL of the assistant proxy (proxy/ or a CF Worker). */
   readonly VITE_ASSISTANT_PROXY_URL?: string
+  /**
+   * Local PDF sidecar base URL (PDF phases b2/c/d). Defaults to
+   * `http://localhost:8790`; set it to an empty string to disable the sidecar
+   * and force the browser-only path.
+   */
+  readonly VITE_PDF_SIDECAR_URL?: string
   /** Build-time base path, e.g. `/Ai-Documents-Translator-Editor/` on Pages. */
   readonly VITE_BASE?: string
 }

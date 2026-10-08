@@ -30,17 +30,25 @@ detection runs on the **raw text runs** (item boxes), so it survives line
 clustering merging columns together.
 
 Optional **Python sidecar** (`sidecar/`): PyMuPDF + pdfplumber + Tesseract
-behind a local HTTP service — protocol v1 server with a 20-test suite ✅ this
-phase; the frontend client, runtime detection and endpoint wiring land next.
-The browser path remains the default and everything degrades gracefully
-without the sidecar.
+behind a local HTTP service — protocol v1 server with a 20-test suite ✅, and
+**wired into the browser as of phase b2** ✅. `src/sidecar/sidecarClient.ts`
+probes `GET /health` once per run (cached, longer when it is absent) and, when
+the sidecar can serve the request, `POST /ocr` answers a scanned page straight
+from the PDF — no browser rasterisation, no WASM core, no CDN traineddata
+download. The response carries per-line text, page-point boxes and a mean
+confidence, which the client converts to pixel boxes for the existing
+structure pass. Everything else degrades gracefully with no sidecar: an
+absent, blocked, misconfigured or tesseract-less sidecar resolves `null`, the
+browser Tesseract path takes over, and the user sees no error and no delay
+beyond one cached probe. Configure with `VITE_PDF_SIDECAR_URL` (default
+`http://localhost:8790`; set it blank to disable the sidecar entirely).
 
 ## The 25 types
 
 | #  | Type                                    | Status | Notes |
 | -- | --------------------------------------- | ------ | ----- |
 | 1  | Text-Based PDF                          | ✅     | Text layer → lines → blocks with headings, lists, styles, fonts, special characters; classified `text` |
-| 2  | Scanned PDF (image-only, rotated, low-res, OCR) | ✅ | Classification `scanned` + auto-OCR inside the parse window (browser Tesseract: `queued→running→done`, confidence + text blocks persisted, E2E-verified); pre-flight warns and offers OCR; rotated scans still need OSD ❌; sidecar OCR ⏳ |
+| 2  | Scanned PDF (image-only, rotated, low-res, OCR) | ✅ | Classification `scanned` + auto-OCR inside the parse window (browser Tesseract: `queued→running→done`, confidence + text blocks persisted, E2E-verified); local sidecar OCR ✅ preferred automatically when running; pre-flight warns and offers OCR; rotated scans still need OSD ❌ |
 | 3  | Mixed PDF (text + scanned pages/images) | 🔶 | Per-page classes + method selection ✅ (text / OCR / hybrid): hybrid keeps the text layer authoritative, OCRs the rest and drops blocks that overlap existing text (unit-tested); reading-order restructure of merged column lines in phase c |
 | 4  | Multi-Column PDF (2/3-col, newspaper, reading order) | 🔶→⏳ | `complex` classification for ≥3 columns ✅ (item-level gutter detection); reading-order restructure of merged column lines in phase c |
 | 5  | PDF With Images (captions, diagrams, charts) | 🔶 | Images kept in the page render/background ✅; image-anchored extraction + caption linkage in phase c |
@@ -70,7 +78,8 @@ without the sidecar.
 | Phase | Delivers | Moves types |
 | ----- | -------- | ----------- |
 | (a) Classification | `complex` class, complexity scoring, item-level column detection, wizard metadata | 4, 12, 22 classification ✅ |
-| (b) Extraction methods | Browser Tesseract OCR auto-runs per window (status lifecycle, confidence, cached recognition), hybrid merge with geometric dedup, run-OCR setting persisted per project, Python sidecar server (protocol v1, 20 tests) | 2, 3 extraction ✅ (client wiring for sidecar next) |
+| (b) Extraction methods | Browser Tesseract OCR auto-runs per window (status lifecycle, confidence, cached recognition), hybrid merge with geometric dedup, run-OCR setting persisted per project, Python sidecar server (protocol v1, 20 tests) | 2, 3 extraction ✅ |
+| (b2) Sidecar wiring | `src/sidecar/sidecarClient.ts`: cached `GET /health` probe, `POST /ocr` with page/language/password, per-line confidence added to the server response, lazy render so a sidecar page never rasterises in the browser, automatic fall-back to browser Tesseract on any failure (22 client + 5 pipeline + 1 Python test) | 2 extraction ✅ with a native-OCR fast path |
 | (c) Structure preservation | Reading-order repair across merged columns, footnote regions, real table cells, links, code blocks, headings | 4, 5, 6, 7, 9, 11, 13, 14, 19, 24, 25 |
 | (d) Layout auto-adjust | Auto-fit/reflow when translated text grows (EN→MY), export height handling | 1, 8, 10, 12 (translation-time layout) |
 

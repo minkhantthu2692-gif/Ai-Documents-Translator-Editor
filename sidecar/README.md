@@ -182,12 +182,21 @@ Single-page OCR (page is a 0-based index, default `0`), rendered at 300 DPI.
 
 ```json
 {"ok": true, "page": 0, "text": "line one\nline two", "confidence": 87.2,
+ "lines": [{"text": "line one", "bbox": {"x": 72.1, "y": 118.4, "w": 41.2, "h": 15.8},
+            "confidence": 91.4}],
  "words": [{"text": "line", "bbox": {"x": 72.1, "y": 118.4, "w": 41.2, "h": 15.8}}],
  "ms": 456}
 ```
 
 - `confidence` — mean word confidence (0 when unavailable); `words` includes
   every tesseract word with `conf >= 0`, rectangles in page points.
+- `lines` — the same recognition grouped into lines (union of the member word
+  rects, `text` joined with single spaces, `confidence` the mean of the
+  member words). This is what the frontend reads: its structure pass filters
+  lines against a confidence floor, and word-level confidence alone would
+  force it to re-do this grouping client-side. Empty lines are omitted, so
+  `text` and `lines` always agree. Added in phase b2 — additive, so older
+  clients that only read `words` are unaffected.
 - `lang` — comma list passed to tesseract; each token is validated against the
   installed languages (unknown token → `400 BAD_REQUEST` listing the available
   ones).

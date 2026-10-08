@@ -116,6 +116,7 @@ Copy `.env.example` to `.env` (git-ignored) and edit. All values are optional.
 | `VITE_APPS_SCRIPT_URL` | Cloud sync | Apps Script web-app endpoint ending in `/exec`. Empty = everything stays in this browser |
 | `VITE_APPS_SCRIPT_TOKEN` | Cloud sync | Shared secret you set as the `TOKEN` Script Property; mismatches are rejected with `UNAUTHORIZED` |
 | `VITE_ASSISTANT_PROXY_URL` | Assistant proxy mode | Base URL of the `proxy/` server (e.g. `http://127.0.0.1:8787`). Empty = built-in offline assistant |
+| `VITE_PDF_SIDECAR_URL` | Faster local OCR | Base URL of `sidecar/server.py`. Unset = `http://localhost:8790` (auto-detected when running). Empty = sidecar off, browser OCR only |
 | `VITE_BASE` | Sub-path hosting | Base path the app is served from, e.g. `/REPO_NAME/` for a GitHub Pages project site |
 
 > Values are baked in **at build time** — restart `npm run dev` or rebuild after editing `.env`.

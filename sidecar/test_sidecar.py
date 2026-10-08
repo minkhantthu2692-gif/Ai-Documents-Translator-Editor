@@ -445,6 +445,19 @@ class SidecarTestCase(unittest.TestCase):
         self.assertIn("text", word)
         for key in ("x", "y", "w", "h"):
             self.assertIn(key, word["bbox"])
+        # Lines are what the frontend's structure pass reads: text + page-point
+        # box + a mean confidence it can filter on.
+        self.assertGreaterEqual(len(payload["lines"]), 1)
+        line = payload["lines"][0]
+        self.assertTrue(line["text"].strip())
+        self.assertGreater(line["confidence"], 0)
+        for key in ("x", "y", "w", "h"):
+            self.assertIn(key, line["bbox"])
+        # Every word the response reports belongs to some line.
+        self.assertEqual(
+            sum(len(part.split()) for part in payload["text"].split("\n")),
+            sum(len(entry["text"].split()) for entry in payload["lines"]),
+        )
 
     def test_ocr_unknown_language(self):
         status, _headers, payload = post("/ocr?page=0&lang=zz", self.pdfs["scan"])

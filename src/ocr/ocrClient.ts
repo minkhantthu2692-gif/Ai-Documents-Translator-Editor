@@ -192,17 +192,54 @@ export async function recognizeOcr(
 }
 
 /**
+ * A recogniser tried before the in-browser one. It needs no image (a local
+ * sidecar reads the PDF itself), and resolving `null` means "not for me —
+ * carry on", which is how an absent sidecar hands the page back to
+ * tesseract.js without an error anywhere.
+ */
+export type OcrPrimary = () => Promise<OcrResult | null>
+
+/** Eager image, or a thunk materialised only when nothing else answered. */
+export type OcrImageSource = Blob | OffscreenCanvas | string
+
+/**
  * Recognition with a Dexie cache. `cacheKey` must identify both the image and
  * the language set (e.g. `${projectId}#${pageIndex}#mya`).
+ *
+ * Two optional hooks sit in front of the ordinary path:
+ *
+ *  - `primary` — an image-free recogniser, tried first;
+ *  - `image` — a *lazy* source for the rasterised page, invoked only when
+ *    `primary` declined, so a sidecar run never pays for a browser render the
+ *    result will not use.
+ *
+ * Whatever answers lands in the cache under the same key, so a re-parse costs
+ * nothing whichever engine produced the first result — and switching engines
+ * later does not force a re-recognition of pages already done.
  */
 export async function recognizeCached(
   cacheKey: string,
-  image: Blob | OffscreenCanvas | string,
+  image: OcrImageSource | (() => Promise<OcrImageSource>),
   options: OcrOptions = {},
+  primary?: OcrPrimary,
 ): Promise<OcrResult> {
   const cached = await cacheRepo.get<OcrResult>('ocr', cacheKey)
   if (cached) return cached
-  const result = await recognizeOcr(image, options)
+
+  let result: OcrResult | null = null
+  if (primary) {
+    try {
+      result = await primary()
+    } catch {
+      // A broken accelerator must never fail the page.
+      result = null
+    }
+  }
+  if (!result) {
+    const source = typeof image === 'function' ? await image() : image
+    result = await recognizeOcr(source, options)
+  }
+
   if (result.text.length > 0) {
     await cacheRepo.put('ocr', cacheKey, result, { maxBytes: 8 * 1024 * 1024 })
   }

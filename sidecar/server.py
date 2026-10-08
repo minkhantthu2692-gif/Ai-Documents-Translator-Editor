@@ -775,6 +775,40 @@ def render_words(page, lang: str, dpi=OCR_DPI) -> dict:
     return {"words": ordered_words, "lines": line_groups}
 
 
+def ocr_line_payload(groups) -> list:
+    """OCR word groups → public line dicts for the frontend.
+
+    The browser's structure pass reads *lines* (blocks → paragraphs → lines)
+    and drops any line under its confidence floor, so each line carries the
+    mean confidence of the words that formed it — word-level confidence alone
+    cannot be filtered without re-doing this grouping client-side. Rects stay
+    in page points, exactly like ``words``.
+    """
+    payload = []
+    for group in groups:
+        if not group:
+            continue
+        text = " ".join(word["text"] for word in group)
+        if not text.strip():
+            continue
+        rects = [word["rect"] for word in group]
+        confs = [word["conf"] for word in group]
+        bbox = (
+            min(r[0] for r in rects),
+            min(r[1] for r in rects),
+            max(r[2] for r in rects),
+            max(r[3] for r in rects),
+        )
+        payload.append(
+            {
+                "text": text,
+                "bbox": rect_dict(bbox),
+                "confidence": round(sum(confs) / len(confs), 1),
+            }
+        )
+    return payload
+
+
 def validate_langs(lang_param):
     """Turn the ``lang`` query value into a validated tesseract language list."""
     requested = [part.strip() for part in (lang_param or "eng").split(",") if part.strip()]
@@ -1241,6 +1275,7 @@ def handle_ocr(data: bytes, query: dict) -> dict:
             "page": index,
             "text": text,
             "confidence": confidence,
+            "lines": ocr_line_payload(result["lines"]),
             "words": words,
             "ms": int((time.perf_counter() - started) * 1000),
         }

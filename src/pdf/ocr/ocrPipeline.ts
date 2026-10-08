@@ -16,10 +16,17 @@
  */
 
 import { logEvent } from '@/core/eventLogger'
-import { isOcrLanguageSupported, recognizeCached, tesseractCodeFor } from '@/ocr/ocrClient'
+import {
+  isOcrLanguageSupported,
+  recognizeCached,
+  tesseractCodeFor,
+  type OcrResult,
+} from '@/ocr/ocrClient'
 import { pageRepo } from '@/db/repo-content'
 import { settingsRepo } from '@/db/repo-settings'
+import { sourceFileRepo } from '@/db/repo-sourceFiles'
 import { pageNeedsOcr, type PageRecord } from '@/db/types'
+import { probeSidecar, sidecarOcr } from '@/sidecar/sidecarClient'
 import { analysisClient, AnalysisCancelled } from '../analysisClient'
 import type { SkipContext } from '../skipRules'
 import { ocrToBlocks, type OcrPageContent } from './ocrStructure'
@@ -71,6 +78,22 @@ async function markFailed(pages: PageRecord[]): Promise<void> {
   for (const page of pages) await pageRepo.update(page.id, { ocrStatus: 'failed' })
 }
 
+/** Raw source bytes + stored password, for a sidecar that re-opens the PDF. */
+async function loadSidecarSource(
+  projectId: string,
+): Promise<{ blob: Blob; password?: string } | null> {
+  try {
+    const source = await sourceFileRepo.getLatestByProject(projectId)
+    if (!source?.blob) return null
+    return {
+      blob: source.blob,
+      ...(source.password ? { password: source.password } : {}),
+    }
+  } catch {
+    return null
+  }
+}
+
 /**
  * Recognises every eligible page in the window and returns its blocks.
  * Reads and writes `PageRecord.ocrStatus` as it goes; pages that fail stay
@@ -118,22 +141,50 @@ export async function runWindowOcr(options: WindowOcrOptions): Promise<Map<numbe
   let succeeded = 0
   let confidenceSum = 0
 
+  const lang = tesseractCodeFor(options.sourceLang) ?? options.sourceLang
+  const cacheKeyOf = (page: PageRecord): string => `${options.fileId}#${page.index}#${lang}`
+
+  /**
+   * The local sidecar re-opens the PDF itself, so it needs no browser render —
+   * but it does need the bytes. Those are read once for the whole window, and
+   * only after a probe says the sidecar is worth asking: without one, this
+   * path costs nothing at all, not even an IndexedDB read.
+   */
+  let sidecarSource: Promise<{ blob: Blob; password?: string } | null> | null = null
+  let sidecarPages = 0
+  const throughSidecar = (page: PageRecord) => async (): Promise<OcrResult | null> => {
+    if (!(await probeSidecar([lang]))) return null
+    sidecarSource ??= loadSidecarSource(options.projectId)
+    const source = await sidecarSource
+    if (!source) return null
+    const result = await sidecarOcr(source.blob, {
+      pageIndex: page.index,
+      langs: [lang],
+      scale: OCR_RENDER_SCALE,
+      ...(source.password ? { password: source.password } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+    })
+    if (result) sidecarPages += 1
+    return result
+  }
+
   for (const page of selected) {
     if (options.signal?.aborted) throw new AnalysisCancelled()
     await pageRepo.update(page.id, { ocrStatus: 'running' })
     try {
       const size = renderedSize(page)
-      const image = await analysisClient.render(
-        options.fileId,
-        page.index,
-        OCR_RENDER_SCALE,
-        'thumbnail',
-        { signal: options.signal },
+      // Lazy render: `recognizeCached` only rasterises when neither the cache
+      // nor the sidecar answered, so a sidecar run skips the browser render
+      // entirely rather than producing a PNG nobody will look at.
+      const recognition = await recognizeCached(
+        cacheKeyOf(page),
+        () =>
+          analysisClient.render(options.fileId, page.index, OCR_RENDER_SCALE, 'thumbnail', {
+            signal: options.signal,
+          }),
+        { langs: [options.sourceLang] },
+        throughSidecar(page),
       )
-      const lang = tesseractCodeFor(options.sourceLang) ?? options.sourceLang
-      const recognition = await recognizeCached(`${options.fileId}#${page.index}#${lang}`, image, {
-        langs: [options.sourceLang],
-      })
       const content = ocrToBlocks(recognition.blocks, {
         pageIndex: page.index,
         pageWidth: size.width,
@@ -178,7 +229,7 @@ export async function runWindowOcr(options: WindowOcrOptions): Promise<Map<numbe
       severity: succeeded === selected.length ? 'success' : 'warning',
       messageMy: `OCR ပြီးဆုံးပြီ (စာမျက်နှာ ${succeeded}/${selected.length} ခု)`,
       messageEn: `OCR finished (${succeeded}/${selected.length} pages)`,
-      technicalDetail: `mean confidence ${(confidenceSum / succeeded).toFixed(1)}%`,
+      technicalDetail: `mean confidence ${(confidenceSum / succeeded).toFixed(1)}% · engine sidecar=${sidecarPages} browser=${succeeded - sidecarPages}`,
       projectId: options.projectId,
     })
   }

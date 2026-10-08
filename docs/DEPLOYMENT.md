@@ -134,9 +134,11 @@ Copy `.env.example` → `.env` for local work; for CI, export them in the build 
 | `VITE_APPS_SCRIPT_URL` | Frontend build | For sync | Apps Script endpoint ending in `/exec` |
 | `VITE_APPS_SCRIPT_TOKEN` | Frontend build | For sync | Fallback sync token; the sealed value in Settings wins |
 | `VITE_ASSISTANT_PROXY_URL` | Frontend build | No | Proxy base URL; empty = offline assistant |
+| `VITE_PDF_SIDECAR_URL` | Frontend build | No | Local sidecar base URL; unset = `http://localhost:8790`, empty = sidecar off (browser OCR only) |
 | `VITE_BASE` | Frontend build | No | Base path, default `/`; GitHub Pages sets it automatically |
 | `OPENROUTER_ASSISTANT_KEY` | **Proxy only** | For proxy mode | Server-side secret — never `VITE_`-prefixed, never committed |
 | `PORT`, `ALLOWED_ORIGIN`, `ASSISTANT_MODEL`, `TRUST_PROXY` | Proxy only | No | See [../proxy/README.md](../proxy/README.md) |
+| `PORT`, `HOST`, `ALLOWED_ORIGIN` | **Sidecar only** | No | Listen address and CORS origin of `sidecar/server.py` — set `ALLOWED_ORIGIN` to the deployed origin or the browser will refuse the response. See [../sidecar/README.md](../sidecar/README.md) |
 
 > **Build-time warning.** All `VITE_` values are inlined when `vite build` runs. Changing
 > `.env` afterwards changes nothing until you rebuild, and every value in the deployed bundle

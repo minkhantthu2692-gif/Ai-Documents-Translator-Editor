@@ -29,7 +29,6 @@ import { useTranslateStore } from '@/stores/translateStore'
 import {
   cancelTranslate,
   pauseTranslate,
-  resumeTranslate,
   restoreTranslate,
   startTranslate,
   subscribeTranslate,
@@ -143,9 +142,30 @@ export function TranslatePage() {
         base.targetLang = record.targetLang || base.targetLang
       }
 
+      // Providers retire model ids, so a saved config can outlive the
+      // bundled list. A model this provider no longer offers would render
+      // as the wrong <option> (the native select shows the first one) and
+      // run as a dead id — reset it to the provider's current default.
+      // The openai-compatible provider is exempt: local endpoints serve
+      // ids that are not in the bundled registry.
+      let healedModel: string | null = null
+      const chain = FALLBACK_CHAINS[base.provider]
+      if (
+        base.provider !== 'openai' &&
+        chain &&
+        chain.length > 0 &&
+        !modelsFor(base.provider).some((entry) => entry.id === base.model)
+      ) {
+        base.model = chain[0]
+        base.fallbackModels = chain.filter((id) => id !== base.model)
+        healedModel = base.model
+        await settingsRepo.set(configKey(projectId), base, 'translate')
+      }
+
       setConfig(base)
       setSourceChoice(base.sourceLang)
       setConfirmed(true)
+      if (healedModel) toast('info', t('translate.modelHealed', { model: healedModel }))
 
       const pending = await restoreTranslate(projectId, true)
       await refreshCoverage(base)
@@ -361,7 +381,12 @@ export function TranslatePage() {
       navigate('/settings')
       return
     }
-    resumeTranslate()
+    // Rebuild from the config on screen instead of resuming the previous
+    // in-memory run: that run can still hold the provider/model the user
+    // has since changed — exactly how one MODEL_UNAVAILABLE kept repeating
+    // after every switch. startTranslate re-plans from Dexie, so lines
+    // already translated stay done and only the pending ones re-run.
+    void handleStart()
   }
 
   const percent =
@@ -556,7 +581,7 @@ export function TranslatePage() {
                     <Button
                       size="sm"
                       variant="secondary"
-                      onClick={resumeTranslate}
+                      onClick={() => void handleStart()}
                       data-testid="translate-resume"
                     >
                       {t('translate.resume')}
@@ -576,7 +601,7 @@ export function TranslatePage() {
                     <Button
                       size="sm"
                       variant="secondary"
-                      onClick={resumeTranslate}
+                      onClick={() => void handleStart()}
                       data-testid="translate-retry"
                     >
                       {t('translate.retryFailed')}

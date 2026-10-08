@@ -330,7 +330,9 @@ describe('model fallback chain', () => {
       }),
     )
 
-    expect(calls).toBe(3)
+    // One pass through the chain is enough: a known-missing model must not
+    // be retried up to maxConsecutiveFailures.
+    expect(calls).toBe(1)
     if (!(error instanceof ProviderError)) throw new Error('expected a ProviderError')
     expect(error.kind).toBe('model_missing')
   })

@@ -219,8 +219,11 @@ export async function executeWithRotation(
             if (modelIndex < models.length - 1) {
               modelIndex += 1
               hooks.onModelFallback?.(models[modelIndex])
+              break
             }
-            break
+            // The whole chain answered 404 — retrying the last known-missing
+            // model only burns quota, so surface MODEL_UNAVAILABLE now.
+            throw providerError
           case 'bad_request':
           case 'unknown':
             // Not the key's fault — retrying on another key would waste quota.

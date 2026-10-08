@@ -34,7 +34,7 @@ export interface CacheWriteInput extends CacheLookupInput {
   confidence: number
 }
 
-/** `deepseek/deepseek-chat-v3.1:free` → `deepseek`, `llama-3.3-70b` → `llama`. */
+/** `thinkingmachines/inkling:free` → `thinkingmachines`, `openai/gpt-oss-120b` → `openai`. */
 export function modelFamily(model: string): string {
   const head = model.split('/')[0]
   const family = head.split('-')[0].split(':')[0]

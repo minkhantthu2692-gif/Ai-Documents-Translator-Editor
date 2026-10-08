@@ -656,6 +656,7 @@
     "provider": "Provider",
     "model": "Model",
     "modelHint": "The model list comes from the AI Providers settings tab.",
+    "modelHealed": "The saved model is no longer offered by this provider — switched to {{model}}.",
     "freeBadge": "Free tier",
     "quality": "Quality",
     "qualityBasic": "Basic — fastest",
@@ -699,7 +700,11 @@
       "cooling-down": "Cooling down",
       "invalid": "Invalid",
       "quota-exhausted": "Quota exhausted",
-      "disabled": "Disabled"
+      "disabled": "Disabled",
+      "unknown": "Not tested",
+      "valid": "Healthy",
+      "cooling": "Cooling down",
+      "quota": "Quota exhausted"
     },
     "coverage": "Coverage report",
     "coverageLine": "{{translated}}/{{total}} translated, {{flagged}} flagged",

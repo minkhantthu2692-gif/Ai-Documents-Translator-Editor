@@ -13,7 +13,7 @@
  *   compatibility_date = "2026-10-01"
  *   [vars]
  *   ALLOWED_ORIGIN = "http://localhost:5173"
- *   ASSISTANT_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
+ *   ASSISTANT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
  *
  * Deploy:
  *   npx wrangler secret put OPENROUTER_ASSISTANT_KEY   # server-side only, never in the browser
@@ -28,7 +28,7 @@
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const APP_REPO_URL = 'https://github.com/minkhantthu2692-gif/Ai-Documents-Translator-Editor'
 const APP_TITLE = 'AI Documents Translator Assistant'
-const DEFAULT_MODEL = 'meta-llama/llama-3.3-70b-instruct:free'
+const DEFAULT_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free'
 const DEFAULT_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173']
 const ACTION_KINDS = ['retry', 'config', 'data', 'navigation']
 const ASSISTANT_PATHS = ['/', '/assistant', '/ask']
@@ -311,7 +311,10 @@ async function requestCompletion(env, key, question, lang, contextJson, noFences
         { role: 'user', content: buildUserPrompt(question, lang, contextJson) },
       ],
       temperature: 0.2,
-      max_tokens: 700,
+      // Headroom for Burmese (poorly tokenized) JSON, and reasoning disabled so
+      // thinking tokens never eat the budget (they caused empty/truncated answers).
+      max_tokens: 2000,
+      reasoning: { enabled: false },
     }
 
     let response

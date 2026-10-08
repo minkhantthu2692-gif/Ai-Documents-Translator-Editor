@@ -45,7 +45,7 @@ curl http://127.0.0.1:8787/health
 | `OPENROUTER_ASSISTANT_KEY` | `proxy/.env` or `wrangler secret`  | Yes\*    | —                                                | OpenRouter API key. Server-side only. Never `VITE_`-prefixed, never committed. |
 | `PORT`                     | `proxy/.env`                       | No       | `8787`                                           | Port for `server.js`. On PaaS platforms this is provided by the host.  |
 | `ALLOWED_ORIGIN`           | `proxy/.env` or `wrangler [vars]`  | No       | `http://localhost:5173`                          | Extra CORS origins, comma-separated. `http://localhost:5173` and `http://127.0.0.1:5173` are always allowed. |
-| `ASSISTANT_MODEL`          | `proxy/.env` or `wrangler [vars]`  | No       | `meta-llama/llama-3.3-70b-instruct:free`         | OpenRouter model id (`:free` suffix = free tier).                       |
+| `ASSISTANT_MODEL`          | `proxy/.env` or `wrangler [vars]`  | No       | `nvidia/nemotron-3-super-120b-a12b:free`         | OpenRouter model id (`:free` suffix = free tier).                       |
 | `TRUST_PROXY`              | `proxy/.env` (`server.js` only)    | No       | `0`                                              | Number of trusted proxy hops. Set to `1` behind Render/Railway/Fly so per-IP rate limiting sees the real client IP. |
 
 \* Without a key the proxy still starts and answers `GET /health` with `hasKey:false`; every
@@ -92,7 +92,7 @@ curl http://127.0.0.1:8787/health
     "steps": ["Open the Jobs tab and cancel the stuck job.", "Reload the page to give the browser a fresh worker.", "Retry the translation with fewer pages per batch."],
     "actions": [{ "id": "retry-job", "label": "Retry the job", "kind": "retry" }]
   },
-  "model": "meta-llama/llama-3.3-70b-instruct:free"
+  "model": "nvidia/nemotron-3-super-120b-a12b:free"
 }
 ```
 

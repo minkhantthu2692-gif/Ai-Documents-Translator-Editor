@@ -188,7 +188,9 @@ export function AssistantDialog() {
               </section>
             ) : null}
 
-            {mode === 'offline' ? (
+            {/* 'empty-question' is not a fallback: the auto-ask on open simply
+                has nothing to send yet, so there is nothing to explain. */}
+            {mode === 'offline' && fallbackReason !== 'empty-question' ? (
               <p
                 className="rounded-md bg-surface-2 px-3 py-2 text-xs text-fg-muted"
                 data-testid="assistant-fallback"

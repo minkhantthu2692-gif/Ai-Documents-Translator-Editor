@@ -242,7 +242,7 @@ describe('assistant client', () => {
         }),
       ),
     )
-    const result = await askAssistant({ question: '', context: ctx(), lang: 'en' })
+    const result = await askAssistant({ question: 'sync failed', context: ctx(), lang: 'en' })
     expect(result.mode).toBe('offline')
     expect(result.fallbackReason).toBe('MISSING_KEY')
     expect(result.answer.title.length).toBeGreaterThan(0)
@@ -254,7 +254,7 @@ describe('assistant client', () => {
       'fetch',
       vi.fn().mockResolvedValue(new Response('<html>error</html>', { status: 200 })),
     )
-    const result = await askAssistant({ question: '', context: ctx(), lang: 'en' })
+    const result = await askAssistant({ question: 'sync failed', context: ctx(), lang: 'en' })
     expect(result.mode).toBe('offline')
     expect(result.fallbackReason).toMatch(/^network:/)
   })
@@ -262,15 +262,30 @@ describe('assistant client', () => {
   it('falls back offline on a network failure or abort', async () => {
     vi.stubEnv('VITE_ASSISTANT_PROXY_URL', 'https://p.example')
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')))
-    const first = await askAssistant({ question: '', context: ctx(), lang: 'en' })
+    const first = await askAssistant({ question: 'sync failed', context: ctx(), lang: 'en' })
     expect(first.mode).toBe('offline')
     expect(first.fallbackReason).toMatch(/^network:/)
 
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new DOMException('aborted', 'AbortError')))
-    const second = await askAssistant({ question: '', context: ctx(), lang: 'my' })
+    const second = await askAssistant({ question: 'sync failed', context: ctx(), lang: 'my' })
     expect(second.mode).toBe('offline')
     expect(second.fallbackReason).toBe('timeout')
     expect(MYANMAR_RE.test(second.answer.title)).toBe(true)
+  })
+
+  it('never sends a blank question to the proxy', async () => {
+    vi.stubEnv('VITE_ASSISTANT_PROXY_URL', 'https://p.example')
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    // The dialog auto-asks on open with an empty question — that must be
+    // answered locally instead of turning into a guaranteed proxy 400.
+    const result = await askAssistant({ question: '   ', context: ctx(), lang: 'en' })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(result.mode).toBe('offline')
+    expect(result.fallbackReason).toBe('empty-question')
+    expect(result.answer.title.length).toBeGreaterThan(0)
+    expect(result.answer.steps.length).toBeGreaterThan(0)
   })
 })
 

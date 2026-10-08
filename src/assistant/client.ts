@@ -166,6 +166,12 @@ export async function askAssistant(input: AskInput): Promise<AskResult> {
   const base = assistantProxyUrl()
   if (!base) return offline(input, 'proxy-not-configured')
 
+  // The dialog auto-asks on open, before the user has typed anything. The
+  // proxy contract requires a non-empty question and answers 400 otherwise —
+  // a guaranteed failure the browser logs as a console error — so an empty
+  // question is answered from the local rules without making a request.
+  if (!input.question.trim()) return offline(input, 'empty-question')
+
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS)
   try {

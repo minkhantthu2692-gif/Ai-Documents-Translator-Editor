@@ -1237,7 +1237,8 @@ try {
     ),
   )
 
-  // The dialog auto-asks on open; without a proxy the offline rules answer first.
+  // The dialog auto-asks on open; a blank question is answered by the local
+  // rules without ever reaching the proxy.
   const firstAnswer = await waitFor(
     `(() => { const el = document.querySelector('[data-testid="assistant-answer"]'); return el ? el.innerText.length : false })()`,
     25000,
@@ -1300,9 +1301,16 @@ try {
   )
 
   // 11) Console hygiene ---------------------------------------------------
-  const realErrors = consoleErrors.filter(
-    (e) => !/favicon|Failed to load resource: the server responded with a status of 404/.test(e),
-  )
+  // Tolerated noise: favicon/404 misses, and failed requests to the optional
+  // assistant proxy other than 400 — rate limits (429), upstream 5xx and
+  // network drops degrade to the offline rules by design. A 400 on the proxy
+  // means we sent it an invalid request (e.g. an empty question), which is a
+  // bug, so those still fail the run.
+  const realErrors = consoleErrors.filter((e) => {
+    if (/favicon|status of 404/.test(e)) return false
+    if (/\/assistant\b/.test(e)) return /status of 400/.test(e)
+    return true
+  })
   check(
     'no console/runtime errors',
     realErrors.length === 0,

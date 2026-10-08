@@ -6,11 +6,15 @@ import './index.css'
 import '@/i18n'
 import { App } from './App'
 import { applyPersistedLanguage, applyTheme, useUiStore } from '@/stores/uiStore'
+import { useImportedModelsStore } from '@/stores/importedModelsStore'
 import { logEvent } from '@/core/eventLogger'
 
 // Apply persisted preferences before the first paint.
 applyTheme(useUiStore.getState().theme)
 applyPersistedLanguage(useUiStore.getState().language)
+
+// Register imported models early so no model dropdown renders without them.
+void useImportedModelsStore.getState().ensureLoaded()
 
 // Deployed under a sub-path (GitHub Pages project site) → routes and the
 // service worker must resolve against the build's BASE_URL, not the root.

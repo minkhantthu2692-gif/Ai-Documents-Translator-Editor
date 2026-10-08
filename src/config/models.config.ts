@@ -506,20 +506,62 @@ export const FALLBACK_CHAINS: Record<ProviderId, string[]> = {
   openai: ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4.1', 'gpt-4-turbo', 'gpt-3.5-turbo'],
 }
 
-/** Models of one provider, recommended entries first. */
+/**
+ * Models the user imported from a live provider list (Settings → Available
+ * Models). Kept out of `MODELS` so the bundled fallback list — and the tests
+ * that pin it — stay untouched; `modelsFor` merges both so imported ids show
+ * up in every model dropdown.
+ *
+ * Deliberately *not* visible through `modelSpec()`: imported models have no
+ * known free-tier limits, so the quota gate reports PENDING and the rate
+ * limiter falls back to the app defaults — exactly what already happens for
+ * any id that is not in the bundled registry.
+ */
+let IMPORTED: ModelSpec[] = []
+
+/** Replaces the in-memory imported set (idempotent; called by the store). */
+export function registerImportedModels(specs: ModelSpec[]): void {
+  const bundled = new Set(MODELS.map((entry) => `${entry.provider}/${entry.id}`))
+  IMPORTED = specs.filter((entry) => !bundled.has(`${entry.provider}/${entry.id}`))
+}
+
+/** Snapshot of the imported set (a copy — never the live array). */
+export function importedModelSpecs(): ModelSpec[] {
+  return [...IMPORTED]
+}
+
+/** Models of one provider, recommended entries first (bundled + imported). */
 export function modelsFor(provider: ProviderId): ModelSpec[] {
-  return MODELS.filter((model) => model.provider === provider).sort(
-    (a, b) =>
-      Number(Boolean(b.recommendedForPdf)) - Number(Boolean(a.recommendedForPdf)) ||
-      rankTier(a.qualityTier) - rankTier(b.qualityTier),
-  )
+  return [...MODELS, ...IMPORTED]
+    .filter((model) => model.provider === provider)
+    .sort(
+      (a, b) =>
+        Number(Boolean(b.recommendedForPdf)) - Number(Boolean(a.recommendedForPdf)) ||
+        rankTier(a.qualityTier) - rankTier(b.qualityTier),
+    )
 }
 
 function rankTier(tier: QualityTier): number {
   return tier === 'basic' ? 0 : tier === 'standard' ? 1 : 2
 }
 
-/** Exact spec for a model id (fallback list lookup). */
+/** True when the id is part of the bundled fallback list for a provider. */
+export function isBundledModel(provider: ProviderId, model: string): boolean {
+  return MODELS.some((entry) => entry.provider === provider && entry.id === model)
+}
+
+/** True when the id exists for a provider (bundled **or** imported). */
+export function isKnownModel(provider: ProviderId, model: string): boolean {
+  return modelsFor(provider).some((entry) => entry.id === model)
+}
+
+/**
+ * Exact spec for a model id (bundled fallback list lookup).
+ *
+ * Bundled-only on purpose: an imported model has no known quota, and both
+ * consumers of this lookup (`freeTierLimits`, `limitsFor`) must treat an
+ * unknown id as "limits unknown / use defaults" rather than invent numbers.
+ */
 export function modelSpec(provider: ProviderId, model: string): ModelSpec | undefined {
   return MODELS.find((entry) => entry.provider === provider && entry.id === model)
 }

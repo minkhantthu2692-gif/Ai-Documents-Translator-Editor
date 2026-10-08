@@ -89,6 +89,12 @@ export interface DiscoveredModel {
   free: boolean
   /** The endpoint says this model can generate content (Gemini filter). */
   usable: boolean
+  /**
+   * Provider-reported abilities when the API exposes them — OpenRouter's
+   * input modalities and `supported_parameters` (reasoning/tools). Absent
+   * means the endpoint told us nothing, not that the model lacks them.
+   */
+  capabilities?: string[]
 }
 
 export type TestKind =

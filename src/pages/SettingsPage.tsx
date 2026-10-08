@@ -7,10 +7,11 @@ import { GeneralTab } from './settings/GeneralTab'
 import { CacheTab } from './settings/CacheTab'
 import { DataTab } from './settings/DataTab'
 import { ProvidersTab } from './settings/ProvidersTab'
+import { AvailableModelsTab } from './settings/AvailableModelsTab'
 import { AssistantTab } from './settings/AssistantTab'
 import { AboutTab } from './settings/AboutTab'
 
-const TAB_IDS = ['general', 'cache', 'data', 'providers', 'assistant', 'about'] as const
+const TAB_IDS = ['general', 'cache', 'data', 'providers', 'models', 'assistant', 'about'] as const
 type TabId = (typeof TAB_IDS)[number]
 
 function isTabId(value: string | null): value is TabId {
@@ -29,6 +30,7 @@ export function SettingsPage() {
       { id: 'cache', label: t('settings.tabs.cache'), content: <CacheTab /> },
       { id: 'data', label: t('settings.tabs.data'), content: <DataTab /> },
       { id: 'providers', label: t('settings.tabs.providers'), content: <ProvidersTab /> },
+      { id: 'models', label: t('settings.tabs.models'), content: <AvailableModelsTab /> },
       { id: 'assistant', label: t('settings.tabs.assistant'), content: <AssistantTab /> },
       { id: 'about', label: t('settings.tabs.about'), content: <AboutTab /> },
     ],

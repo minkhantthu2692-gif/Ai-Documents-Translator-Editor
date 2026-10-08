@@ -82,6 +82,22 @@ function modelsFromOpenAiList(body: unknown, baseUrl: string): DiscoveredModel[]
     .filter((model) => model.id.length > 0)
 }
 
+/** Abilities OpenRouter reports per model: input modalities + key parameters. */
+function capabilitiesOfOpenRouter(entry: Record<string, unknown>): string[] | undefined {
+  const architecture = entry.architecture as Record<string, unknown> | undefined
+  const modalities = Array.isArray(architecture?.input_modalities)
+    ? architecture.input_modalities
+    : []
+  const supported = Array.isArray(entry.supported_parameters) ? entry.supported_parameters : []
+  const has = (name: string) => supported.some((value) => value === name)
+  const capabilities = [
+    ...modalities.filter((value): value is string => typeof value === 'string' && value !== 'text'),
+    ...(has('reasoning') ? ['reasoning'] : []),
+    ...(has('tools') ? ['tools'] : []),
+  ]
+  return capabilities.length > 0 ? capabilities : undefined
+}
+
 function modelsFromOpenRouter(body: unknown): DiscoveredModel[] {
   const data = (body as { data?: unknown } | null)?.data
   if (!Array.isArray(data)) return []
@@ -102,6 +118,7 @@ function modelsFromOpenRouter(body: unknown): DiscoveredModel[] {
         contextWindow: context,
         free,
         usable: id.length > 0,
+        capabilities: capabilitiesOfOpenRouter(entry),
       }
     })
     .filter((model) => model.id.length > 0)

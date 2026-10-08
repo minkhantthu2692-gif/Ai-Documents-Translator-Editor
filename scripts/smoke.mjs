@@ -1300,6 +1300,60 @@ try {
     `cmds=${launcherCommands}`,
   )
 
+  // Settings — Available Models / Assistant tabs ---------------------------
+  await goto('/settings?tab=models')
+  const modelsTab = await waitFor(
+    `!!document.querySelector('[data-testid="available-models-tab"]')`,
+    15000,
+  )
+  check('Available Models tab renders', Boolean(modelsTab))
+
+  const filterControls = await evalJs(
+    `['models-search','models-filter'].filter(id => !!document.querySelector('[data-testid="' + id + '"]')).length`,
+  )
+  check(
+    'model search + provider filter present',
+    filterControls === 2,
+    `controls=${filterControls}/2`,
+  )
+
+  const defaultRows = await evalJs(
+    `document.querySelectorAll('[data-testid="default-models"] li').length`,
+  )
+  check('default model list shows bundled entries', defaultRows > 5, `rows=${defaultRows}`)
+
+  const providerStates = await evalJs(
+    `[...document.querySelectorAll('[data-testid^="models-provider-"]')].map(el => el.getAttribute('data-state'))`,
+  )
+  check(
+    'all four provider sections render',
+    Array.isArray(providerStates) && providerStates.length === 4,
+    JSON.stringify(providerStates),
+  )
+  check(
+    'provider fetch states are a valid enum',
+    Array.isArray(providerStates) &&
+      providerStates.every((s) =>
+        ['idle', 'loading', 'live', 'cached', 'no_key', 'error'].includes(s),
+      ),
+    JSON.stringify(providerStates),
+  )
+
+  // The profile carries a deliberately fake Gemini key, so the auto-fetch
+  // must settle into `live` or a graceful error state — never hang or crash.
+  const geminiSettled = await waitFor(
+    `['live','error','no_key','cached'].includes(document.querySelector('[data-testid="models-provider-gemini"]')?.getAttribute('data-state'))`,
+    25000,
+  )
+  check('gemini auto-fetch settles or degrades gracefully', Boolean(geminiSettled))
+
+  await goto('/settings?tab=assistant')
+  const assistantTab = await waitFor(
+    `!!document.querySelector('[data-testid="assistant-open"]')`,
+    15000,
+  )
+  check('Assistant tab renders', Boolean(assistantTab))
+
   // 11) Console hygiene ---------------------------------------------------
   // Tolerated noise: favicon/404 misses, and failed requests to the optional
   // assistant proxy other than 400 — rate limits (429), upstream 5xx and
@@ -1309,6 +1363,11 @@ try {
   const realErrors = consoleErrors.filter((e) => {
     if (/favicon|status of 404/.test(e)) return false
     if (/\/assistant\b/.test(e)) return /status of 400/.test(e)
+    // The smoke profile stores a deliberately fake Gemini key, and the
+    // Available Models tab fetches live model lists when it opens — Google's
+    // answer to that key (4xx, or an offline DNS drop) is expected. The
+    // graceful error state is what the tab checks above are asserting.
+    if (/generativelanguage\.googleapis\.com/.test(e)) return false
     return true
   })
   check(

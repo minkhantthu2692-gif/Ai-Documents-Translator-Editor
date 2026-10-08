@@ -26,6 +26,7 @@ import { getAdapter } from '@/providers'
 import { systemPrompt, temperatureFor, userPrompt } from '@/translate/prompts'
 import { validateResponse } from '@/translate/batchValidation'
 import { useTranslateStore } from '@/stores/translateStore'
+import { useImportedModelsStore } from '@/stores/importedModelsStore'
 import {
   cancelTranslate,
   pauseTranslate,
@@ -111,6 +112,10 @@ export function TranslatePage() {
     if (!projectId) return
     let cancelled = false
     void (async () => {
+      // Imported models must be registered before the stale-config heal
+      // below, or an imported id would read as unknown and get wiped.
+      await useImportedModelsStore.getState().ensureLoaded()
+      if (cancelled) return
       const [stored, provider, storedModel] = await Promise.all([
         settingsRepo.get<TranslateRunConfig | null>(configKey(projectId), null),
         settingsRepo.get<ProviderId>(SETTING_KEYS.provider, 'gemini'),

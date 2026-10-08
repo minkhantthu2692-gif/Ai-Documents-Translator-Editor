@@ -179,6 +179,30 @@ export interface CoverageReport {
   /** 0..100 average confidence over the translated lines. */
   qualityScore: number
   perPage: PageCoverage[]
+  /**
+   * Merge integrity for the same scope (Layer 7).
+   *
+   * "No missing or duplicated content" is *verified* here rather than assumed —
+   * recomputed from Dexie with the very rules that decided what to translate.
+   */
+  integrity: IntegrityReport
+}
+
+/**
+ * Layer 7 — what the merge actually produced, checked after the queue settles.
+ *
+ * Both lists are empty exactly when the document is whole. Any `missing` id is
+ * already `pending` in Dexie, so the next run re-plans and re-translates it
+ * automatically — this makes the gap *visible* instead of silent.
+ */
+export interface IntegrityReport {
+  ok: boolean
+  /** In-scope blocks counted in the plan (translated or not). */
+  checked: number
+  /** In-scope blocks that never received a translation. */
+  missing: string[]
+  /** Block ids that appeared in more than one batch (would cost the quota twice). */
+  duplicated: string[]
 }
 
 export interface PageCoverage {

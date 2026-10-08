@@ -18,6 +18,9 @@ import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
 import type { PageContentClass } from '@/db/types'
 import { detectLanguage } from '@/core/langDetect'
 import { ensureUnicode, zawgyiProbability } from '@/core/zawgyi'
+// Pure, dependency-free module — no layering problem reaching across to
+// `translate`, and it is the *same* estimator the run will use.
+import { estimateTokens } from '@/translate/tokenEstimate'
 import { classifyPage, coverageOf, emptyTally, type ContentTally } from './pageClassify'
 import { analyzeLayout, itemBoxesOf, type LayoutComplexity } from './layoutComplexity'
 import {
@@ -319,6 +322,15 @@ export interface ProbeSummary {
   /** Pages that need OCR before translation. */
   ocrNeededPages: number
   totalChars: number
+  /**
+   * Script-aware token estimate of the same text, measured with the estimator
+   * the translation run itself uses (`tokenEstimate.ts`).
+   *
+   * `totalChars` alone cannot drive a forecast: a Burmese character is worth
+   * several times an English one, so a character count under-forecasts a
+   * Myanmar document by roughly 3x.
+   */
+  totalTokens: number
   totalImages: number
   annotations: number
   formFields: number
@@ -371,6 +383,7 @@ export async function probeDocument(
 
   let sample = ''
   let totalChars = 0
+  let totalTokens = 0
   let totalImages = 0
   let annotations = 0
   let formFields = 0
@@ -428,6 +441,8 @@ export async function probeDocument(
 
     pageLines.push(lines)
     totalChars += charCount
+    // Measured here, where the text exists — the wizard only ever sees counts.
+    totalTokens += estimateTokens(pageText)
     totalImages += imageCount
     annotations += prepared.annotations.length
     formFields += formFieldCount
@@ -468,6 +483,7 @@ export async function probeDocument(
       textLayerPages: tally.text + tally.mixed + tally.complex,
       ocrNeededPages: tally.scanned,
       totalChars,
+      totalTokens,
       totalImages,
       annotations,
       formFields,

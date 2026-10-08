@@ -10,6 +10,7 @@
 
 import { blockRepo, pageRepo } from '@/db/repo-content'
 import type { BlockRecord } from '@/db/types'
+import { verifyDocumentIntegrity } from './integrity'
 import { classifyBlock } from './translateQueue'
 import type { CoverageReport, PageCoverage, TranslateRunConfig } from './types'
 
@@ -93,5 +94,8 @@ export async function buildCoverage(
     failed: Math.max(0, total - translated),
     qualityScore: scored > 0 ? Math.round((scoreSum / scored) * 100) : 0,
     perPage,
+    // "Nothing missing, nothing sent twice" is verified here rather than
+    // assumed — with the same scope rules that decided what to translate.
+    integrity: await verifyDocumentIntegrity(projectId, config),
   }
 }

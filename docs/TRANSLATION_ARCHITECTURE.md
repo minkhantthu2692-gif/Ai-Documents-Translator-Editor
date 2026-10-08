@@ -209,15 +209,23 @@ Long documents lose coherence when each request sees only ~25 lines. Mitigations
 
 **Why the ceiling is in tokens, not entries.** The glossary lives in the *system prompt*, and `promptOverheadTokens` is measured from the real `systemPrompt(...)` — so growth during a run would break the window invariant. The fill ratio uses only `FILL_RATIO` (85%) of the content budget, leaving 15% unused; learning is bounded to **10% of that same slack** (`ROLLING_GLOSSARY_SHARE`, capped in absolute terms at 512 tokens). `promptOverheadTokens + fillTargetTokens + maxOutputTokens ≤ contextWindow` therefore stays true however much a 350-page run picks up, and — because the budget is only *reserved* by the fill ratio, never re-measured — a run that learns nothing pays nothing for the feature.
 
-### Layer 7 — merge integrity verification
+### Layer 7 — merge integrity verification ✅ shipped (D2)
 
-The merge is already exactly-once per block (per-block writes + id-set validation + re-plan-from-state). Add an explicit end-of-run check so "missing or duplicated" is *verified*, not assumed:
+The merge is already exactly-once per block (per-block writes + id-set validation + re-plan-from-state). What was missing was a way to *see* that it held. `translate/integrity.ts` adds:
 
 ```ts
-verifyDocumentIntegrity(projectId): { ok, missing: BlockId[], duplicated: BlockId[] }
+verifyDocumentIntegrity(projectId, config): IntegrityReport
+// { ok, checked, missing: string[], duplicated: string[] }
 ```
 
-run after the queue reaches `done`, surfaced through the existing `CoverageReport`. Any `missing` id is automatically re-queued on the next run because it is still `pending` in Dexie — the invariant is already self-healing; this just makes it visible.
+The design decision is that "missing" and "duplicated" are **not** derived from a second, parallel notion of the document. The verifier simply **re-plans the project with the same `buildTranslatePlan` the run used**, then reads two things off the result:
+
+- every line still in a job is a block that never landed → `missing`;
+- any line id appearing in more than one job → `duplicated`.
+
+Re-run after the queue settles, the pending jobs are *exactly* the in-scope blocks that never received a translation, and the line ids are *exactly* what the run would send — so the report can never disagree with the queue about what counts as work, skip rules, locks, user edits and the image switch included. It is attached to `CoverageReport.integrity`, so the existing post-run panel gets it for free.
+
+Any `missing` id is automatically re-queued on the next run because it is still `pending` in Dexie — the invariant is self-healing; this makes the gap *visible*, and answers the only question the queue itself could not: "is this document actually whole?"
 
 ---
 
@@ -252,7 +260,7 @@ Each phase is independently shippable, gated by `tsc · eslint · prettier · vi
 | **A ✅ shipped** | `BudgetProfile` + script-aware estimator + calibration + the 429-quota classification fix | `translate/budget.ts`, `translate/tokenEstimate.ts`, `translate/batching.ts`, `providers/http.ts`, `translate/engine.ts`, `translate/translateQueue.ts`, `workers/translation.worker.ts` | Fixes the root cause. Largest accuracy gain, smallest blast radius. |
 | **B ✅ shipped** | Structure-aware chunker (logical units, heading/caption binding, oversized-line rescue) | `translate/batching.ts`, `translate/types.ts`, `translate/engine.ts` | Turns correct budgets into *well-formed* requests. |
 | **C ✅ shipped** | Context continuity (heading chain, terminology reseed on restore, rolling glossary) | `translate/prompts.ts`, `translate/translateQueue.ts`, `translate/types.ts`, `translate/terminology.ts`, `translate/rollingGlossary.ts` | Quality at scale, cheap. |
-| **D** | **D1 ✅ shipped** quota scope + daily token ledger · **D2 pending** forecast alignment + integrity verification | `config/models.config.ts`, `translate/keyPool.ts`, `translate/protocol.ts`, `db/types.ts`, `pdf/preflight.ts`, `translate/integrity.ts` | Makes multi-key honest and large runs observable. |
+| **D ✅ shipped** | Quota scope + daily token ledger, forecast alignment, integrity verification | `config/models.config.ts`, `translate/keyPool.ts`, `translate/protocol.ts`, `db/types.ts`, `pdf/pdfExtract.ts`, `pdf/preflight.ts`, `translate/integrity.ts`, `translate/coverage.ts` | Makes multi-key honest and large runs observable. |
 
 ### 5.1 Phase A — what shipped
 
@@ -292,8 +300,8 @@ by 2.05 because its review pass re-sends source **and** draft.
 
 **Deferred from the original Phase A list: `pdf/preflight.ts`.** Its
 `estimateTranslationWork` is handed a bare character count, so a script-aware
-estimate needs text it does not have; aligning the forecast with the budget
-belongs with the forecast UI in Phase D.
+estimate needs text it does not have — resolved in **Phase D** (§5.4), which
+measures the tokens in the analysis probe where the text still exists.
 
 **Explicitly out of scope as a "solution":** auto-switching OpenRouter→Groq, and
 Local AI. Both stay available as user-selectable options; neither is load-bearing
@@ -415,4 +423,58 @@ longer.
 any of the resume invariants. Learned glossary entries are **in-memory for the
 run's lifetime** — persisting them would write into the user's own glossary
 table, and they are re-learned within a handful of batches after a restart.
+
+### 5.4 Phase D — what shipped
+
+Phases A–C made the requests well formed and mutually coherent. Phase D makes
+the **accounting** honest — the scheduler now knows what the provider will
+actually allow, and the user can verify what the run actually produced.
+
+**Quota scope** (`ModelSpec.quotaScope`, `translate/keyPool.ts`). The pool used
+to give every key its own `rpm`/`tpm`/`rpd` buckets, which is true for Google
+AI Studio keys (per project) and OpenRouter keys (per account) — and false for
+Groq, whose free tier is organisation-scoped. Two Groq keys were therefore
+scheduled against 2K requests and 16K tpm of a budget that is really 1K and 8K.
+Under `'per-provider'` every key is handed the **same bucket objects**, so the
+allowance is counted once. `configureLimits` re-points the keys when the scope
+flips on, and seeding a shared set takes the *widest* key state, so switching a
+per-key pool into provider scope can never under-count what the org has already
+spent. The second key buys failover, not quota — and the provider card now says
+so rather than letting the user find out at request 1,001.
+
+**Daily token ledger** (`KeyBuckets.tpd`). Groq publishes a 200K/day token
+allowance the pool ignored entirely: a large document could spend its whole day
+budget while the request counter still looked healthy. `tpd` is now checked in
+`hasCapacity`, rolled in `consume`, exposed as `tpdRemaining` and persisted.
+`limit === 0` means *unknown*, never zero — an unknown daily allowance blocks
+nothing. Records written before the ledger shipped restore cleanly.
+
+**Forecast alignment** (`pdf/pdfExtract.ts`, `pdf/preflight.ts`). This is the
+item Phase A deferred: `estimateTranslationWork` was handed a bare character
+count, and `chars / 3.5` under-forecasts a Myanmar document by roughly **3×**,
+because a Burmese character is worth several times an English one. With the
+daily ledger now actually enforcing the token budget, a 3×-optimistic forecast
+becomes a run that stops half-way. The fix measures the tokens in the *analysis
+probe*, where the text still exists (`ProbeSummary.totalTokens`, via the same
+`estimateTokens` the run will use), and the wizard passes it through. The
+request and time estimates are deliberately unchanged — they are block-count
+heuristics, and the token fix is about the quota comparison the ledger enforces.
+
+**Integrity verification** (`translate/integrity.ts`, Layer 7). Rather than
+maintain a second notion of the document, the verifier **re-plans with the same
+`buildTranslatePlan`** and reads two facts off the result: lines still in a job
+are blocks that never landed (`missing`), and an id appearing in more than one
+job is a duplicate (`duplicated`). Attached to `CoverageReport.integrity`, so the
+existing post-run panel gets it without new wiring.
+
+**What Phase D did not change:** selection preference order (capacity-fit →
+`least-used`/round-robin → earliest-available), single-key sufficiency, or
+`startTranslate`'s acceptance of exactly one key. Nothing in the design requires
+a second key — with one key the pool is a degenerate case of the same algorithm.
+
+**Known limitation:** `per-provider` shares *every* bucket, including rpm. Groq
+does publish rpm at the org level so this matches reality there, but a provider
+that allowed extra per-key parallelism would be scheduled more patiently than
+strictly necessary. That is the conservative direction — it costs throughput,
+never correctness.
 

@@ -228,4 +228,35 @@ describe('estimateTranslationWork', () => {
     expect(estimateTranslationWork(0, 0).requests).toBe(1)
     expect(estimateTranslationWork(1, 1).tokensIn).toBeGreaterThan(0)
   })
+
+  it('prefers a measured token count over the character fallback', () => {
+    // The same Burmese characters are worth several times what `chars / 3.5`
+    // assumes — and the daily token ledger now enforces that budget, so a
+    // 3x-optimistic forecast turns into a run that stops half-way.
+    const measured = estimateTranslationWork(350, 10, 300)
+    const guessed = estimateTranslationWork(350, 10)
+
+    expect(measured.tokensIn).toBe(300)
+    expect(measured.tokensIn).toBeGreaterThan(guessed.tokensIn)
+    expect(measured.tokensOut).toBe(375)
+  })
+
+  it('falls back to the character estimate when the measured one is unusable', () => {
+    expect(estimateTranslationWork(350, 10, 0).tokensIn).toBe(100)
+    expect(estimateTranslationWork(350, 10, -5).tokensIn).toBe(100)
+    expect(estimateTranslationWork(350, 10, Number.NaN).tokensIn).toBe(100)
+  })
+
+  it('rounds a fractional measured count up', () => {
+    expect(estimateTranslationWork(350, 10, 10.2).tokensIn).toBe(11)
+  })
+
+  it('the request and time estimates are unchanged by the token count', () => {
+    // Request count is a block-count heuristic; the token fix is about the
+    // *quota* comparison, which is what the ledger actually enforces.
+    const a = estimateTranslationWork(3500, 100)
+    const b = estimateTranslationWork(3500, 100, 5_000)
+    expect(b.requests).toBe(a.requests)
+    expect(b.seconds).toBe(a.seconds)
+  })
 })

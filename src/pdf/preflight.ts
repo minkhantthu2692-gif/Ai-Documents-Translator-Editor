@@ -123,19 +123,41 @@ const BUNDLED_FONT_TARGETS: Record<string, string> = {
 }
 
 /**
- * Blocks-per-request heuristic used for the token/request/time estimate.
- * Matches the batching the translation job will use in Phase 3.
+ * Blocks-per-request heuristic used for the request/time estimate. The real
+ * packer sizes batches from the model's budget, but 15 is the right order of
+ * magnitude for the bundled models' `maxLines` — and the estimate errs high,
+ * never low.
  */
 export const BATCH_BLOCKS = 15
 export const AVG_REQUEST_SECONDS = 2.5
 
-export function estimateTranslationWork(characterCount: number, blockCount: number): QuotaEstimate {
+/** The old flat assumption, kept for callers with no text to measure. */
+const CHARS_PER_TOKEN = 3.5
+
+export function estimateTranslationWork(
+  characterCount: number,
+  blockCount: number,
+  /**
+   * Script-aware token estimate of the source, measured with the same
+   * `estimateTokens` the run itself uses. Preferred over the character
+   * fallback: a Burmese character is worth several times an English one, so
+   * `chars / 3.5` under-forecasts a Myanmar document by roughly 3x — and the
+   * daily token ledger (Layer 5) now actually enforces that budget, so a
+   * forecast that is 3x optimistic turns into a run that stops half-way.
+   */
+  tokensIn?: number,
+): QuotaEstimate {
   const chars = Math.max(0, characterCount)
-  const tokensIn = Math.max(1, Math.ceil(chars / 3.5))
-  const tokensOut = Math.max(1, Math.ceil(tokensIn * 1.25))
+  const sourceTokens =
+    typeof tokensIn === 'number' && Number.isFinite(tokensIn) && tokensIn > 0
+      ? Math.ceil(tokensIn)
+      : Math.max(1, Math.ceil(chars / CHARS_PER_TOKEN))
+  // EN→MY tends to grow slightly; 1.25 sits between a literal and a generous
+  // rendering of the same content.
+  const tokensOut = Math.max(1, Math.ceil(sourceTokens * 1.25))
   const requests = Math.max(1, Math.ceil(blockCount / BATCH_BLOCKS))
   const seconds = Math.round((requests * AVG_REQUEST_SECONDS + chars / 400) * 10) / 10
-  return { tokensIn, tokensOut, requests, seconds }
+  return { tokensIn: sourceTokens, tokensOut, requests, seconds }
 }
 
 function fileCheck(files: PreflightFileState[]): PreflightCheck {

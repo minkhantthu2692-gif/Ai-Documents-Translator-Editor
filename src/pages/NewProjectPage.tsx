@@ -587,13 +587,17 @@ export function NewProjectPage() {
 
   const estimate = useMemo(() => {
     let characters = 0
+    let tokens = 0
     let blocks = 0
     for (const file of files) {
       if (!file.probe) continue
       characters += file.probe.summary.totalChars
+      tokens += file.probe.summary.totalTokens
       blocks += file.probe.probes.reduce((sum, page) => sum + page.lineCount, 0)
     }
-    return estimateTranslationWork(characters, blocks)
+    // The measured count is what the run will actually be billed against;
+    // falling back to `chars / 3.5` under-forecasts Burmese by roughly 3x.
+    return estimateTranslationWork(characters, blocks, tokens)
   }, [files])
 
   /** Real provider state: which key/provider/model the wizard pre-flight uses. */

@@ -25,6 +25,7 @@ function batchOf(ids: string[] = WANTED): TranslationBatch {
       pageIndex: 0,
       order: index,
       listMarker: null,
+      kind: 'paragraph' as const,
       placeholders: [],
     })),
   }

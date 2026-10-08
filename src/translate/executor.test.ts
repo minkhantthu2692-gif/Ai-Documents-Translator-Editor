@@ -43,6 +43,7 @@ function lines(count: number): BatchLine[] {
     pageIndex: 0,
     order: index,
     listMarker: null,
+    kind: 'paragraph' as const,
     placeholders: [],
   }))
 }

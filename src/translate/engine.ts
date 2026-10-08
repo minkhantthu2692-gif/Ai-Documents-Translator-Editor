@@ -5,7 +5,8 @@
  *
  *   build prompts → executor (key rotation, 429 handling, model fallback)
  *     → strict validation
- *       → on failure: halve the batch → line-by-line → keep the original
+ *       → on failure: halve the batch → line-by-line → split the offending line
+ *         along its own structure → keep the original
  *     → (High) review pass over the same ids
  *     → post-processing: restore `{{n}}` placeholders, enforce the glossary,
  *       normalise `TranslatedTerm(OriginalTerm)`, keep original when unusable
@@ -21,7 +22,7 @@
 
 import { missingPlaceholders, restorePlaceholders } from '@/pdf/placeholders'
 import type { TranslateCall } from '@/providers/types'
-import { splitBatch, splitToLines } from './batching'
+import { splitBatch, splitLineForRetry, splitToLines, type LineSplit } from './batching'
 import { fallbackBudget, maxOutputFor, type BudgetProfile } from './budget'
 import { validateResponse, type Validation } from './batchValidation'
 import { executeWithRotation, type BatchTransport, type ExecutorHooks } from './executor'
@@ -112,6 +113,42 @@ function stronger(a: TranslationFlag | null, b: TranslationFlag | null): Transla
   if (a === null) return b
   if (b === null) return a
   return FLAG_PRIORITY.indexOf(a) <= FLAG_PRIORITY.indexOf(b) ? a : b
+}
+
+/**
+ * Collapses fragment results back into the one line the caller expects.
+ *
+ * Fragments carry derived ids (`parent#s0`, `parent#s1`, …) that exist only so
+ * the strict validator can tell them apart; nothing downstream — review,
+ * post-processing, `persistLines` — may ever see them. They are therefore
+ * rejoined here, in order, before the ladder hands its result over.
+ *
+ * Confidence is the weakest of the parts and the strongest flag wins, so a
+ * fragment that kept its source drags the whole line down: one output per input
+ * id stays true, and the line is honestly all-or-nothing.
+ */
+function reassemble(fragments: BatchResultLine[], split: LineSplit): BatchResultLine[] {
+  if (fragments.length === 0) {
+    return [
+      { id: split.parent.id, text: split.parent.text, confidence: 0.2, flag: 'kept-original' },
+    ]
+  }
+
+  let confidence = 1
+  let flag: TranslationFlag | null = null
+  for (const fragment of fragments) {
+    confidence = Math.min(confidence, fragment.confidence)
+    flag = stronger(flag, fragment.flag)
+  }
+
+  return [
+    {
+      id: split.parent.id,
+      text: fragments.map((fragment) => fragment.text).join(split.separator),
+      confidence,
+      flag,
+    },
+  ]
 }
 
 export async function runBatch(
@@ -206,7 +243,7 @@ export async function runBatch(
     return validateResponse(outcome.text, target)
   }
 
-  /** Try → halve → line-by-line → keep the original. Always ordered. */
+  /** Try → halve → line-by-line → split the line → keep the original. Ordered. */
   async function ladder(target: TranslationBatch, depth: number): Promise<LadderResult> {
     const validation = await attempt(target, false)
     if (validation.ok) {
@@ -244,12 +281,27 @@ export async function runBatch(
       }
     }
 
-    // Single line: one more try with the repair instruction, then keep it.
+    // Single line: one more try with the repair instruction, then — if the line
+    // has structure to cut along — the fragments, then keep it.
     if (target.lines.length === 1) {
       const repaired = await attempt(target, true)
       if (repaired.ok) {
         return { lines: repaired.lines, retried: true, gaveUp: false }
       }
+
+      const split = splitLineForRetry(target)
+      if (split) {
+        // Exactly one rescue at fragment level, and no deeper. The fragments
+        // are already the smallest useful pieces; letting them fall through to
+        // the line-by-line rung would cost two requests *per row* of a big
+        // table — a free tier's whole day burned on a line that is going to be
+        // kept anyway. One try: the smaller request is usually the point.
+        const rescued = await attempt(split.batch, false)
+        if (rescued.ok) {
+          return { lines: reassemble(rescued.lines, split), retried: true, gaveUp: false }
+        }
+      }
+
       const line = target.lines[0]
       return {
         lines: [

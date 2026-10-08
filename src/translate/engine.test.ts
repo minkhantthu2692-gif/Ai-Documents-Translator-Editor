@@ -32,7 +32,15 @@ function makePool(): KeyPool {
 }
 
 function line(id: string, text: string, placeholders: Placeholder[] = []): BatchLine {
-  return { id, text, pageIndex: 0, order: 0, listMarker: null, placeholders }
+  return {
+    id,
+    text,
+    pageIndex: 0,
+    order: 0,
+    listMarker: null,
+    kind: 'paragraph',
+    placeholders,
+  }
 }
 
 function batchOf(lines: BatchLine[], id = 'proj#1#0#0'): TranslationBatch {
@@ -135,6 +143,62 @@ describe('retry ladder on a hopeless response', () => {
     expect(result.lines.every((entry) => entry.confidence > 0 && entry.confidence <= 0.2)).toBe(
       true,
     )
+  })
+})
+
+describe('retry ladder on one line that has structure to cut along', () => {
+  const prose = 'First one is done. Second one is done. Third one is done.'
+
+  it('splits it at its sentence boundaries and rejoins under the original id', async () => {
+    const batch = batchOf([line('b1', prose)])
+    const transport: BatchTransport = async ({ call }) => {
+      // The whole-line attempt and the repair attempt both come back as prose;
+      // only the derived fragment ids get a valid answer.
+      if (idsIn(call.user).join() === 'b1') return ok('I am afraid I cannot produce JSON today.')
+      return ok(answer(call.user, (id) => `T:${id}`))
+    }
+
+    const result = await runBatch(batch, engineOptions({ transport }))
+
+    // The queue persists by `line.id`, so the fragments must never escape.
+    expect(result.lines).toHaveLength(1)
+    expect(result.lines[0].id).toBe('b1')
+    expect(result.lines[0].text).toBe('T:b1#s0 T:b1#s1 T:b1#s2')
+    expect(result.lines[0].flag).toBe('retried')
+    expect(result.lines[0].confidence).toBeCloseTo(0.9, 3)
+    // attempt → repair → fragments
+    expect(result.requests).toBe(3)
+  })
+
+  it('still keeps the original when there is nothing to split', async () => {
+    const source = 'no sentence ends here'
+    const batch = batchOf([line('b1', source)])
+    const transport: BatchTransport = async () => ok('I am afraid I cannot produce JSON today.')
+
+    const result = await runBatch(batch, engineOptions({ transport }))
+
+    expect(result.lines).toHaveLength(1)
+    expect(result.lines[0].id).toBe('b1')
+    expect(result.lines[0].text).toBe(source)
+    expect(result.lines[0].flag).toBe('kept-original')
+    // attempt → repair; the split offers nothing, so the terminal runs unchanged
+    expect(result.requests).toBe(2)
+  })
+
+  it('does not split below the fragment step — one rescue, then the terminal', async () => {
+    const batch = batchOf([line('b1', prose)])
+    const seen: number[] = []
+    const transport: BatchTransport = async ({ call }) => {
+      seen.push(idsIn(call.user).length)
+      return ok('I am afraid I cannot produce JSON today.')
+    }
+
+    const result = await runBatch(batch, engineOptions({ transport }))
+
+    // whole → repair → three fragments (never re-split, never re-recursed)
+    expect(seen).toEqual([1, 1, 3])
+    expect(result.lines[0].flag).toBe('kept-original')
+    expect(result.lines[0].text).toBe(prose)
   })
 })
 

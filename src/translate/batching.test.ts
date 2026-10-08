@@ -1,10 +1,20 @@
 /**
- * Batch construction: sizes, derived ids and a stable order.
+ * Batch construction: sizes, derived ids, a stable order — and the structure
+ * rules that decide where a batch is allowed to end.
  */
 import { describe, expect, it } from 'vitest'
-import { BATCH_DEFAULTS, buildBatches, countLines, splitBatch, splitToLines } from './batching'
+import type { Placeholder } from '@/pdf/placeholders'
+import {
+  BATCH_DEFAULTS,
+  buildBatches,
+  buildUnits,
+  countLines,
+  splitBatch,
+  splitLineForRetry,
+  splitToLines,
+} from './batching'
 import { estimateTokens } from './tokenEstimate'
-import type { BatchLine } from './types'
+import type { BatchLine, TranslationBatch } from './types'
 
 const EPOCH = 1_700_000_000_000
 /** Historic soft minimum — batches are still at least this big when they fit. */
@@ -17,6 +27,20 @@ function lines(count: number, chars = 12): BatchLine[] {
     pageIndex: 0,
     order: index,
     listMarker: null,
+    kind: 'paragraph' as const,
+    placeholders: [],
+  }))
+}
+
+/** Same shape as `lines`, but with an explicit per-line structure. */
+function structured(kinds: Array<BatchLine['kind']>): BatchLine[] {
+  return kinds.map((kind, index) => ({
+    id: `blk_${index}`,
+    text: `${kind} ${index}`,
+    pageIndex: 0,
+    order: index,
+    listMarker: kind === 'list' ? '•' : null,
+    kind,
     placeholders: [],
   }))
 }
@@ -104,6 +128,206 @@ describe('buildBatches', () => {
     const batches = buildBatches('proj', EPOCH, 0, lines(9))
     expect(batches).toHaveLength(1)
     expect(batches[0].id).toBe(`proj#${EPOCH}#0#0`)
+  })
+})
+
+describe('buildUnits — where a batch is allowed to end', () => {
+  it('binds a heading forward and a caption backward, everything else alone', () => {
+    const units = buildUnits(
+      structured(['paragraph', 'heading', 'paragraph', 'table', 'table', 'caption']),
+    )
+
+    expect(units.map((unit) => unit.map((line) => line.kind))).toEqual([
+      ['paragraph'],
+      ['heading', 'paragraph'],
+      ['table', 'table', 'caption'],
+    ])
+    // Units are a regrouping, never a reorder.
+    expect(units.flat().map((line) => line.id)).toEqual([
+      'blk_0',
+      'blk_1',
+      'blk_2',
+      'blk_3',
+      'blk_4',
+      'blk_5',
+    ])
+  })
+
+  it('leaves consecutive ordinary paragraphs as their own units', () => {
+    expect(buildUnits(lines(4))).toHaveLength(4)
+    expect(buildUnits([])).toEqual([])
+  })
+})
+
+describe('structure-aware packing', () => {
+  it('never strands a heading at the end of a batch — it travels with its body', () => {
+    // Three lines a batch: without units the heading would open batch 0 and be
+    // left trailing it, so batch 1 would be translated without its section title.
+    const source = structured(['paragraph', 'paragraph', 'heading', 'paragraph'])
+    const batches = buildBatches('proj', EPOCH, 0, source, { maxLines: 3 })
+
+    expect(batches.map((batch) => batch.lines.map((line) => line.kind))).toEqual([
+      ['paragraph', 'paragraph'],
+      ['heading', 'paragraph'],
+    ])
+    expect(batches.flatMap((batch) => batch.lines.map((line) => line.id))).toEqual(
+      source.map((line) => line.id),
+    )
+  })
+
+  it('keeps a caption with the figure it labels instead of opening a batch', () => {
+    const source = structured(['paragraph', 'caption', 'paragraph'])
+    const batches = buildBatches('proj', EPOCH, 0, source, { maxLines: 2 })
+
+    expect(batches.map((batch) => batch.lines.map((line) => line.kind))).toEqual([
+      ['paragraph', 'caption'],
+      ['paragraph'],
+    ])
+  })
+
+  it('keeps a run of table rows together, cutting only between rows', () => {
+    const source = structured(['paragraph', 'table', 'table', 'table'])
+    const batches = buildBatches('proj', EPOCH, 0, source, { maxLines: 2 })
+
+    // Without units this would be [paragraph, table] / [table, table] — the run
+    // cut open. Now the lone paragraph pays for keeping the table intact.
+    expect(batches.map((batch) => batch.lines.map((line) => line.kind))).toEqual([
+      ['paragraph'],
+      ['table', 'table'],
+      ['table'],
+    ])
+    expect(batches.flatMap((batch) => batch.lines.map((line) => line.id))).toEqual(
+      source.map((line) => line.id),
+    )
+  })
+
+  it('keeps list items together as one run', () => {
+    const source = structured(['list', 'list', 'list', 'list'])
+    const batches = buildBatches('proj', EPOCH, 0, source, { maxLines: 3 })
+
+    expect(batches.map((batch) => batch.lines.length)).toEqual([3, 1])
+    expect(batches[0].lines.every((line) => line.kind === 'list')).toBe(true)
+  })
+
+  it('subdivides a unit that cannot fit, never pushing a batch past the budget', () => {
+    // Four table rows of ~500 tokens each into a 1200-token budget: the run is
+    // cut between rows, and no batch overshoots.
+    const source = Array.from({ length: 4 }, (_, index) => ({
+      id: `row_${index}`,
+      text: 'cell '.repeat(300),
+      pageIndex: 0,
+      order: index,
+      listMarker: null,
+      kind: 'table' as const,
+      placeholders: [],
+    }))
+    const batches = buildBatches('proj', EPOCH, 0, source, { maxTokens: 1200 })
+
+    expect(batches.map((batch) => batch.lines.length)).toEqual([2, 2])
+    for (const batch of batches) {
+      expect(batch.tokens).toBeLessThanOrEqual(1200)
+      expect(batch.lines.every((line) => line.kind === 'table')).toBe(true)
+    }
+    expect(batches.flatMap((batch) => batch.lines.map((line) => line.id))).toEqual(
+      source.map((line) => line.id),
+    )
+  })
+
+  it('still honours the token budget for ordinary prose mixed with structure', () => {
+    const source = structured([
+      'heading',
+      'paragraph',
+      'paragraph',
+      'paragraph',
+      'paragraph',
+      'paragraph',
+    ])
+    const perLine = estimateTokens('paragraph 1')
+    const maxTokens = perLine * 2
+    const batches = buildBatches('proj', EPOCH, 0, source, { maxTokens, maxLines: 25 })
+
+    for (const batch of batches) expect(batch.tokens).toBeLessThanOrEqual(maxTokens)
+    expect(batches.flatMap((batch) => batch.lines.map((line) => line.id))).toEqual(
+      source.map((line) => line.id),
+    )
+    // The heading still leads the batch that carries its body.
+    expect(batches[0].lines[0].kind).toBe('heading')
+  })
+})
+
+describe('splitLineForRetry (the last resort for one line)', () => {
+  function single(
+    kind: BatchLine['kind'],
+    text: string,
+    placeholders: Placeholder[] = [],
+  ): TranslationBatch {
+    return {
+      id: 'proj#1#0#0',
+      pageIndex: 0,
+      index: 0,
+      tokens: estimateTokens(text),
+      lines: [{ id: 'blk_0', text, pageIndex: 0, order: 0, listMarker: null, kind, placeholders }],
+    }
+  }
+
+  it('cuts prose at sentence boundaries, keeping each terminator with its sentence', () => {
+    const split = splitLineForRetry(single('paragraph', 'One is done. Two is done. Three is done.'))
+
+    expect(split?.separator).toBe(' ')
+    expect(split?.lines.map((entry) => entry.text)).toEqual([
+      'One is done.',
+      'Two is done.',
+      'Three is done.',
+    ])
+    expect(split?.lines.map((entry) => entry.id)).toEqual(['blk_0#s0', 'blk_0#s1', 'blk_0#s2'])
+    expect(split?.parent.id).toBe('blk_0')
+    expect(split?.batch.id).toBe('proj#1#0#0#s')
+    expect(split?.batch.lines).toHaveLength(3)
+    expect(split?.lines.every((entry) => entry.kind === 'paragraph')).toBe(true)
+  })
+
+  it('splits a table at row boundaries and rejoins with a newline', () => {
+    const split = splitLineForRetry(single('table', 'a | b\nc | d\ne | f'))
+
+    expect(split?.separator).toBe('\n')
+    expect(split?.lines.map((entry) => entry.text)).toEqual(['a | b', 'c | d', 'e | f'])
+    expect(split?.lines.map((entry) => entry.kind)).toEqual(['table', 'table', 'table'])
+  })
+
+  it('splits a list at item boundaries', () => {
+    const split = splitLineForRetry(single('list', 'first item\nsecond item'))
+    expect(split?.separator).toBe('\n')
+    expect(split?.lines.map((entry) => entry.text)).toEqual(['first item', 'second item'])
+  })
+
+  it('returns null for a line that has nothing to cut', () => {
+    // These are the terminal cases the ladder already handled by keeping the
+    // source text — the split must not change their behaviour.
+    expect(splitLineForRetry(single('paragraph', 'no sentence ends here'))).toBeNull()
+    expect(splitLineForRetry(single('paragraph', 'Just one sentence.'))).toBeNull()
+    expect(splitLineForRetry(single('paragraph', ''))).toBeNull()
+    expect(splitLineForRetry(single('table', 'only one row'))).toBeNull()
+    expect(splitLineForRetry(single('list', 'only one item'))).toBeNull()
+  })
+
+  it('is rejected outright for anything but a single-line batch', () => {
+    const [batch] = buildBatches('proj', EPOCH, 0, lines(3))
+    expect(splitLineForRetry(batch)).toBeNull()
+  })
+
+  it('keeps only the placeholders that live in each fragment', () => {
+    const placeholders: Placeholder[] = [
+      { token: '{{0}}', kind: 'existing', original: 'Alpha' },
+      { token: '{{1}}', kind: 'existing', original: 'Beta' },
+    ]
+    const split = splitLineForRetry(
+      single('paragraph', 'Keep {{0}} here. Keep {{1}} there.', placeholders),
+    )
+
+    expect(split?.lines.map((entry) => entry.placeholders.map((p) => p.token))).toEqual([
+      ['{{0}}'],
+      ['{{1}}'],
+    ])
   })
 })
 

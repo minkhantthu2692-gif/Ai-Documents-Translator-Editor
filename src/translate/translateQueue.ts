@@ -173,6 +173,7 @@ function toLine(block: BlockRecord): BatchLine {
     pageIndex: 0,
     order: block.order,
     listMarker: block.listMarker,
+    kind: block.kind,
     placeholders: block.placeholders,
   }
 }

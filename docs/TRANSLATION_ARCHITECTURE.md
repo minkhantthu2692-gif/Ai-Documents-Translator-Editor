@@ -1,8 +1,9 @@
 # Large-Document Translation Architecture
 
-**Status:** Phase A is **implemented and shipped** (§5.1). Phases B → D are design
-only. Nothing in any phase makes a provider switch or a local LLM load-bearing —
-chunking, queueing, retrying and key scheduling are the mechanism.
+**Status:** Phases **A** (§5.1) and **B** (§5.2) are **implemented and shipped**.
+Phases C and D are design only. Nothing in any phase makes a provider switch or a
+local LLM load-bearing — chunking, queueing, retrying and key scheduling are the
+mechanism.
 **Scope:** how a large document is split, budgeted, scheduled, retried and re-merged.
 **Non-goals:** switching provider/model as a *solution* to size, or requiring a local LLM. Those remain optional *user choices*, never the mechanism that makes a large file work.
 
@@ -18,14 +19,14 @@ The pipeline is already structurally sound. These parts are **not** the problem 
 | Idempotent resume | `translateQueue.ts:928-960` (`restoreTranslate`) | Re-plans from **Dexie block state**, not the snapshot. `classifyBlock` (158-165) drops `translated`/`edited`, so re-running never re-translates. Restart-safe by construction. |
 | Per-block merge | `translateQueue.ts:484-545` (`persistLines`) | Writes `block.translatedText` per block. The block row *is* the merged document — there is no separate document-merge step that can lose or duplicate content. |
 | Response validation | `translate/batchValidation.ts:129-177` | Count → shape → **order-independent FNV-1a checksum** → exact id set → non-empty. Output is rebuilt in *input* order; model output order is never trusted. |
-| Retry ladder | `translate/engine.ts:181-248` | full batch → halve → per-line → single-line repair → keep source at `confidence 0.2` / `kept-original`. Never loses a line. |
+| Retry ladder | `translate/engine.ts:246-333` | full batch → halve → per-line → single-line repair → **split the line at its own sentence/row boundaries** → keep source at `confidence 0.2` / `kept-original`. Never loses a line. |
 | Key pool | `translate/keyPool.ts` | rpm/tpm/rpd sliding buckets, `Retry-After` honoured, exponential backoff ±25% jitter, quota → 1 h, invalid keys removed, live headers override estimates, state persisted + rehydrated on restart. |
 | Multi-key rotation | `translate/executor.ts:151-273` | Rotates on 429/5xx/timeout, advances the model chain on 404, waits when all keys cool, gives up after 30 consecutive failures. |
 | Concurrency | `translate/concurrency.ts` | AIMD 1↔3 with per-page mutex — already adapts to error rate. |
 
 The problem is **not** "we cannot process a large document". The problem is that **the size of each request is guessed, not computed**, and the guess is wrong in a way that compounds.
 
-> **Status:** root causes **A** (§1.1) and **B** (§1.2) are fixed as of Phase A (§5.1). Root cause **C** (§1.3) is half fixed — the budget is now model-derived and hard, but the chunker is still line-based and structure-blind (Phase B).
+> **Status:** root causes **A** (§1.1) and **B** (§1.2) are fixed as of Phase A (§5.1). Root cause **C** (§1.3) is now fixed as of Phase B (§5.2) — the budget is model-derived and hard, and the packer works in structural units. Only the thin neighbour window remains (Phase C).
 
 ### 1.1 Root cause A — the token estimate is script-blind
 
@@ -69,8 +70,8 @@ Phase A replaced the flat constant with the model's real budget and made it a
 *hard* budget; the rest of this list is still open:
 
 - `minLines: 15` was a **floor consulted before the token budget**, so a page of long lines could push a batch far past budget — **fixed in Phase A** (§5.1);
-- a single oversized line is never split (no per-line path in `buildBatches`) — **open, Phase B**;
-- `BlockKind` (`heading | paragraph | list | table | caption | shape`, `db/types.ts:88`) is **never consulted** — a table is split at an arbitrary line boundary and a heading can be stranded at the end of a batch — **open, Phase B**;
+- a single oversized line had no path at all: if the model answered it badly the line silently kept its source text — **fixed in Phase B** (§5.2), which cuts it at sentence/row boundaries in the ladder's last resort;
+- `BlockKind` (`heading | paragraph | list | table | caption | shape`, `db/types.ts:88`) was **never consulted** — a table was split at an arbitrary line boundary and a heading could be stranded at the end of a batch — **fixed in Phase B** (§5.2);
 - only **one** neighbour line is passed as context (`translateQueue.ts:258-264`, `prompts.ts:141-146`), which is thin for consistency over hundreds of pages — **open, Phase C**.
 
 ### 1.4 The second direction of the size problem
@@ -149,21 +150,22 @@ This is self-correcting within a handful of requests regardless of language, so 
 - **never scale down below the static weight** (a bad early sample can't inflate batches);
 - if the observed ratio stays pinned at the clamp for 3 consecutive batches, the run flags `LOW_TOKEN_CONFIDENCE` and shrinks `fillTargetTokens` by 25% rather than continuing to overshoot.
 
-### Layer 3 — structure-aware chunker (rewrite of `batching.ts` internals, same public API)
+### Layer 3 — structure-aware chunker ✅ shipped (§5.2)
 
-`buildBatches(projectId, epoch, pageIndex, lines, { budget, policy })` keeps its signature-compatible entry point and its **order-preservation invariant** (already pinned by `batching.test.ts:31-34,49-51`), but groups *before* it packs:
+`buildBatches(projectId, epoch, pageIndex, lines, options)` kept its signature and its **order-preservation invariant** (pinned by `batching.test.ts`), but now groups *before* it packs:
 
-1. **Reconstruct logical units** from consecutive lines by `BlockKind`:
-   - a run of `table` lines → one **TableUnit** (never split at a row boundary; if it alone exceeds `contentBudget`, split at *row groups* and repeat the header row as context);
-   - `heading` → **binds forward** to the next non-skipped unit (a heading is never the last item in a batch);
-   - `caption` → binds backward to its preceding figure/table;
-   - `list` → splits only **between items**, never mid-item;
-   - `paragraph` / `shape` → indivisible unless oversized (below).
-2. **Pack units** by measured tokens toward `fillTargetTokens`, never past `contentBudgetTokens`, with `maxLines` as a secondary guard. The `minLines` floor that used to let an oversized batch through is already gone (Phase A); what is left here is the packing *order* — units, not raw lines.
-3. **Oversized single unit** (one paragraph wider than the budget) → sentence-boundary split with ids `` `${batchId}#s${n}` ``, reassembled by the existing `splitToLines` id convention so validation and the merge path are unchanged. A unit that is *one* sentence longer than the budget is the one true irreducible case (§5).
-4. **Context enrichment**: each batch now carries `{ before, after }` as today, **plus** the nearest enclosing heading and its translation (`sectionDigest`), which costs ~10 tokens and buys most of the consistency that a larger neighbour window would.
+1. **`BatchLine.kind`** — every line carries its `BlockKind`, filled in by `toLine()` (`translateQueue.ts`) and by `inline.ts`. The packer can see the structure it is cutting.
+2. **`buildUnits(lines)`** reconstructs logical units from consecutive lines:
+   - a run of `table` lines → one unit; a run of `list` lines → one unit (cut only *between* rows/items, never inside one);
+   - `heading` → **binds forward**: the next line joins it, so a heading is never the last item in its batch;
+   - `caption` → binds **backward** to the figure/table it labels;
+   - everything else → its own unit.
+3. **`subdivide(unit)`** cuts a unit that alone exceeds `maxLines`/`maxTokens` at *line* boundaries. A line that alone exceeds the budget is still sent whole — there is nothing to cut it against, and the ladder owns it (point 4).
+4. **Pack units**, not lines: a batch may only end on a unit boundary, and `maxTokens` remains a hard budget. Order is never changed and no line is ever duplicated or dropped.
+5. **Oversized / badly-answered single line** → in the ladder's last resort, `splitLineForRetry` cuts it at the boundaries its own structure implies (table/list at `\n`, prose at sentence ends) into fragments with derived ids `` `${parentId}#s${n}` ``, sends them as **one** request, and `reassemble()` joins the results back under the parent id. Validation, review, post-processing and `persistLines` never see a fragment.
+6. **Context enrichment**: each batch still carries `{ before, after }`, **plus** the nearest enclosing heading and its translation (`sectionDigest`) — **open, Phase C**.
 
-The retry ladder, `splitBatch`/`splitToLines` and `#cache`/`#l<n>` id conventions are untouched — `batchValidation` and `resume.test.ts` continue to hold.
+The `splitBatch`/`splitToLines` rungs, the `#l<n>` id convention and `batchValidation` are untouched — `resume.test.ts` still holds.
 
 ### Layer 4 — pacing and honest quota forecasting
 
@@ -244,7 +246,7 @@ Each phase is independently shippable, gated by `tsc · eslint · prettier · vi
 | Phase | Deliverable | Primary files | Why first |
 |---|---|---|---|
 | **A ✅ shipped** | `BudgetProfile` + script-aware estimator + calibration + the 429-quota classification fix | `translate/budget.ts`, `translate/tokenEstimate.ts`, `translate/batching.ts`, `providers/http.ts`, `translate/engine.ts`, `translate/translateQueue.ts`, `workers/translation.worker.ts` | Fixes the root cause. Largest accuracy gain, smallest blast radius. |
-| **B** | Structure-aware chunker (logical units, oversized split, heading binding) | `translate/batching.ts`, `translate/types.ts` | Turns correct budgets into *well-formed* requests. |
+| **B ✅ shipped** | Structure-aware chunker (logical units, heading/caption binding, oversized-line rescue) | `translate/batching.ts`, `translate/types.ts`, `translate/engine.ts` | Turns correct budgets into *well-formed* requests. |
 | **C** | Context continuity (heading chain, rolling glossary, terminology reseeding on restore) | `translate/prompts.ts`, `translate/translateQueue.ts`, `translate/tm.ts` | Quality at scale, cheap. |
 | **D** | Quota scope, daily ledger, forecast UI (and the `preflight` alignment), integrity verification | `config/models.config.ts`, `translate/keyPool.ts`, `pdf/preflight.ts`, `translate/coverage.ts` | Makes multi-key honest and large runs observable. |
 
@@ -292,3 +294,54 @@ belongs with the forecast UI in Phase D.
 **Explicitly out of scope as a "solution":** auto-switching OpenRouter→Groq, and
 Local AI. Both stay available as user-selectable options; neither is load-bearing
 for large files.
+
+### 5.2 Phase B — what shipped
+
+Phase A made the request *sized correctly*. Phase B makes it *well formed*.
+
+**`BatchLine.kind`.** The line the packer manipulates now carries the
+`BlockKind` it came from. It is filled in at both construction sites
+(`toLine()` in `translateQueue.ts`, the inline path in `inline.ts`), and
+`translateQueue`'s `QueueSnapshot` deliberately does **not** persist lines —
+batches are re-planned from Dexie on restore — so there is no legacy shape to
+migrate.
+
+**Units, then packing.** `buildUnits(lines)` groups before `buildBatches`
+packs:
+
+| Rule | Effect |
+|---|---|
+| consecutive `table` → one unit, consecutive `list` → one unit | a run is cut only *between* rows/items |
+| `heading` binds **forward** (the next line joins it) | a heading is never the last line of its batch, so the body is never translated without its title |
+| `caption` binds **backward** (joins the figure/table above) | a caption never opens a batch |
+| everything else → its own unit | Latin prose batches are unchanged |
+
+A batch may only end on a unit boundary. A unit that alone exceeds
+`maxLines`/`maxTokens` is cut at *line* boundaries by `subdivide` — never inside
+one — so `maxTokens` is still a hard budget. A single line that alone exceeds
+the budget is still sent whole (there is nothing to cut it against yet).
+
+**The ladder's new last resort.** `splitLineForRetry` (batching.ts) cuts one
+line at the boundaries its structure implies: table/list at `\n`, prose at
+sentence ends (a terminator followed by whitespace, so `3.14` and `A.B` are left
+alone). Fragments get derived ids `parent#s0`, `parent#s1`, …, carry only the
+placeholders that actually occur in them, and are sent as **one** request after
+the normal attempt and the repair attempt have both failed. `reassemble()`
+joins the results back under the parent id — weakest confidence, strongest flag
+— so validation, the review pass, post-processing and `persistLines` all keep
+seeing exactly one line with its original id.
+
+The rescue is deliberately **bounded to one request**. Letting fragments fall
+through to the line-by-line rung would cost two requests *per row* of a large
+table on a line that is about to be kept anyway — a free tier's whole day burnt
+on a failure. So: attempt → repair → fragments → terminal, i.e. three requests
+worst case for a hopeless line (two before, for a line with nothing to cut).
+
+**What Phase B did not change:** `splitBatch`, `splitToLines`, the `#l<n>` id
+convention, `batchValidation`, `persistLines`, and the exactly-once resume
+invariants in `resume.test.ts`. Order preservation is still pinned by
+`batching.test.ts` — units regroup lines, they never reorder them.
+
+**Known limitation:** the sentence splitter is deliberately naive (it does not
+know about abbreviations such as `Mr.`), because a fragment boundary is never a
+content boundary — the pieces are rejoined before anything downstream sees them.

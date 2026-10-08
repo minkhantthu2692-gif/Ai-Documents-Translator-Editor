@@ -7,7 +7,7 @@
 
 import type { ProviderId, QualityTier } from '@/config/models.config'
 import type { Placeholder } from '@/pdf/placeholders'
-import type { TranslationFlag } from '@/db/types'
+import type { BlockKind, TranslationFlag } from '@/db/types'
 
 export type { TranslationFlag }
 
@@ -64,6 +64,13 @@ export interface BatchLine {
   order: number
   /** Bullet / numbering marker kept out of the prompt. */
   listMarker: string | null
+  /**
+   * Structure of the block this came from. The packer reads it so a batch
+   * respects the document instead of cutting it at an arbitrary line: a
+   * heading stays with the body it introduces, a caption stays with the figure
+   * above it, and a run of table rows or list items travels together.
+   */
+  kind: BlockKind
   /** `{{n}}` → original substring, restored after translation. */
   placeholders: Placeholder[]
 }

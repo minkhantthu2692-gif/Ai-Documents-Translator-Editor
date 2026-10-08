@@ -85,6 +85,7 @@ export async function translateInline(
     pageIndex: options.pageIndexOf?.(block) ?? 0,
     order: block.order,
     listMarker: block.listMarker,
+    kind: block.kind,
     placeholders: block.placeholders,
   }))
 

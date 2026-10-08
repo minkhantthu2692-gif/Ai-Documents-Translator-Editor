@@ -313,6 +313,7 @@ export function TranslatePage() {
             pageIndex: 0,
             order: 0,
             listMarker: null,
+            kind: 'paragraph',
             placeholders: [],
           },
         ],

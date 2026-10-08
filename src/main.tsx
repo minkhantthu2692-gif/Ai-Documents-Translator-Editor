@@ -12,12 +12,16 @@ import { logEvent } from '@/core/eventLogger'
 applyTheme(useUiStore.getState().theme)
 applyPersistedLanguage(useUiStore.getState().language)
 
+// Deployed under a sub-path (GitHub Pages project site) → routes and the
+// service worker must resolve against the build's BASE_URL, not the root.
+const APP_BASE = import.meta.env.BASE_URL
+
 const container = document.getElementById('root')
 if (!container) throw new Error('Root container #root is missing')
 
 createRoot(container).render(
   <StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={APP_BASE}>
       <App />
     </BrowserRouter>
   </StrictMode>,
@@ -38,7 +42,7 @@ logEvent({
 if ('serviceWorker' in navigator) {
   if (import.meta.env.PROD) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').catch((error: unknown) => {
+      navigator.serviceWorker.register(`${APP_BASE}sw.js`).catch((error: unknown) => {
         console.warn('[sw] registration failed', error)
       })
     })

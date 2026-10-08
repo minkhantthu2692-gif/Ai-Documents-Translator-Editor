@@ -4,12 +4,19 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Virtuoso } from 'react-virtuoso'
 import { Badge, Button, Card, ConfirmDialog, EmptyState, IconButton, Input } from '@/components/ui'
 import { PageContainer, PageHeader } from '@/components/layout/Page'
-import { IconChevronDown, IconDownload, IconSearch, IconTrash } from '@/components/layout/icons'
+import {
+  IconChevronDown,
+  IconDownload,
+  IconSearch,
+  IconSparkle,
+  IconTrash,
+} from '@/components/layout/icons'
 import { eventRepo } from '@/db/repo-events'
 import { saveJsonFile } from '@/db/backup'
 import type { Severity } from '@/core/reasonCodes'
 import { logEvent } from '@/core/eventLogger'
 import { toast } from '@/stores/toastStore'
+import { useAssistantStore } from '@/stores/assistantStore'
 import { cn } from '@/lib/cn'
 import { formatDateTime } from '@/lib/format'
 
@@ -101,6 +108,15 @@ export function LogsPage() {
         meta={<Badge tone="neutral">{t('logs.total', { count: totalCount })}</Badge>}
         actions={
           <>
+            <Button
+              data-testid="open-assistant"
+              variant="secondary"
+              size="sm"
+              iconLeft={<IconSparkle className="h-4 w-4" />}
+              onClick={() => useAssistantStore.getState().openDialog()}
+            >
+              {t('assistant.open')}
+            </Button>
             <Button
               variant="secondary"
               size="sm"

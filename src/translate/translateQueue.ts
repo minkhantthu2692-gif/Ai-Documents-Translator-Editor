@@ -33,11 +33,11 @@ import { apiKeyRepo } from '@/db/repo-apiKeys'
 import { blockRepo, pageRepo, translationRepo } from '@/db/repo-content'
 import { glossaryRepo } from '@/db/repo-knowledge'
 import { jobRepo } from '@/db/repo-jobs'
-import { settingsRepo } from '@/db/repo-settings'
+import { SETTING_KEYS, settingsRepo } from '@/db/repo-settings'
 import { usageRepo } from '@/db/repo-usage'
 import type { ApiKeyRecord, BlockRecord, TranslationFlag } from '@/db/types'
 import { useTranslateStore } from '@/stores/translateStore'
-import { buildBatches } from './batching'
+import { BATCH_DEFAULTS, buildBatches } from './batching'
 import { AdaptiveLimiter, RateMeter } from './concurrency'
 import {
   TranslationRunCancelled,
@@ -188,6 +188,17 @@ export async function buildTranslatePlan(
   config: TranslateRunConfig,
   epoch: number,
 ): Promise<TranslatePlan> {
+  // Assistant / settings can lower the batch size (rate limits, quota) — the
+  // value lives in `translate.batchMaxLines` and is clamped to a sane range.
+  const storedMaxLines = await settingsRepo.get<number>(
+    SETTING_KEYS.batchMaxLines,
+    BATCH_DEFAULTS.maxLines,
+  )
+  const maxLines =
+    typeof storedMaxLines === 'number' && Number.isFinite(storedMaxLines) && storedMaxLines >= 1
+      ? Math.floor(storedMaxLines)
+      : BATCH_DEFAULTS.maxLines
+
   const pages = (await pageRepo.listByProject(projectId)).sort((a, b) => a.index - b.index)
   const blocks = await blockRepo.listByProject(projectId)
   const byPage = new Map<string, BlockRecord[]>()
@@ -237,7 +248,7 @@ export async function buildTranslatePlan(
     pageTotals.set(page.index, onPageTotal)
     pageDone.set(page.index, doneOnPage)
 
-    const batches = buildBatches(projectId, epoch, page.index, lines)
+    const batches = buildBatches(projectId, epoch, page.index, lines, { maxLines })
     const jobs: TranslateJob[] = batches.map((batch, position) => ({
       id: batch.id,
       projectId,

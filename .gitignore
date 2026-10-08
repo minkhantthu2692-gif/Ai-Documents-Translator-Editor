@@ -27,3 +27,6 @@ pnpm-debug.log*
 
 # Test artifacts
 .vitest-reports
+
+# Personal notes at the repo root — never committed
+/types-of-pdf-file.md

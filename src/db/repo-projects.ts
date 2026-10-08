@@ -2,6 +2,7 @@
 
 import { getDb } from './db'
 import { stampNew, stampUpdate } from './repo-common'
+import { enqueueDelete } from '@/sync/hooks'
 import type {
   BlockRecord,
   PageRecord,
@@ -192,6 +193,7 @@ export class ProjectRepository {
   /** Removes the project and everything that belongs to it. */
   async remove(id: string): Promise<void> {
     const db = getDb()
+    const existing = await db.projects.get(id)
     await db.transaction(
       'rw',
       [db.projects, db.pages, db.blocks, db.translations, db.jobs, db.outbox],
@@ -201,13 +203,25 @@ export class ProjectRepository {
         await db.blocks.where('projectId').equals(id).delete()
         await db.translations.where('projectId').equals(id).delete()
         await db.jobs.where('projectId').equals(id).delete()
+        // Queued children upserts would beat the server-side cascade (see
+        // dropPendingProjectChildren); the project row itself is replaced by a
+        // tombstone so other devices learn about the deletion.
         await db.outbox
-          .where('entity')
-          .equals('project')
-          .and((row) => row.entityId === id)
+          .filter(
+            (row) =>
+              (row.entity === 'page' || row.entity === 'block') &&
+              Boolean(
+                row.payload &&
+                typeof row.payload === 'object' &&
+                (row.payload as { projectId?: unknown }).projectId === id,
+              ),
+          )
           .delete()
       },
     )
+    if (existing) {
+      await enqueueDelete('project', existing as unknown as Record<string, unknown>)
+    }
   }
 
   async stats(): Promise<{

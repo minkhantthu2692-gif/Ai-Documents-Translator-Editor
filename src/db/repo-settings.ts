@@ -2,6 +2,7 @@
 
 import { getDb } from './db'
 import { stampNew } from './repo-common'
+import { enqueueDelete } from '@/sync/hooks'
 import type { SettingRecord } from './types'
 
 export class SettingsRepository {
@@ -47,7 +48,12 @@ export class SettingsRepository {
   }
 
   async remove(key: string): Promise<void> {
-    await getDb().settings.delete(key)
+    const db = getDb()
+    const existing = await db.settings.get(key)
+    await db.settings.delete(key)
+    if (existing) {
+      await enqueueDelete('settings', existing as unknown as Record<string, unknown>)
+    }
   }
 
   async clear(): Promise<void> {
@@ -70,7 +76,9 @@ export const SETTING_KEYS = {
   autoSync: 'sync.autoSync',
   autoSyncInterval: 'sync.intervalMinutes',
   conflictPolicy: 'sync.conflictPolicy',
+  syncEntities: 'sync.entities',
   assistantEnabled: 'assistant.enabled',
   provider: 'ai.provider',
   model: 'ai.model',
+  batchMaxLines: 'translate.batchMaxLines',
 } as const

@@ -6,18 +6,26 @@
  *  - Cross-origin requests (fonts, OCR assets, provider APIs) are never cached here; those
  *    are handled by the application layer with its own Dexie-backed cache.
  *
+ * All shell URLs are resolved against the worker's own location, so the same
+ * file works at the domain root (`/sw.js`) and under a GitHub Pages project
+ * path (`/REPO/sw.js`).
+ *
  * CACHE_VERSION must be bumped when the shell markup changes so old clients refresh.
  */
 const CACHE_VERSION = 'v1'
 const SHELL_CACHE = `aidt-shell-${CACHE_VERSION}`
 const RUNTIME_CACHE = `aidt-runtime-${CACHE_VERSION}`
 
+// Scope directory of this worker ('/' or '/REPO_NAME/').
+const SCOPE = new URL('./', self.location).pathname
+const at = (name) => `${SCOPE}${name}`
+
 const SHELL_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.webmanifest',
-  '/icon.svg',
-  '/icon-maskable.svg',
+  SCOPE,
+  at('index.html'),
+  at('manifest.webmanifest'),
+  at('icon.svg'),
+  at('icon-maskable.svg'),
 ]
 
 self.addEventListener('install', (event) => {
@@ -65,7 +73,7 @@ async function networkFirstNavigation(request) {
   } catch (error) {
     const cached = await caches.match(request)
     if (cached) return cached
-    const shell = (await caches.match('/index.html')) || (await caches.match('/'))
+    const shell = (await caches.match(at('index.html'))) || (await caches.match(SCOPE))
     if (shell) return shell
     throw error
   }
@@ -104,8 +112,8 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (
-    url.pathname.startsWith('/assets/') ||
-    url.pathname.startsWith('/fonts/') ||
+    url.pathname.startsWith(at('assets/')) ||
+    url.pathname.startsWith(at('fonts/')) ||
     url.pathname.endsWith('.webmanifest') ||
     url.pathname.endsWith('.svg')
   ) {

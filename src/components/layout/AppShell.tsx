@@ -5,6 +5,8 @@ import { Header } from './Header'
 import { Sidebar } from './Sidebar'
 import { BottomTabBar } from './BottomTabBar'
 import { Toaster } from '@/components/ui'
+import { AssistantBootstrap, AssistantDialog } from '@/assistant'
+import { SyncBootstrap } from '@/sync'
 import { applyPersistedLanguage, applyTheme, useUiStore } from '@/stores/uiStore'
 
 /**
@@ -103,6 +105,10 @@ export function AppShell() {
       ) : null}
 
       <Toaster />
+
+      <SyncBootstrap />
+      <AssistantBootstrap />
+      <AssistantDialog />
     </div>
   )
 }

@@ -2,6 +2,7 @@
 
 import { getDb } from './db'
 import { hashText, stampNew, stampUpdate } from './repo-common'
+import { enqueueDelete } from '@/sync/hooks'
 import type { GlossaryRecord, TranslationMemoryRecord } from './types'
 
 export class GlossaryRepository {
@@ -41,7 +42,12 @@ export class GlossaryRepository {
   }
 
   async remove(id: string): Promise<void> {
-    await getDb().glossary.delete(id)
+    const db = getDb()
+    const existing = await db.glossary.get(id)
+    await db.glossary.delete(id)
+    if (existing) {
+      await enqueueDelete('glossary', existing as unknown as Record<string, unknown>)
+    }
   }
 }
 

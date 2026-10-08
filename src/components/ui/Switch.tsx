@@ -11,6 +11,8 @@ export interface SwitchProps {
   hideLabel?: boolean
   id?: string
   className?: string
+  /** Rendered as `data-testid` on the switch button (smoke/UI tests). */
+  testId?: string
 }
 
 export function Switch({
@@ -22,6 +24,7 @@ export function Switch({
   hideLabel,
   id,
   className,
+  testId,
 }: SwitchProps) {
   const generatedId = useId()
   const switchId = id ?? generatedId
@@ -48,6 +51,7 @@ export function Switch({
         type="button"
         role="switch"
         id={switchId}
+        data-testid={testId}
         aria-checked={checked}
         aria-labelledby={labelId}
         aria-describedby={descriptionId}

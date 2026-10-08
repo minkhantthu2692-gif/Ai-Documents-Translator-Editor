@@ -2,6 +2,7 @@
 
 import { getDb } from './db'
 import { stampNew, stampUpdate } from './repo-common'
+import { enqueueDelete } from '@/sync/hooks'
 import type { BlockRecord, PageRecord, TranslationRecord } from './types'
 
 export class PageRepository {
@@ -235,9 +236,12 @@ export class BlockRepository {
   async removeStaleByPage(pageId: string, keepIds: string[]): Promise<number> {
     const db = getDb()
     const keep = new Set(keepIds)
-    const keys = await db.blocks.where('pageId').equals(pageId).primaryKeys()
-    const stale = keys.filter((key) => !keep.has(String(key)))
-    if (stale.length > 0) await db.blocks.bulkDelete(stale)
+    const staleRows = await db.blocks.where('pageId').equals(pageId).toArray()
+    const stale = staleRows.filter((row) => !keep.has(row.id))
+    if (stale.length > 0) await db.blocks.bulkDelete(stale.map((row) => row.id))
+    for (const row of stale) {
+      await enqueueDelete('block', row as unknown as Record<string, unknown>)
+    }
     return stale.length
   }
 

@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Doc Translator — Launcher</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f7fb;
+        --panel: #ffffff;
+        --panel-2: #eef1f7;
+        --fg: #1b2434;
+        --fg-muted: #5b6478;
+        --border: #d8deea;
+        --accent: #3b5bdb;
+        --accent-fg: #ffffff;
+        --ok: #2b8a3e;
+        --warn: #b8860b;
+        --shadow: 0 10px 30px rgba(27, 36, 52, 0.08);
+      }
+      [data-theme='dark'] {
+        color-scheme: dark;
+        --bg: #10141d;
+        --panel: #171d29;
+        --panel-2: #1f2735;
+        --fg: #e7ebf3;
+        --fg-muted: #9aa4b8;
+        --border: #2c3546;
+        --accent: #6c8cff;
+        --accent-fg: #0d1220;
+        --ok: #51cf66;
+        --warn: #ecc94b;
+        --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family:
+          Inter,
+          'Noto Sans',
+          system-ui,
+          -apple-system,
+          'Segoe UI',
+          Roboto,
+          'Noto Sans Myanmar',
+          sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+        line-height: 1.55;
+      }
+      main {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: 32px 20px 56px;
+      }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 8px;
+      }
+      h1 {
+        font-size: 1.45rem;
+        margin: 0;
+      }
+      .subtitle {
+        color: var(--fg-muted);
+        margin: 0 0 20px;
+        font-size: 0.95rem;
+      }
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      button,
+      .btn {
+        font: inherit;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--fg);
+        border-radius: 8px;
+        padding: 7px 14px;
+        cursor: pointer;
+        transition:
+          background 0.15s,
+          border-color 0.15s;
+      }
+      button:hover,
+      .btn:hover {
+        border-color: var(--accent);
+      }
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--accent-fg);
+        font-weight: 600;
+      }
+      .actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin: 18px 0 26px;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        box-shadow: var(--shadow);
+        padding: 18px 18px 8px;
+        margin-bottom: 18px;
+      }
+      .card h2 {
+        font-size: 1rem;
+        margin: 0 0 6px;
+      }
+      .hint {
+        color: var(--fg-muted);
+        font-size: 0.86rem;
+        margin: 0 0 12px;
+      }
+      ol.checks {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      ol.checks li {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 10px 4px;
+        border-top: 1px solid var(--border);
+      }
+      ol.checks li:first-child {
+        border-top: 0;
+      }
+      ol.checks input[type='checkbox'] {
+        margin-top: 4px;
+        width: 16px;
+        height: 16px;
+        accent-color: var(--accent);
+        cursor: pointer;
+      }
+      .check-body {
+        flex: 1;
+        min-width: 0;
+      }
+      .check-title {
+        font-weight: 600;
+        font-size: 0.94rem;
+      }
+      .check-desc {
+        color: var(--fg-muted);
+        font-size: 0.85rem;
+      }
+      .cmd {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 6px;
+      }
+      .cmd code {
+        flex: 1;
+        min-width: 0;
+        overflow-x: auto;
+        white-space: nowrap;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 5px 9px;
+        font-family: 'Cascadia Code', Consolas, 'Courier New', monospace;
+        font-size: 0.83rem;
+      }
+      .copy {
+        padding: 4px 10px;
+        font-size: 0.8rem;
+      }
+      .status {
+        display: inline-block;
+        font-size: 0.72rem;
+        font-weight: 700;
+        border-radius: 999px;
+        padding: 1px 9px;
+        border: 1px solid var(--border);
+        color: var(--fg-muted);
+      }
+      .status.ok {
+        color: var(--ok);
+        border-color: var(--ok);
+      }
+      .status.pending {
+        color: var(--warn);
+        border-color: var(--warn);
+      }
+      footer {
+        color: var(--fg-muted);
+        font-size: 0.8rem;
+        text-align: center;
+        margin-top: 24px;
+      }
+      .toast {
+        position: fixed;
+        left: 50%;
+        bottom: 22px;
+        transform: translateX(-50%);
+        background: var(--fg);
+        color: var(--bg);
+        border-radius: 8px;
+        padding: 8px 16px;
+        font-size: 0.85rem;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.25s;
+        z-index: 10;
+      }
+      .toast.show {
+        opacity: 1;
+      }
+      @media (max-width: 560px) {
+        main {
+          padding: 20px 12px 40px;
+        }
+        .cmd {
+          flex-wrap: wrap;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1 data-en="Doc Translator — Launcher" data-my="စာသားဘာသာပြန် — ဖွင့်သည့်ကိရိယာ">
+          Doc Translator — Launcher
+        </h1>
+        <div class="toolbar">
+          <button id="btn-lang" type="button">EN / မြန်မာ</button>
+          <button id="btn-theme" type="button" data-en="Dark" data-my="အမှောင်">Dark</button>
+          <button id="btn-refresh" type="button" data-en="Re-check" data-my="ပြန်စစ်မည်">
+            Re-check
+          </button>
+        </div>
+      </header>
+
+      <p
+        class="subtitle"
+        data-en="Run the app locally, keep the repo clean, and know which gate step is next."
+        data-my="အက်ပ်ကို စက်တွင်းဖွင့်ပြီး  repo ကို သန့်ရှင်းအောင်ထားကာ နောက်တစ်ဆင့်ကို ဆက်လုပ်ပါ။"
+      >
+        Run the app locally, keep the repo clean, and know which gate step is next.
+      </p>
+
+      <div class="actions">
+        <button id="btn-open-app" type="button" class="primary">
+          <span data-en="Open app (localhost:5173)" data-my="အက်ပ်ဖွင့် (localhost:5173)"
+            >Open app (localhost:5173)</span
+          >
+        </button>
+        <button id="btn-github" type="button">
+          <span data-en="GitHub repository" data-my="GitHub ကုဒ်သိမ်းရာ">GitHub repository</span>
+        </button>
+      </div>
+
+      <section class="card">
+        <h2 data-en="Setup checklist" data-my="ပြင်ဆင်မှု စာရင်း">Setup checklist</h2>
+        <p
+          class="hint"
+          data-en="Tick each step as you go. “Re-check” pings the dev server; your ticks are remembered in this browser."
+          data-my="တစ်ဆင့်ချင်း ပြီးတိုင်း အမှတ်အသားပြုပါ။ “Re-check” က dev server ကို စစ်ပေးပြီး မှတ်ထားသည်များ မပျက်ပါ။"
+        >
+          Tick each step as you go. “Re-check” pings the dev server; your ticks are remembered in
+          this browser.
+        </p>
+
+        <ol class="checks" id="checks">
+          <li>
+            <input id="ck-node" type="checkbox" />
+            <div class="check-body">
+              <div class="check-title">
+                <span data-en="1. Node.js 18 or newer" data-my="၁။ Node.js 18 သို့မဟုတ် အထက်"
+                  >1. Node.js 18 or newer</span
+                >
+                <span class="status" data-status="node">…</span>
+              </div>
+              <div
+                class="check-desc"
+                data-en="Any Node ≥ 18 works (the app uses ES modules and WebCrypto)."
+                data-my="Node ≥ 18 ဆိုလျှင် လုံလောက်ပါသည် (ES modules နှင့် WebCrypto သုံးသည်)။"
+              >
+                Any Node ≥ 18 works (the app uses ES modules and WebCrypto).
+              </div>
+              <div class="cmd">
+                <code>node -v</code>
+                <button class="copy" type="button" data-copy="node -v">copy</button>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <input id="ck-install" type="checkbox" />
+            <div class="check-body">
+              <div class="check-title">
+                <span data-en="2. Install dependencies" data-my="၂။ မှီခိုအားဖြင့် ထည့်သွင်းရန်"
+                  >2. Install dependencies</span
+                >
+              </div>
+              <div
+                class="check-desc"
+                data-en="Run once after cloning (or whenever package.json changes)."
+                data-my="Clone လုပ်ပြီးတိုင်း (သို့ package.json ပြောင်းတိုင်း) တစ်ကြိမ် လုပ်ပါ။"
+              >
+                Run once after cloning (or whenever package.json changes).
+              </div>
+              <div class="cmd">
+                <code>npm install</code>
+                <button class="copy" type="button" data-copy="npm install">copy</button>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <input id="ck-env" type="checkbox" />
+            <div class="check-body">
+              <div class="check-title">
+                <span data-en="3. Create .env" data-my="၃။ .env ဖန်တီးရန်">3. Create .env</span>
+              </div>
+              <div
+                class="check-desc"
+                data-en="Copies .env.example → .env (git-ignored). Optional keys only."
+                data-my=" .env.example ကို .env အဖြစ် ကူးယူသည် (git မှ ကျော်သည်)။ ရွေးချယ်နိုင်သော သော့များသာ။"
+              >
+                Copies .env.example → .env (git-ignored). Optional keys only.
+              </div>
+              <div class="cmd">
+                <code>cp .env.example .env</code>
+                <button class="copy" type="button" data-copy="cp .env.example .env">copy</button>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <input id="ck-dev" type="checkbox" />
+            <div class="check-body">
+              <div class="check-title">
+                <span data-en="4. Start the dev server" data-my="၄။ Dev server စတင်ရန်"
+                  >4. Start the dev server</span
+                >
+                <span class="status" data-status="server">…</span>
+              </div>
+              <div
+                class="check-desc"
+                data-en="Serves http://localhost:5173 — “Re-check” probes it for you."
+                data-my="http://localhost:5173 တွင် ဖွင့်ပေးသည် — “Re-check” ဖြင့် စစ်နိုင်သည်။"
+              >
+                Serves http://localhost:5173 — “Re-check” probes it for you.
+              </div>
+              <div class="cmd">
+                <code>npm run dev</code>
+                <button class="copy" type="button" data-copy="npm run dev">copy</button>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <input id="ck-test" type="checkbox" />
+            <div class="check-body">
+              <div class="check-title">
+                <span data-en="5. Tests + lint + format" data-my="၅။ စမ်းသပ်မှု + lint + format">
+                  5. Tests + lint + format
+                </span>
+              </div>
+              <div
+                class="check-desc"
+                data-en="The full gate: typecheck, ESLint, Prettier, Vitest."
+                data-my="အပြည့်အစုံ စစ်ဆေးမှု — typecheck, ESLint, Prettier, Vitest။"
+              >
+                The full gate: typecheck, ESLint, Prettier, Vitest.
+              </div>
+              <div class="cmd">
+                <code
+                  >npx tsc --noEmit &amp;&amp; npx eslint . &amp;&amp; npx prettier --check .</code
+                >
+                <button
+                  class="copy"
+                  type="button"
+                  data-copy="npx tsc --noEmit && npx eslint . && npx prettier --check ."
+                >
+                  copy
+                </button>
+              </div>
+              <div class="cmd">
+                <code>npx vitest run</code>
+                <button class="copy" type="button" data-copy="npx vitest run">copy</button>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <input id="ck-build" type="checkbox" />
+            <div class="check-body">
+              <div class="check-title">
+                <span data-en="6. Production build" data-my="၆။ ထုတ်ကုန် တည်ဆောက်ရန်">
+                  6. Production build
+                </span>
+              </div>
+              <div
+                class="check-desc"
+                data-en="Outputs dist/ — also what the GitHub Pages workflow ships."
+                data-my="dist/ ထုတ်ပေးသည် — GitHub Pages workflow ကလည်း ထိုနည်းတူ။"
+              >
+                Outputs dist/ — also what the GitHub Pages workflow ships.
+              </div>
+              <div class="cmd">
+                <code>npm run build</code>
+                <button class="copy" type="button" data-copy="npm run build">copy</button>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <input id="ck-secrets" type="checkbox" />
+            <div class="check-body">
+              <div class="check-title">
+                <span data-en="7. No secrets in git" data-my="၇။ Git ထဲတွင် လျှို့ဝှက်မရှိ">
+                  7. No secrets in git
+                </span>
+              </div>
+              <div
+                class="check-desc"
+                data-en=".env, node_modules/ and dist/ must stay untracked."
+                data-my=".env, node_modules/ နှင့် dist/ ကို track မလုပ်ရပါ။"
+              >
+                .env, node_modules/ and dist/ must stay untracked.
+              </div>
+              <div class="cmd">
+                <code>git status --porcelain</code>
+                <button class="copy" type="button" data-copy="git status --porcelain">copy</button>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <input id="ck-push" type="checkbox" />
+            <div class="check-body">
+              <div class="check-title">
+                <span data-en="8. Push to GitHub" data-my="၈။ GitHub သို့ တင်ရန်">
+                  8. Push to GitHub
+                </span>
+              </div>
+              <div
+                class="check-desc"
+                data-en="The guided script verifies .gitignore, prompts for a message, then pushes."
+                data-my="လမ်းညွှန် script က .gitignore စစ်ပြီး မှတ်ချက်မေးကာ တင်ပေးသည်။"
+              >
+                The guided script verifies .gitignore, prompts for a message, then pushes.
+              </div>
+              <div class="cmd">
+                <code>tools/push-to-github.sh</code>
+                <button class="copy" type="button" data-copy="tools/push-to-github.sh">copy</button>
+              </div>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <footer
+        data-en="AI Documents Translator & Editor — all processing stays in your browser."
+        data-my="AI စာသားဘာသာပြန်နှင့် တည်းဖြတ်ကိရိယာ — အားလုံး သင့်ဘရောက်ဇာထဲတွင်သာ ဆောင်ရွက်သည်။"
+      >
+        AI Documents Translator &amp; Editor — all processing stays in your browser.
+      </footer>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script>
+      ;(function () {
+        'use strict'
+
+        var APP_URL = 'http://localhost:5173'
+        var REPO_URL = 'https://github.com/minkhantthu2692-gif/Ai-Documents-Translator-Editor'
+        var STORAGE_THEME = 'launcher.theme'
+        var STORAGE_LANG = 'launcher.lang'
+
+        var html = document.documentElement
+        var toastEl = document.getElementById('toast')
+
+        function store(key, value) {
+          try {
+            localStorage.setItem(key, value)
+          } catch (error) {
+            void error
+          }
+        }
+        function read(key) {
+          try {
+            return localStorage.getItem(key)
+          } catch (error) {
+            void error
+            return null
+          }
+        }
+
+        var toastTimer = 0
+        function showToast(text) {
+          toastEl.textContent = text
+          toastEl.classList.add('show')
+          window.clearTimeout(toastTimer)
+          toastTimer = window.setTimeout(function () {
+            toastEl.classList.remove('show')
+          }, 1600)
+        }
+
+        /* ---------------- theme ---------------- */
+        function applyTheme(theme) {
+          html.setAttribute('data-theme', theme)
+          var button = document.getElementById('btn-theme')
+          var lang = currentLang()
+          button.textContent =
+            theme === 'dark'
+              ? lang === 'my'
+                ? 'အလင်း'
+                : 'Light'
+              : lang === 'my'
+                ? 'အမှောင်'
+                : 'Dark'
+          store(STORAGE_THEME, theme)
+        }
+        function initialTheme() {
+          var saved = read(STORAGE_THEME)
+          if (saved === 'dark' || saved === 'light') return saved
+          return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+            ? 'dark'
+            : 'light'
+        }
+
+        /* ---------------- language ---------------- */
+        function currentLang() {
+          return read(STORAGE_LANG) === 'my' ? 'my' : 'en'
+        }
+        function applyLang(lang) {
+          store(STORAGE_LANG, lang)
+          html.setAttribute('lang', lang === 'my' ? 'my' : 'en')
+          var nodes = document.querySelectorAll('[data-en][data-my]')
+          for (var i = 0; i < nodes.length; i += 1) {
+            var node = nodes[i]
+            var text = node.getAttribute(lang === 'my' ? 'data-my' : 'data-en')
+            if (text !== null) node.textContent = text
+          }
+          var copyButtons = document.querySelectorAll('.copy')
+          for (var j = 0; j < copyButtons.length; j += 1) {
+            copyButtons[j].textContent = lang === 'my' ? 'ကူး' : 'copy'
+          }
+          applyTheme(html.getAttribute('data-theme') === 'dark' ? 'dark' : 'light')
+        }
+
+        /* ---------------- live checks ---------------- */
+        function setStatus(name, state, text) {
+          var el = document.querySelector('[data-status="' + name + '"]')
+          if (!el) return
+          el.textContent = text
+          el.className = 'status ' + state
+        }
+
+        function checkNode() {
+          // Browsers cannot read `node -v`; the user ticks this manually.
+          var ticked = read('launcher.ck-node') === '1'
+          setStatus('node', ticked ? 'ok' : 'pending', ticked ? '✓' : '?')
+        }
+
+        function checkServer() {
+          var lang = currentLang()
+          var pending = lang === 'my' ? 'စောင့်နေသည်…' : 'checking…'
+          var up = lang === 'my' ? 'အလုပ်လုပ်နေသည်' : 'running'
+          var down = lang === 'my' ? 'မတွေ့ပါ' : 'not running'
+          setStatus('server', 'pending', pending)
+          if (!window.fetch) {
+            setStatus('server', 'pending', '?')
+            return
+          }
+          fetch(APP_URL, { mode: 'no-cors', cache: 'no-store' })
+            .then(function () {
+              setStatus('server', 'ok', up)
+              var box = document.getElementById('ck-dev')
+              if (box && !box.checked) {
+                box.checked = true
+                store('launcher.ck-dev', '1')
+              }
+            })
+            .catch(function () {
+              setStatus('server', 'pending', down)
+            })
+        }
+
+        /* ---------------- checklist persistence ---------------- */
+        function wireChecklist() {
+          var boxes = document.querySelectorAll('#checks input[type="checkbox"]')
+          for (var i = 0; i < boxes.length; i += 1) {
+            ;(function (box) {
+              var key = 'launcher.' + box.id
+              if (read(key) === '1') box.checked = true
+              box.addEventListener('change', function () {
+                store(key, box.checked ? '1' : '0')
+                if (box.id === 'ck-node') checkNode()
+              })
+            })(boxes[i])
+          }
+        }
+
+        /* ---------------- copy buttons ---------------- */
+        function wireCopy() {
+          var buttons = document.querySelectorAll('.copy')
+          for (var i = 0; i < buttons.length; i += 1) {
+            ;(function (button) {
+              button.addEventListener('click', function () {
+                var text = button.getAttribute('data-copy') || ''
+                function done() {
+                  showToast(currentLang() === 'my' ? 'ကူးပြီးပါပြီ' : 'Copied to clipboard')
+                }
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                  navigator.clipboard.writeText(text).then(done, function () {
+                    fallbackCopy(text, done)
+                  })
+                } else {
+                  fallbackCopy(text, done)
+                }
+              })
+            })(buttons[i])
+          }
+        }
+
+        function fallbackCopy(text, done) {
+          var area = document.createElement('textarea')
+          area.value = text
+          area.setAttribute('readonly', 'readonly')
+          area.style.position = 'fixed'
+          area.style.opacity = '0'
+          document.body.appendChild(area)
+          area.select()
+          try {
+            document.execCommand('copy')
+            done()
+          } catch (error) {
+            void error
+            showToast(currentLang() === 'my' ? 'ကူး၍မရပါ' : 'Copy failed')
+          }
+          document.body.removeChild(area)
+        }
+
+        /* ---------------- actions ---------------- */
+        document.getElementById('btn-open-app').addEventListener('click', function () {
+          window.open(APP_URL, '_blank', 'noopener')
+        })
+        document.getElementById('btn-github').addEventListener('click', function () {
+          window.open(REPO_URL, '_blank', 'noopener')
+        })
+        document.getElementById('btn-lang').addEventListener('click', function () {
+          applyLang(currentLang() === 'my' ? 'en' : 'my')
+        })
+        document.getElementById('btn-theme').addEventListener('click', function () {
+          applyTheme(html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark')
+        })
+        document.getElementById('btn-refresh').addEventListener('click', function () {
+          checkNode()
+          checkServer()
+          showToast(currentLang() === 'my' ? 'ပြန်စစ်ပြီးပါပြီ' : 'Re-checked')
+        })
+
+        wireChecklist()
+        wireCopy()
+        applyLang(currentLang())
+        applyTheme(initialTheme())
+        checkNode()
+        checkServer()
+      })()
+    </script>
+  </body>
+</html>

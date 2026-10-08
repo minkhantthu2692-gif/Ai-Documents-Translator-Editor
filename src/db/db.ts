@@ -12,6 +12,9 @@
  * Version 5 — Phase 4: `revisions` (per-block history that powers undo/redo
  *             and the inspector timeline) and the pending AI suggestion fields
  *             on `blocks`.
+ * Version 6 — Phase 4: `originalFontSize` / `originalFontFamily` backfill.
+ * Version 7 — Phase 5: `syncConflicts` (LWW conflict log) and `syncMeta`
+ *             (single row: pull cursor, push cursors, device version vector).
  *
  * Dexie runs upgrade hooks only when an existing database is older than the
  * version being installed, so a fresh install applies both schemas in order and
@@ -33,14 +36,22 @@ import type {
   RevisionRecord,
   SettingRecord,
   SourceFileRecord,
+  SyncConflictRecord,
+  SyncMetaRecord,
   TranslationMemoryRecord,
   TranslationRecord,
   UsageStatsRecord,
 } from './types'
 
 export const DB_NAME = 'aidt'
-export const DB_SCHEMA_VERSION = 6
+export const DB_SCHEMA_VERSION = 7
 
+/**
+ * Tables included in backup export/import. `syncConflicts` / `syncMeta` are
+ * deliberately device-local bookkeeping (pull cursors, per-device vectors) and
+ * must not travel between devices — restoring stale cursors would make a fresh
+ * device skip cloud changes it never saw.
+ */
 export const TABLE_NAMES = [
   'projects',
   'pages',
@@ -94,6 +105,8 @@ export class AppDatabase extends Dexie {
   usageStats!: Table<UsageStatsRecord, string>
   sourceFiles!: Table<SourceFileRecord, string>
   revisions!: Table<RevisionRecord, string>
+  syncConflicts!: Table<SyncConflictRecord, string>
+  syncMeta!: Table<SyncMetaRecord, string>
 
   constructor(name = DB_NAME) {
     super(name)
@@ -321,6 +334,28 @@ export class AppDatabase extends Dexie {
             }
           })
       })
+
+    this.version(7).stores({
+      projects: 'id, name, status, lastOpenedAt, archivedAt, createdAt, updatedAt',
+      pages: 'id, [projectId+index], projectId, ocrStatus, contentClass, updatedAt',
+      blocks: 'id, [projectId+pageId+order], projectId, pageId, kind, status, region, updatedAt',
+      translations:
+        'id, sourceHash, [projectId+blockId], projectId, blockId, provider, status, updatedAt',
+      glossary: 'id, sourceTerm, targetTerm, projectId, updatedAt',
+      translationMemory: 'id, sourceHash, [sourceLang+targetLang+sourceHash], hits, updatedAt',
+      cache: 'id, [kind+key], kind, expiresAt, lastAccessAt, updatedAt',
+      jobs: 'id, state, type, projectId, startedAt, updatedAt',
+      events: 'id, timestamp, severity, reasonCode, state, updatedAt',
+      outbox: 'id, [entity+entityId], nextAttemptAt, updatedAt',
+      settings: 'id, group, updatedAt',
+      apiKeys: 'id, provider, status, updatedAt',
+      usageStats: 'id, [provider+model+day], day, provider, updatedAt',
+      sourceFiles: 'id, projectId, updatedAt',
+      revisions: 'id, [projectId+blockId], projectId, blockId, timestamp, updatedAt',
+      // Phase 5 — cloud sync bookkeeping (see src/sync/).
+      syncConflicts: 'id, entity, entityId, detectedAt, updatedAt',
+      syncMeta: 'id',
+    })
   }
 }
 

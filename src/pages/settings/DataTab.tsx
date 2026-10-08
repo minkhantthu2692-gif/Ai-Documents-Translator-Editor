@@ -1,62 +1,27 @@
 import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useLiveQuery } from 'dexie-react-hooks'
-import { Badge, Button, Card, ConfirmDialog, Input, Select, Switch } from '@/components/ui'
-import { SETTING_KEYS, settingsRepo } from '@/db/repo-settings'
+import { Button, Card, ConfirmDialog, Select } from '@/components/ui'
+import { settingsRepo } from '@/db/repo-settings'
 import { downloadBackup, restoreBackupFromFile } from '@/db/backup'
 import { deleteDatabase } from '@/db/db'
-import { outboxRepo } from '@/db/repo-outbox'
-import { destroyDeviceSecret, sealText, type SealedPayload } from '@/core/crypto'
+import { destroyDeviceSecret } from '@/core/crypto'
 import { logEvent } from '@/core/eventLogger'
 import { toast } from '@/stores/toastStore'
 import { useUiStore } from '@/stores/uiStore'
-import { useSetting } from './useSetting'
+import { SyncCard } from './SyncCard'
 
-interface TokenSetting {
-  sealed: SealedPayload | null
-  lastFour: string
-}
-
-const EMPTY_TOKEN: TokenSetting = { sealed: null, lastFour: '' }
-
+/**
+ * Data tab: cloud sync (delegated to `SyncCard`), local backup export/import
+ * and the danger zone. The backup file input is the only `<input type=file>`
+ * on this page — the smoke test drives it directly.
+ */
 export function DataTab() {
   const { t } = useTranslation()
-  const [appsScriptUrl, setAppsScriptUrl] = useSetting<string>(SETTING_KEYS.appsScriptUrl, '')
-  const [tokenSetting, setTokenSetting] = useSetting<TokenSetting>(
-    SETTING_KEYS.appsScriptToken,
-    EMPTY_TOKEN,
-  )
-  const [syncEnabled, setSyncEnabled] = useSetting<boolean>(SETTING_KEYS.syncEnabled, false)
-  const [autoSync, setAutoSync] = useSetting<boolean>(SETTING_KEYS.autoSync, false)
-  const [interval, setIntervalMinutes] = useSetting<number>(SETTING_KEYS.autoSyncInterval, 15)
-  const [conflictPolicy, setConflictPolicy] = useSetting<string>(
-    SETTING_KEYS.conflictPolicy,
-    'newest',
-  )
 
-  const pendingSync = useLiveQuery(() => outboxRepo.pendingCount(), [])
   const fileRef = useRef<HTMLInputElement>(null)
   const [importMode, setImportMode] = useState<'replace' | 'merge'>('replace')
-  const [tokenDraft, setTokenDraft] = useState('')
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false)
   const [busy, setBusy] = useState(false)
-
-  async function saveToken() {
-    const value = tokenDraft.trim()
-    if (!value) return
-    const sealed = await sealText(value)
-    await setTokenSetting({ sealed, lastFour: value.slice(-4) })
-    setTokenDraft('')
-    logEvent({
-      state: 'SETTINGS',
-      action: 'sync.token.save',
-      severity: 'success',
-      messageMy: 'ဝင်ရောက်ခွင့်သော့ ကုဒ်ပြင်းထပ်၍ သိမ်းပြီး',
-      messageEn: 'Access token encrypted and stored',
-      technicalDetail: 'AES-GCM / PBKDF2-SHA256 150000 iterations',
-    })
-    toast('success', t('common.saved'))
-  }
 
   async function exportBackup() {
     setBusy(true)
@@ -137,82 +102,14 @@ export function DataTab() {
 
   return (
     <div className="flex flex-col gap-4">
-      <Card
-        title={t('settings.data.sync')}
-        description={t('settings.data.cloudNote')}
-        actions={
-          pendingSync ? (
-            <Badge tone="warning" dot>
-              {t('settings.data.syncPending', { count: pendingSync })}
-            </Badge>
-          ) : null
-        }
-      >
-        <div className="flex flex-col gap-4">
-          <Input
-            label={t('settings.data.appsScriptUrl')}
-            hint={t('settings.data.appsScriptUrlDesc')}
-            type="url"
-            inputMode="url"
-            placeholder="https://script.google.com/macros/s/…/exec"
-            value={appsScriptUrl}
-            onChange={(event) => void setAppsScriptUrl(event.target.value)}
-          />
-
-          <Input
-            label={t('settings.data.appsScriptToken')}
-            hint={t('settings.data.appsScriptTokenDesc')}
-            type="password"
-            autoComplete="off"
-            placeholder={tokenSetting.sealed ? `••••${tokenSetting.lastFour}` : ''}
-            value={tokenDraft}
-            onChange={(event) => setTokenDraft(event.target.value)}
-            onBlur={() => void saveToken()}
-          />
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Switch
-              checked={syncEnabled}
-              onChange={(next) => void setSyncEnabled(next)}
-              label={t('settings.data.syncEnabled')}
-              description={t('settings.data.syncEnabledDesc')}
-            />
-            <Switch
-              checked={autoSync}
-              onChange={(next) => void setAutoSync(next)}
-              label={t('settings.data.autoSync')}
-              description={t('settings.data.autoSyncDesc')}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Input
-              label={t('settings.data.interval')}
-              type="number"
-              min={1}
-              max={1440}
-              value={String(interval)}
-              onChange={(event) => void setIntervalMinutes(Number(event.target.value))}
-            />
-            <Select
-              label={t('settings.data.conflict')}
-              value={conflictPolicy}
-              onChange={(event) => void setConflictPolicy(event.target.value)}
-              options={[
-                { value: 'local', label: t('settings.data.conflictLocal') },
-                { value: 'remote', label: t('settings.data.conflictRemote') },
-                { value: 'newest', label: t('settings.data.conflictNewest') },
-              ]}
-            />
-          </div>
-        </div>
-      </Card>
+      <SyncCard />
 
       <Card title={t('settings.data.backup')}>
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-xs text-muted">{t('settings.data.exportDesc')}</p>
             <Button
+              data-testid="backup-export"
               variant="secondary"
               size="sm"
               loading={busy}
@@ -238,6 +135,7 @@ export function DataTab() {
             <div>
               <input
                 ref={fileRef}
+                data-testid="backup-file"
                 type="file"
                 accept="application/json,.json"
                 className="sr-only"
@@ -248,6 +146,7 @@ export function DataTab() {
                 }}
               />
               <Button
+                data-testid="backup-import"
                 variant="secondary"
                 size="sm"
                 loading={busy}
@@ -265,7 +164,12 @@ export function DataTab() {
           <p className="max-w-2xl text-xs leading-relaxed text-muted">
             {t('settings.data.deleteAllBody')}
           </p>
-          <Button variant="danger" size="sm" onClick={() => setConfirmDeleteAll(true)}>
+          <Button
+            data-testid="delete-local"
+            variant="danger"
+            size="sm"
+            onClick={() => setConfirmDeleteAll(true)}
+          >
             {t('settings.data.deleteAllTitle')}
           </Button>
         </div>

@@ -1,17 +1,21 @@
 /**
- * Phase 2 smoke test — drives the running dev server in headless Chrome over CDP.
+ * Smoke test — drives the running dev server in headless Chrome over CDP.
  * Verifies: routes render, responsive breakpoints, theme + language persistence,
  * the PDF wizard (scanned flagging, password prompt + retry, 300-page analysis),
- * workspace thumbnails + layout extraction, Dexie data surviving reload, and a
- * UI-level backup export/import round-trip.
+ * workspace thumbnails + layout extraction, Dexie data surviving reload, a
+ * UI-level backup export/import round-trip, the editor/export/knowledge flows,
+ * and Phase 5: sync controls + testids, the troubleshooting assistant dialog
+ * (offline rule answer with safe actions), the tooling files, `.env` hygiene
+ * and `tools/launcher.html` rendering from `file://`.
  *
  * Requires: `npm run dev` on :5173 and `fixtures/` (see scripts/make-fixtures.mjs).
  */
 import { spawn } from 'node:child_process'
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
+import { pathToFileURL } from 'node:url'
 
 const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
 const PORT = 9444
@@ -1133,7 +1137,169 @@ try {
   )
   check('Noto Sans Myanmar webfont is loaded', fontLoaded === true, String(fontLoaded))
 
-  // 10) Console hygiene ---------------------------------------------------
+  // 10) Phase 5 — sync UI, troubleshooting assistant, tooling ---------------
+  const expectedFiles = [
+    'apps-script/Code.gs',
+    'apps-script/appsscript.json',
+    '.env.example',
+    'tools/launcher.html',
+    'tools/open-app.bat',
+    'tools/open-app.sh',
+    'tools/push-to-github.bat',
+    'tools/push-to-github.sh',
+    '.github/workflows/deploy.yml',
+    'proxy/server.js',
+    'proxy/README.md',
+    'README.md',
+    'README.my.md',
+    'docs/GOOGLE_APPS_SCRIPT_SETUP.md',
+    'docs/GOOGLE_APPS_SCRIPT_SETUP.my.md',
+    'docs/API_KEYS_GUIDE.md',
+    'docs/API_KEYS_GUIDE.my.md',
+    'docs/TROUBLESHOOTING.md',
+    'docs/TROUBLESHOOTING.my.md',
+    'docs/ARCHITECTURE.md',
+    'docs/SECURITY.md',
+    'docs/DEPLOYMENT.md',
+    'docs/CONTRIBUTING.md',
+    'docs/LICENSE',
+    'docs/CHANGELOG.md',
+    'docs/TEST_CHECKLIST.md',
+  ]
+  const missingFiles = expectedFiles.filter((f) => !existsSync(resolve(f)))
+  check(
+    'Phase 5 tooling + docs files exist',
+    missingFiles.length === 0,
+    missingFiles.join(', ') || `${expectedFiles.length} files`,
+  )
+
+  const envExample = readFileSync(resolve('.env.example'), 'utf8')
+  check(
+    '.env.example documents the three VITE_ variables',
+    ['VITE_APPS_SCRIPT_URL', 'VITE_APPS_SCRIPT_TOKEN', 'VITE_ASSISTANT_PROXY_URL'].every((key) =>
+      envExample.includes(key),
+    ),
+    '',
+  )
+  const gitignoreText = readFileSync(resolve('.gitignore'), 'utf8')
+  check('.gitignore excludes .env (secrets stay local)', /^\.env$/m.test(gitignoreText), '')
+
+  await goto('/settings?tab=data')
+  const syncState = await waitFor(
+    `(() => { const el = document.querySelector('[data-testid="sync-status"]'); return el ? el.getAttribute('data-state') : null })()`,
+    10000,
+  )
+  check(
+    'sync status line renders a valid state',
+    ['disabled', 'idle', 'syncing', 'error', 'offline'].includes(String(syncState)),
+    `data-state=${syncState}`,
+  )
+  const syncControls = await evalJs(
+    `['sync-now', 'test-connection', 'wipe-cloud', 'sync-url', 'sync-token', 'sync-enabled', 'sync-autosync', 'sync-interval', 'sync-policy'].filter(id => !!document.querySelector('[data-testid="' + id + '"]')).length`,
+  )
+  check('sync controls present', syncControls === 9, `found=${syncControls}/9`)
+  const syncToggles = await evalJs(
+    `['projects', 'pages', 'blocks', 'glossary', 'settings', 'usage'].filter(id => !!document.querySelector('[data-testid="sync-toggle-' + id + '"]')).length`,
+  )
+  check('per-entity sync toggles present', syncToggles === 6, `found=${syncToggles}/6`)
+  const fileInputs = await evalJs(`document.querySelectorAll('input[type="file"]').length`)
+  check('backup file input still unique on the Data tab', fileInputs === 1, `count=${fileInputs}`)
+  check(
+    'backup export/import + delete-local buttons present',
+    await evalJs(
+      `['backup-export', 'backup-import', 'delete-local'].every(id => !!document.querySelector('[data-testid="' + id + '"]'))`,
+    ),
+  )
+
+  await goto('/logs')
+  check(
+    'Logs page offers the assistant entry',
+    await clickWhenReady('[data-testid="open-assistant"]'),
+  )
+  const dialogUp = await waitFor(
+    `!!document.querySelector('[data-testid="assistant-dialog"]')`,
+    10000,
+  )
+  check('assistant dialog opens', Boolean(dialogUp))
+  const assistantMode = await waitFor(
+    `(() => { const el = document.querySelector('[data-testid="assistant-mode"]'); return el ? el.getAttribute('data-mode') : null })()`,
+    5000,
+  )
+  check(
+    'assistant mode badge renders',
+    ['offline', 'proxy'].includes(String(assistantMode)),
+    `mode=${assistantMode}`,
+  )
+  check(
+    'assistant question field + ask button present',
+    await evalJs(
+      `!!document.querySelector('[data-testid="assistant-question"]') && !!document.querySelector('[data-testid="assistant-ask"]')`,
+    ),
+  )
+
+  // The dialog auto-asks on open; without a proxy the offline rules answer first.
+  const firstAnswer = await waitFor(
+    `(() => { const el = document.querySelector('[data-testid="assistant-answer"]'); return el ? el.innerText.length : false })()`,
+    25000,
+  )
+  check('assistant produces an answer', Boolean(firstAnswer), `chars=${firstAnswer}`)
+  if (String(assistantMode) === 'offline') {
+    const fallbackActions = await evalJs(
+      `document.querySelectorAll('[data-testid^="assistant-action-"]').length`,
+    )
+    check(
+      'offline answer offers >= 3 safe actions',
+      fallbackActions >= 3,
+      `actions=${fallbackActions}`,
+    )
+  }
+
+  await evalJs(`(() => {
+    const el = document.querySelector('[data-testid="assistant-question"]')
+    if (!el) return false
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(el, 'rate limit exceeded — what should I do?')
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    return true
+  })()`)
+  check(
+    'assistant question field accepts input',
+    await clickWhenReady('[data-testid="assistant-ask"]'),
+  )
+  if (String(assistantMode) === 'offline') {
+    const explained = await waitFor(
+      `/rate limit/i.test(document.querySelector('[data-testid="assistant-answer"]')?.innerText ?? '')`,
+      25000,
+    )
+    check('offline rules explain the rate-limit question', Boolean(explained))
+    const steps = await evalJs(
+      `document.querySelectorAll('[data-testid="assistant-answer"] ol li, [data-testid="assistant-answer"] [data-testid="assistant-step"]').length`,
+    )
+    check('answer lists numbered steps', steps >= 1, `steps=${steps}`)
+  }
+
+  // launcher.html must render standalone (file://) with no build step.
+  await send('Page.navigate', { url: pathToFileURL(resolve('tools/launcher.html')).href })
+  const launcherReady = await waitFor(
+    `document.readyState === 'complete' && !!document.getElementById('checks')`,
+    10000,
+  )
+  const launcherIds = await evalJs(
+    `['checks', 'btn-open-app', 'btn-github', 'btn-lang', 'btn-theme', 'btn-refresh'].filter(id => !!document.getElementById(id)).length`,
+  )
+  check(
+    'launcher.html renders from file:// with all controls',
+    Boolean(launcherReady) && launcherIds === 6,
+    `ids=${launcherIds}/6`,
+  )
+  const launcherCommands = await evalJs(`document.querySelectorAll('.cmd code').length`)
+  check(
+    'launcher checklist exposes copyable commands',
+    launcherCommands >= 6,
+    `cmds=${launcherCommands}`,
+  )
+
+  // 11) Console hygiene ---------------------------------------------------
   const realErrors = consoleErrors.filter(
     (e) => !/favicon|Failed to load resource: the server responded with a status of 404/.test(e),
   )

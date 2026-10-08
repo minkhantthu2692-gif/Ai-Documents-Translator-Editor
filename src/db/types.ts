@@ -294,6 +294,28 @@ export type OutboxEntity =
   | 'translationMemory'
   | 'event'
   | 'settings'
+  /** Phase 5 — usageStats rows travel under this singular queue name. */
+  | 'usage'
+
+/**
+ * Phase 5 — entities that travel to the Google Sheet (wire names, identical to
+ * `SHEET_DEFS_[].entity` in apps-script/Code.gs). Everything else — apiKeys,
+ * translations, events, revisions, cache, jobs, sourceFiles — stays local by
+ * design; `apiKey` is not even in this union so it cannot be synced by
+ * accident. `settings` sync also drops secret-looking ids client-side before
+ * the server's own SECRET_NOT_ALLOWED check.
+ */
+export type SyncableEntity =
+  'projects' | 'pages' | 'blocks' | 'glossary' | 'settings' | 'usageStats'
+
+export const SYNCABLE_ENTITIES: readonly SyncableEntity[] = [
+  'projects',
+  'pages',
+  'blocks',
+  'glossary',
+  'settings',
+  'usageStats',
+]
 
 export interface OutboxRecord extends BaseRecord {
   entity: OutboxEntity
@@ -314,6 +336,56 @@ export interface SettingRecord {
   deviceId: string
   version: number
   createdAt: number
+}
+
+/**
+ * Phase 5 — one entry in the cloud-sync conflict log (LWW resolution).
+ * Whenever a pulled remote change overwrites a local record that had local
+ * edits (or the local change loses on push), the losing side is captured here
+ * so Settings → Data can show what was replaced and offer a restore.
+ */
+export interface SyncConflictRecord extends BaseRecord {
+  entity: SyncableEntity
+  entityId: string
+  projectId: string | null
+  /** Which side survived the merge. */
+  winner: 'local' | 'remote'
+  /** The policy in force when the conflict was resolved. */
+  policy: 'local' | 'remote' | 'newest'
+  localUpdatedAt: number
+  remoteUpdatedAt: number
+  localVersion: number
+  remoteVersion: number
+  /** Snapshot of the losing record (the side that did not survive). */
+  loser: Record<string, unknown>
+  detectedAt: number
+  resolvedAt: number
+}
+
+/**
+ * Phase 5 — single-row sync state (`id: 'meta'`). Device-local only: never
+ * synced, never backed up. `vector` maps deviceId → highest `updatedAt` this
+ * device has seen from it (the version vector that makes delta pull possible
+ * after an offline period).
+ */
+export interface SyncMetaRecord {
+  id: 'meta'
+  /** `updatedAt` cursor for push collection (local rows newer than this). */
+  pushCursor: number
+  /** Server `since` cursor for pullChanges. */
+  pullCursor: number
+  deviceId: string
+  /** deviceId → max updatedAt observed from that device. */
+  vector: Record<string, number>
+  /** Wire entities included in the previous run (detects toggle-on rescans). */
+  syncedEntities?: SyncableEntity[]
+  lastPushAt: number | null
+  lastPullAt: number | null
+  lastSyncAt: number | null
+  lastError: string | null
+  lastErrorCode: string | null
+  createdAt: number
+  updatedAt: number
 }
 
 export type ApiKeyStatus = 'unknown' | 'valid' | 'invalid' | 'cooling' | 'quota'

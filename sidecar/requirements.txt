@@ -1,0 +1,17 @@
+# Sidecar dependencies — Python 3.12 (developed against the versions below).
+# Install:  python -m pip install -r requirements.txt
+# (All three are already present in the dev environment; do not reinstall.)
+
+# PDF parsing / text extraction / page rendering.
+# Import name is `pymupdf` — the legacy `import fitz` alias prints a
+# deprecation warning and must not be used.
+pymupdf==1.28.2
+
+# Text-layer table detection (page.find_tables()) used by /extract.
+# Degrades gracefully to "no tables" if it cannot import or parse.
+pdfplumber==0.11.10
+
+# Tesseract wrapper for /ocr and for scanned pages in /extract?mode=auto.
+# Requires the tesseract binary (C:\Program Files\Tesseract-OCR\tesseract.exe)
+# and Pillow (installed as a dependency of pytesseract/pdfplumber).
+pytesseract==0.3.13

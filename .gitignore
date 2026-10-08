@@ -30,3 +30,9 @@ pnpm-debug.log*
 
 # Personal notes at the repo root — never committed
 /types-of-pdf-file.md
+
+# Python sidecar artifacts
+__pycache__/
+*.pyc
+# tesseract.js drops language data in the working directory on first use
+*.traineddata

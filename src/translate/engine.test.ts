@@ -3,12 +3,13 @@
  * flags/confidence the coverage report is built from. Transport is a mock and
  * sleep is injected, so no clock and no network are involved.
  */
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { Placeholder } from '@/pdf/placeholders'
 import { emptyRateLimit } from '@/providers/rateLimit'
 import { runBatch, type EngineOptions } from './engine'
 import type { BatchTransport, TransportOk } from './executor'
 import { KeyPool, type KeySeed } from './keyPool'
+import { resetTokenScale, tokenScale } from './tokenEstimate'
 import type { BatchLine, GlossarySpec, TranslationBatch } from './types'
 
 const T0 = 1_700_000_000_000
@@ -193,5 +194,31 @@ describe('glossary', () => {
     expect(result.lines[0].text).toBe('API သော့ ကို သိမ်းပါ')
     expect(result.lines[0].flag).toBe('glossary-miss')
     expect(result.lines[0].confidence).toBeCloseTo(0.9, 3)
+  })
+})
+
+describe('token calibration', () => {
+  afterEach(() => resetTokenScale())
+
+  /** A batch the provider claims cost 1000× more than we predicted. */
+  async function runWithUsage(overrides: Partial<EngineOptions>): Promise<void> {
+    const batch = batchOf([line('b1', 'a'.repeat(300))]) // 100 source tokens
+    const transport: BatchTransport = async ({ call }) => ({
+      ...ok(answer(call.user, () => 'translated')),
+      tokensIn: 100_000,
+    })
+    await runBatch(batch, engineOptions({ transport, ...overrides }))
+  }
+
+  it('folds the provider usage into the estimator when the run opts in', async () => {
+    await runWithUsage({ calibrate: true })
+
+    expect(tokenScale()).toBeGreaterThan(1)
+  })
+
+  it('leaves the estimator alone by default, so tests and previews stay stable', async () => {
+    await runWithUsage({})
+
+    expect(tokenScale()).toBe(1)
   })
 })

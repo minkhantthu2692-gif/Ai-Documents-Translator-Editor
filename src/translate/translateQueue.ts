@@ -39,6 +39,7 @@ import { usageRepo } from '@/db/repo-usage'
 import type { ApiKeyRecord, BlockRecord, TranslationFlag } from '@/db/types'
 import { useTranslateStore } from '@/stores/translateStore'
 import { BATCH_DEFAULTS, buildBatches } from './batching'
+import { computeBudget } from './budget'
 import { AdaptiveLimiter, RateMeter } from './concurrency'
 import {
   TranslationRunCancelled,
@@ -47,6 +48,7 @@ import {
 } from './translationClient'
 import { estimateTokens, type PersistedKeyState } from './keyPool'
 import type { RunnerHooks, TranslateRunner } from './protocol'
+import { resetTokenScale } from './tokenEstimate'
 import { lookupTranslation, storeTranslation } from './tm'
 import type {
   BatchLine,
@@ -188,6 +190,7 @@ export async function buildTranslatePlan(
   projectId: string,
   config: TranslateRunConfig,
   epoch: number,
+  glossary?: GlossarySpec[],
 ): Promise<TranslatePlan> {
   // Assistant / settings can lower the batch size (rate limits, quota) — the
   // value lives in `translate.batchMaxLines` and is clamped to a sane range.
@@ -199,6 +202,19 @@ export async function buildTranslatePlan(
     typeof storedMaxLines === 'number' && Number.isFinite(storedMaxLines) && storedMaxLines >= 1
       ? Math.floor(storedMaxLines)
       : BATCH_DEFAULTS.maxLines
+
+  // How much content one request may carry, taken from the *model* instead of
+  // a flat constant. The narrowest window in the fallback chain wins, so a
+  // batch can never outgrow a model that may end up serving it.
+  const budget = computeBudget({
+    provider: config.provider,
+    models: modelChain(config),
+    quality: config.quality,
+    sourceLang: config.sourceLang,
+    targetLang: config.targetLang,
+    terminologyScope: config.terminologyScope,
+    glossary: glossary ?? (await loadGlossary(projectId)),
+  })
 
   const pages = (await pageRepo.listByProject(projectId)).sort((a, b) => a.index - b.index)
   const blocks = await blockRepo.listByProject(projectId)
@@ -249,7 +265,10 @@ export async function buildTranslatePlan(
     pageTotals.set(page.index, onPageTotal)
     pageDone.set(page.index, doneOnPage)
 
-    const batches = buildBatches(projectId, epoch, page.index, lines, { maxLines })
+    const batches = buildBatches(projectId, epoch, page.index, lines, {
+      maxLines,
+      maxTokens: budget.fillTargetTokens,
+    })
     const jobs: TranslateJob[] = batches.map((batch, position) => ({
       id: batch.id,
       projectId,
@@ -818,8 +837,11 @@ export async function startTranslate(
   stopCurrentRun()
 
   const epoch = Date.now()
-  const plan = await buildTranslatePlan(projectId, config, epoch)
+  // A fresh run starts from the static script weights; the provider's reported
+  // usage re-calibrates them within the first few requests.
+  resetTokenScale()
   const glossary = await loadGlossary(projectId)
+  const plan = await buildTranslatePlan(projectId, config, epoch, glossary)
   const models = modelChain(config)
   const limits = limitsFor(config)
   const sessionId = `${projectId}#${epoch}`

@@ -12,6 +12,10 @@
  *
  * Every function is pure w.r.t. its `now` argument, so the 429-storm tests run
  * on a virtual clock with no timers.
+ *
+ * Token *sizes* are not this module's business — the buckets are fed
+ * `estimateTokens()` from `tokenEstimate.ts`, which knows that a Burmese
+ * character is worth several times an English one.
  */
 
 import type { RateLimitInfo } from '@/providers/rateLimit'
@@ -125,10 +129,16 @@ function maskOf(lastFour: string): string {
   return `••••${lastFour || '????'}`
 }
 
-/** Conservative estimate: 1 token ≈ 3 characters of source text. */
-export function estimateTokens(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 3))
-}
+/**
+ * Conservative token estimate for one string.
+ *
+ * Moved to `tokenEstimate.ts`, where it is script-aware (Burmese and other
+ * non-Latin scripts cost far more than the old `len / 3` assumed) and
+ * self-calibrating against the provider's reported `usage`. Re-exported here
+ * because this module's TPM buckets are its main consumer and it is where the
+ * rest of the pipeline has always imported it from.
+ */
+export { estimateTokens } from './tokenEstimate'
 
 export class KeyPool {
   private readonly keys = new Map<string, KeyState>()

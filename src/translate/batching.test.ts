@@ -3,9 +3,12 @@
  */
 import { describe, expect, it } from 'vitest'
 import { BATCH_DEFAULTS, buildBatches, countLines, splitBatch, splitToLines } from './batching'
+import { estimateTokens } from './tokenEstimate'
 import type { BatchLine } from './types'
 
 const EPOCH = 1_700_000_000_000
+/** Historic soft minimum — batches are still at least this big when they fit. */
+const MIN_LINES = 15
 
 function lines(count: number, chars = 12): BatchLine[] {
   return Array.from({ length: count }, (_, index) => ({
@@ -25,7 +28,7 @@ describe('buildBatches', () => {
 
     expect(batches.map((batch) => batch.lines.length)).toEqual([25, 25, 10])
     for (const batch of batches.slice(0, -1)) {
-      expect(batch.lines.length).toBeGreaterThanOrEqual(BATCH_DEFAULTS.minLines)
+      expect(batch.lines.length).toBeGreaterThanOrEqual(MIN_LINES)
       expect(batch.lines.length).toBeLessThanOrEqual(BATCH_DEFAULTS.maxLines)
     }
     expect(batches.flatMap((batch) => batch.lines.map((line) => line.id))).toEqual(
@@ -43,9 +46,37 @@ describe('buildBatches', () => {
       expect(batch.tokens).toBeLessThanOrEqual(BATCH_DEFAULTS.maxTokens)
       expect(batch.lines.length).toBeLessThanOrEqual(BATCH_DEFAULTS.maxLines)
     }
-    expect(
-      batches.slice(0, -1).every((batch) => batch.lines.length >= BATCH_DEFAULTS.minLines),
-    ).toBe(true)
+    expect(batches.slice(0, -1).every((batch) => batch.lines.length >= MIN_LINES)).toBe(true)
+    expect(batches.flatMap((batch) => batch.lines.map((line) => line.id))).toEqual(
+      source.map((line) => line.id),
+    )
+  })
+
+  it('lets the token budget win over the line floor for long lines', () => {
+    // Before the budget was enforced unconditionally, a batch could only flush
+    // on tokens once it held `MIN_LINES` lines — so 14 long lines shipped as
+    // one oversized request. Now the budget cuts first.
+    const longLines = 200
+    const source = lines(30, longLines * 3)
+    const perLine = estimateTokens('x'.repeat(longLines * 3))
+    const maxTokens = perLine * 5 // five long lines per request, no more
+    const batches = buildBatches('proj', EPOCH, 0, source, { maxTokens })
+
+    for (const batch of batches) {
+      expect(batch.lines.length).toBeLessThanOrEqual(5)
+      if (batch.lines.length > 1) expect(batch.tokens).toBeLessThanOrEqual(maxTokens)
+    }
+    expect(batches[0].lines.length).toBe(5)
+    expect(batches.flatMap((batch) => batch.lines.map((line) => line.id))).toEqual(
+      source.map((line) => line.id),
+    )
+  })
+
+  it('still sends a single line that alone exceeds the budget', () => {
+    const source = lines(3, 9_000) // ~3000 tokens a line
+    const batches = buildBatches('proj', EPOCH, 0, source, { maxTokens: 500 })
+
+    expect(batches.map((batch) => batch.lines.length)).toEqual([1, 1, 1])
     expect(batches.flatMap((batch) => batch.lines.map((line) => line.id))).toEqual(
       source.map((line) => line.id),
     )

@@ -180,9 +180,3 @@ ${pairs}`
 /** Short instruction prepended when a batch is retried after bad JSON. */
 export const REPAIR_SUFFIX =
   '\n\nYour previous answer was rejected by a strict validator. Return valid JSON with exactly the requested ids and count.'
-
-/** Maximum completion size for a batch (protects the free tier). */
-export function maxOutputTokensFor(batch: TranslationBatch): number {
-  // ~1.6x the source estimate, clamped to a sane window.
-  return Math.min(4_000, Math.max(256, Math.round(batch.tokens * 1.6)))
-}

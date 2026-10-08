@@ -19,6 +19,7 @@
 /// <reference lib="webworker" />
 
 import { decodeSealed, openText } from '@/core/crypto'
+import { computeBudget } from '@/translate/budget'
 import { defaultSleep, type BatchTransport } from '@/translate/executor'
 import { runBatch } from '@/translate/engine'
 import { KeyPool, type KeySeed, type PersistedKeyState } from '@/translate/keyPool'
@@ -30,6 +31,7 @@ import type {
   WorkerToMain,
   WaitingReason,
 } from '@/translate/protocol'
+import { resetTokenScale } from '@/translate/tokenEstimate'
 import { getAdapter } from '@/providers'
 import { ProviderError } from '@/providers/types'
 import type { ReasonCode } from '@/core/reasonCodes'
@@ -137,6 +139,9 @@ async function handleOpen(message: OpenMessage): Promise<void> {
   )
   nextPool.setKeys(seeds)
   pool = nextPool
+  // A new session starts from the static script weights; the first few
+  // responses re-calibrate them against this provider's real tokenizer.
+  resetTokenScale()
   session = {
     sessionId: message.sessionId,
     config: message.config,
@@ -164,6 +169,17 @@ async function handleRun(message: RunMessage): Promise<void> {
   const controller = new AbortController()
   controllers.set(message.id, controller)
   const adapter = getAdapter(message.config.provider)
+  // One profile for the whole chain: the narrowest window wins, so a batch
+  // sized for the selected model also fits whatever fallback answers instead.
+  const budget = computeBudget({
+    provider: message.config.provider,
+    models: message.models,
+    quality: message.config.quality,
+    sourceLang: message.config.sourceLang,
+    targetLang: message.config.targetLang,
+    terminologyScope: message.config.terminologyScope,
+    glossary: message.glossary,
+  })
   let waiting = false
 
   const transport: BatchTransport = async (input) => {
@@ -207,6 +223,10 @@ async function handleRun(message: RunMessage): Promise<void> {
       targetLang: message.config.targetLang,
       terminologyScope: message.config.terminologyScope,
       glossary: message.glossary,
+      budget,
+      // The provider's `usage` is the ground truth for how expensive this
+      // script really is — let it correct the estimator for the rest of the run.
+      calibrate: true,
       context: message.context,
       signal: controller.signal,
       sleep: defaultSleep,

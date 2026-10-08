@@ -22,11 +22,11 @@
 import { missingPlaceholders, restorePlaceholders } from '@/pdf/placeholders'
 import type { TranslateCall } from '@/providers/types'
 import { splitBatch, splitToLines } from './batching'
+import { fallbackBudget, maxOutputFor, type BudgetProfile } from './budget'
 import { validateResponse, type Validation } from './batchValidation'
 import { executeWithRotation, type BatchTransport, type ExecutorHooks } from './executor'
-import { estimateTokens, type KeyPool } from './keyPool'
+import type { KeyPool } from './keyPool'
 import {
-  maxOutputTokensFor,
   qualitySpec,
   REPAIR_SUFFIX,
   reviewPrompt,
@@ -34,6 +34,7 @@ import {
   temperatureFor,
   userPrompt,
 } from './prompts'
+import { estimateTokens, recordTokenCalibration } from './tokenEstimate'
 import { postProcessTranslation } from './terminology'
 import type {
   BatchResultLine,
@@ -63,6 +64,19 @@ export interface EngineOptions {
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
   hooks?: ExecutorHooks
   maxConsecutiveFailures?: number
+  /**
+   * Size limits for the model chain (context window, completion cap, content
+   * budget). Computed once per run by `computeBudget`; when omitted the engine
+   * falls back to the conservative unknown-model profile so a batch can never
+   * exceed a window nobody told it about.
+   */
+  budget?: BudgetProfile
+  /**
+   * Fold the provider's reported `usage.prompt_tokens` into the token
+   * estimator. Off by default so tests stay deterministic; the production run
+   * (`translation.worker.ts`) turns it on.
+   */
+  calibrate?: boolean
   /** Page-scoped terminology state — owned by the caller, mutated here. */
   seenPage: Set<string>
   /** Document-scoped terminology state (scope `document`). */
@@ -123,6 +137,15 @@ export async function runBatch(
     glossary: options.glossary,
     terminologyScope: options.terminologyScope,
   })
+  const budget =
+    options.budget ??
+    fallbackBudget({
+      quality: options.quality,
+      sourceLang: options.sourceLang,
+      targetLang: options.targetLang,
+      terminologyScope: options.terminologyScope,
+      glossary: options.glossary,
+    })
 
   const executorHooks: ExecutorHooks = {
     ...options.hooks,
@@ -144,7 +167,7 @@ export async function runBatch(
       system,
       user,
       temperature: temperatureFor(options.quality),
-      maxOutputTokens: maxOutputTokensFor(target),
+      maxOutputTokens: maxOutputFor(budget, target),
     }
     const outcome = await executeWithRotation(() => call, {
       pool: options.pool,
@@ -173,6 +196,12 @@ export async function runBatch(
       keyId: outcome.keyId,
       maskedKey: outcome.maskedKey,
     })
+
+    // The provider told us the truth about the prompt size — let it correct
+    // the estimator for the rest of the run (and every later batch).
+    if (options.calibrate) {
+      recordTokenCalibration(estimateTokens(system) + estimateTokens(user), outcome.tokensIn)
+    }
 
     return validateResponse(outcome.text, target)
   }
@@ -267,7 +296,7 @@ export async function runBatch(
           glossary: options.glossary,
         }),
         temperature: temperatureFor(options.quality),
-        maxOutputTokens: maxOutputTokensFor(batch),
+        maxOutputTokens: maxOutputFor(budget, batch),
       }
       const outcome = await executeWithRotation(() => reviewCall, {
         pool: options.pool,

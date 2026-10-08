@@ -60,17 +60,36 @@ function messageFrom(body: unknown, raw: string): string {
   return raw.slice(0, 400)
 }
 
-/** True when the provider text says the *quota* ran out (not just a burst). */
-function looksLikeQuota(text: string, status: number): boolean {
-  if (status === 429) return false
-  return /quota|resource_exhausted|daily limit|insufficient_quota|exceeded your current/i.test(text)
+/**
+ * Body-text signals that mean "burst throttling" or "the allowance is gone".
+ *
+ * Providers answer **429 for both**, so the status code alone cannot tell them
+ * apart — and the difference matters: a burst backs off for seconds, a spent
+ * daily allowance must park the key for the rest of the window and surface
+ * `QUOTA_EXHAUSTED` instead of retrying against a wall for thirty attempts.
+ */
+const DAILY_QUOTA_HINT =
+  /per[-\s]?day|\/ ?day\b|\bdaily\b|per[-\s]?24 hours|insufficient_quota|exceeded your current/i
+const RATE_LIMIT_HINT =
+  /per[-\s]?(minute|second|hour)|\/ ?(min|sec)\b|rate limit|too many requests|try again in/i
+const QUOTA_HINT = /quota|resource_exhausted|limit reached|usage limit/i
+
+/** True when the provider means the *allowance* ran out, not a burst. */
+function looksLikeQuota(text: string): boolean {
+  // Daily first: "… requests per day …" and "Rate limit reached: free-models-
+  // per-day" both describe a daily cap even though they mention other words.
+  if (DAILY_QUOTA_HINT.test(text)) return true
+  // A message that describes a short window ("per minute", "try again in 4s")
+  // is a burst, even when it mentions the word "quota".
+  if (RATE_LIMIT_HINT.test(text)) return false
+  return QUOTA_HINT.test(text)
 }
 
 export function statusToKind(status: number, bodyText: string): ProviderErrorKind {
   if (status === 401) return 'unauthorized'
   if (status === 403) return 'forbidden'
   if (status === 404) return 'model_missing'
-  if (status === 429) return looksLikeQuota(bodyText, status) ? 'quota' : 'rate_limit'
+  if (status === 429) return looksLikeQuota(bodyText) ? 'quota' : 'rate_limit'
   if (status === 400 || status === 422) return 'bad_request'
   if (status === 408 || status === 425 || status >= 500) return 'server'
   if (status >= 400) return 'unknown'

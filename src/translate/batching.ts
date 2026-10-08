@@ -1,9 +1,11 @@
 /**
  * Batch construction.
  *
- * A page is cut into batches of 15–25 lines or ~1500 source tokens (whichever
- * comes first) — big enough to amortise the round trip, small enough that a
- * retry after a malformed response is cheap.
+ * A page is cut into batches of at most `maxLines` lines or `maxTokens` source
+ * tokens, whichever comes first — big enough to amortise the round trip, small
+ * enough that a retry after a malformed response is cheap, and always small
+ * enough to fit the model's window, because `maxTokens` arrives from the run's
+ * `BudgetProfile` rather than from a constant.
  *
  * Batch ids are *derived, never random*: `project#epoch#page#index`, and the
  * retry ladder produces `…#0`, `…#1`, `…#l3` from a parent id. Re-running the
@@ -11,18 +13,22 @@
  * "rotate mid-batch with zero duplicate/missing lines" achievable.
  */
 
-import { estimateTokens } from './keyPool'
+import { estimateTokens } from './tokenEstimate'
 import type { BatchLine, TranslationBatch } from './types'
 
 export interface BuildOptions {
-  /** Smallest batch we bother to send (unless the page runs out). */
-  minLines?: number
   maxLines?: number
+  /**
+   * Content budget for one request, in estimated source tokens. The run passes
+   * the model's real budget here (`BudgetProfile.fillTargetTokens`) instead of
+   * the flat 1500 this module used to assume — which was simultaneously too
+   * much for a free tier's TPM window and far too little for a big-context
+   * model, where timid batches multiply the request count.
+   */
   maxTokens?: number
 }
 
 export const BATCH_DEFAULTS: Required<BuildOptions> = {
-  minLines: 15,
   maxLines: 25,
   maxTokens: 1500,
 }
@@ -54,7 +60,7 @@ export function buildBatches(
   lines: BatchLine[],
   options: BuildOptions = {},
 ): TranslationBatch[] {
-  const { minLines, maxLines, maxTokens } = { ...BATCH_DEFAULTS, ...options }
+  const { maxLines, maxTokens } = { ...BATCH_DEFAULTS, ...options }
   const batches: TranslationBatch[] = []
   let current: BatchLine[] = []
   let tokens = 0
@@ -75,7 +81,12 @@ export function buildBatches(
 
   for (const line of lines) {
     const lineTokens = estimateTokens(line.text)
-    const overTokenBudget = current.length >= minLines && tokens + lineTokens > maxTokens
+    // `maxTokens` is a hard budget. A page of long lines used to be allowed to
+    // overshoot it (a "minimum lines" floor was consulted first), which is how
+    // a request could end up larger than the model's window. A single line that
+    // alone exceeds the budget is still sent whole: there is nothing to split
+    // it against, and the retry ladder owns what comes next.
+    const overTokenBudget = tokens + lineTokens > maxTokens
     if (current.length > 0 && (current.length >= maxLines || overTokenBudget)) flush()
     current.push(line)
     tokens += lineTokens

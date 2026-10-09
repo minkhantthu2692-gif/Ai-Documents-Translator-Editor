@@ -38,6 +38,8 @@ import { SETTING_KEYS, settingsRepo } from '@/db/repo-settings'
 import { usageRepo } from '@/db/repo-usage'
 import type { ApiKeyRecord, BlockRecord, TranslationFlag } from '@/db/types'
 import { useTranslateStore } from '@/stores/translateStore'
+import { textMeasurer } from '@/editor/autofit'
+import { autoFitEnabled, translationLayoutPatch } from '@/editor/layout'
 import { BATCH_DEFAULTS, buildBatches } from './batching'
 import {
   createRollingGlossary,
@@ -592,17 +594,32 @@ async function persistLines(
   const now = Date.now()
   const config = run.config
   let characters = 0
+  // Read once per batch, not per line: a 300-page document must not turn into
+  // one extra IndexedDB read per block.
+  const autoFit = await autoFitEnabled()
+  const measure = autoFit ? textMeasurer() : null
 
   for (const entry of entries) {
     const { line } = entry
     characters += entry.text.length + line.text.length
-    await blockRepo.update(line.id, {
+    const patch: Partial<BlockRecord> = {
       translatedText: entry.text,
       status: 'translated',
       translationConfidence: entry.confidence,
       translationFlag: entry.flag,
       translatedAt: now,
-    })
+    }
+    // The translation just changed how much room this block needs. Fold the
+    // re-fit into the same write so there is one row, one version bump and
+    // nothing to reconcile afterwards.
+    if (measure) {
+      const previous = await blockRepo.get(line.id)
+      if (previous) {
+        const fit = translationLayoutPatch(previous, entry.text, measure)
+        if (fit) Object.assign(patch, fit)
+      }
+    }
+    await blockRepo.update(line.id, patch)
 
     const sourceHash = hashText(`${config.sourceLang}|${config.targetLang}|${line.text}`)
     const existing = await translationRepo.findByBlock(config.projectId, line.id)

@@ -302,7 +302,11 @@
       "theme": "Theme",
       "themeDesc": "System follows your device preference.",
       "samplePreview": "Preview",
-      "sampleText": "Translate documents while keeping their layout."
+      "sampleText": "Translate documents while keeping their layout.",
+      "layoutTitle": "Layout",
+      "layoutDesc": "How a page makes room for a translation that outgrew the box it was cut for.",
+      "autoFit": "Shrink text to fit after translating",
+      "autoFitDesc": "When a translation no longer fits its original box, the font steps down just far enough to keep it inside — never below a readable 6pt. A size you picked yourself is left alone, and a block that still cannot fit keeps the document's own size and is flagged instead."
     },
     "cache": {
       "title": "Cache control",

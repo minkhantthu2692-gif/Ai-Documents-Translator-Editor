@@ -1,15 +1,17 @@
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Card } from '@/components/ui'
+import { Card, Switch } from '@/components/ui'
 import { LanguageSwitch, ThemeSegment } from '@/components/layout/switches'
-import { settingsRepo } from '@/db/repo-settings'
+import { SETTING_KEYS, settingsRepo } from '@/db/repo-settings'
 import { useUiStore } from '@/stores/uiStore'
 import { logEvent } from '@/core/eventLogger'
+import { useSetting } from './useSetting'
 
 export function GeneralTab() {
   const { t, i18n } = useTranslation()
   const language = useUiStore((state) => state.language)
   const theme = useUiStore((state) => state.theme)
+  const [autoFit, setAutoFit] = useSetting<boolean>(SETTING_KEYS.autoFit, true)
 
   // Mirror UI preferences into Dexie so backups and future sync include them.
   useEffect(() => {
@@ -77,6 +79,18 @@ export function GeneralTab() {
             </dd>
           </div>
         </dl>
+      </Card>
+
+      <Card
+        title={t('settings.general.layoutTitle')}
+        description={t('settings.general.layoutDesc')}
+      >
+        <Switch
+          checked={autoFit}
+          onChange={(next) => void setAutoFit(next)}
+          label={t('settings.general.autoFit')}
+          description={t('settings.general.autoFitDesc')}
+        />
       </Card>
     </div>
   )

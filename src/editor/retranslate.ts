@@ -14,6 +14,8 @@ import { translateInline, loadReTranslatableBlocks } from '@/translate/inline'
 import type { BlockRecord } from '@/db/types'
 import { loadEditorBlocks, pageIndexMap } from './blocks'
 import { commandFrom, commitCommand } from './commands'
+import { textMeasurer } from './autofit'
+import { autoFitEnabled, translationLayoutPatch } from './layout'
 import { loadTranslateConfig } from './templates'
 import type { IndexedBlock } from './commands'
 import type { BlockPatch } from './types'
@@ -75,22 +77,32 @@ export async function retranslate(options: RetranslateOptions): Promise<Retransl
   })
 
   const now = Date.now()
+  // Only the applied translation changes the layout — a suggestion parked in
+  // the inspector has not been put on the page yet.
+  const measure = options.mode === 'apply' && (await autoFitEnabled()) ? textMeasurer() : null
   const targets: Array<{ block: BlockRecord; pageIndex: number; patch: BlockPatch }> = []
   for (const line of result.lines) {
     const block = byId.get(line.id)
     if (!block) continue
     if (options.mode === 'apply') {
       if (block.translatedText === line.text) continue
+      const patch: BlockPatch = {
+        translatedText: line.text,
+        status: 'edited',
+        suggestedText: null,
+        suggestedModel: null,
+        suggestedAt: null,
+      }
+      // Same command, same undo step: the re-fit travels with the text that
+      // caused it instead of landing as a second entry in History.
+      if (measure) {
+        const fit = translationLayoutPatch(block, line.text, measure)
+        if (fit) Object.assign(patch, fit)
+      }
       targets.push({
         block,
         pageIndex: pageIndexFor(block, pageOf),
-        patch: {
-          translatedText: line.text,
-          status: 'edited',
-          suggestedText: null,
-          suggestedModel: null,
-          suggestedAt: null,
-        },
+        patch,
       })
     } else {
       if (block.suggestedText === line.text) continue
@@ -133,23 +145,23 @@ export async function acceptSuggestion(
 ): Promise<{ accepted: boolean }> {
   const [block, pageOf] = await Promise.all([blockRepo.get(blockId), pageIndexMap(projectId)])
   if (!block || block.suggestedText === null) return { accepted: false }
+  const suggested = block.suggestedText
+  const patch: BlockPatch = {
+    translatedText: suggested,
+    status: 'edited',
+    suggestedText: null,
+    suggestedModel: null,
+    suggestedAt: null,
+  }
+  if (await autoFitEnabled()) {
+    const fit = translationLayoutPatch(block, suggested, textMeasurer())
+    if (fit) Object.assign(patch, fit)
+  }
   await commitCommand(
     commandFrom(
       'editor.cmd.accept',
       'accept-suggestion',
-      [
-        {
-          block,
-          pageIndex: pageOf.get(block.pageId) ?? 0,
-          patch: {
-            translatedText: block.suggestedText,
-            status: 'edited',
-            suggestedText: null,
-            suggestedModel: null,
-            suggestedAt: null,
-          },
-        },
-      ],
+      [{ block, pageIndex: pageOf.get(block.pageId) ?? 0, patch }],
       'user',
     ),
   )

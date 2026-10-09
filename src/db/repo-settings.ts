@@ -81,4 +81,5 @@ export const SETTING_KEYS = {
   provider: 'ai.provider',
   model: 'ai.model',
   batchMaxLines: 'translate.batchMaxLines',
+  autoFit: 'layout.autoFit',
 } as const

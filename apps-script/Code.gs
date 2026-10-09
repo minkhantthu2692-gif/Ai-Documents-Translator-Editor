@@ -81,8 +81,14 @@
  *     same action again with that cursor. Because every write is
  *     last-write-wins and idempotent, resuming is always safe.
  *   - All reads use one `getRange(...).getValues()` per sheet and all writes
- *     use `setValues(...)` in chunks of `CHUNK_ROWS_` (100) rows. There are
- *     no per-cell get/set loops anywhere.
+ *     go through `writePlain_(...)`, which formats the destination as Plain
+ *     Text and then calls `setValues(...)` in chunks of `CHUNK_ROWS_` (100)
+ *     rows. There are no per-cell get/set loops anywhere.
+ *   - Plain Text is not cosmetic: Sheets parses a cell on the way in, so a
+ *     string starting with `=` would be written as a live formula. A document
+ *     that opens with `=IMPORTDATA(...)` would then phone home from the
+ *     user's own Sheet. Formatting the range first makes that impossible
+ *     without altering the value, so a hyphen bullet survives the round trip.
  *   - Google Sheets caps a cell at 50,000 characters, so any string longer
  *     than `MAX_CELL_CHARS_` (45,000) is truncated before the write and the
  *     truncation is recorded in SyncLog instead of failing the request.
@@ -101,6 +107,23 @@ var MAX_CELL_CHARS_ = 45000
 
 /** Rows per setValues() call. Keeps write calls small and predictable. */
 var CHUNK_ROWS_ = 100
+
+/**
+ * Number format applied to every range this script writes.
+ *
+ * Sheets parses a cell on the way *in*, not only on display: a string that
+ * starts with `=` becomes a formula, one that starts with `+`, `-` or `@`
+ * becomes arithmetic, one that looks like a date becomes a date. The first is
+ * a security hole and the rest are quiet data loss. A translated paragraph
+ * that opens with a hyphen bullet, a glossary term that is a phone number and
+ * a document whose first line is an equation all arrive here as strings that
+ * would be reinterpreted on write.
+ *
+ * Plain Text stops the parse. Numbers and booleans written as numbers and
+ * booleans are unaffected — the format only keeps *text* from being read as
+ * anything else — so the round trip through getValues() is exact.
+ */
+var PLAIN_TEXT_FMT_ = '@'
 
 /**
  * Shared time budget: the 6-minute Apps Script execution limit (300s) minus
@@ -1374,6 +1397,40 @@ function indexRows_(rows) {
 }
 
 /**
+ * Writes a block of values with the destination formatted as plain text.
+ *
+ * Sheets parses a cell on the way in: a string starting with `=` becomes a
+ * formula, one starting with `+`, `-` or `@` becomes arithmetic, one that
+ * looks like a date becomes a date. The first is a security hole — a
+ * translated document whose first line is `=IMPORTDATA("https://…")` would
+ * phone home from the user's own Sheet — and the rest are quiet data loss,
+ * hit by ordinary content: a paragraph that opens with a hyphen bullet, a
+ * glossary term that is a phone number, a note that is a date.
+ *
+ * Formatting the range as Plain Text first makes the parse impossible. The
+ * usual alternative — prefixing the value with an apostrophe — is not used
+ * because the marker does not round-trip through getValues(), so the stored
+ * value would come back different from the written one. Here it does: a
+ * value that begins with `-` leaves as the same `-` it arrived with.
+ *
+ * Numbers and booleans keep their type. Plain Text only stops *text* from
+ * being read as anything else; a value passed as a number is still a number.
+ *
+ * @param {Object} sh     Sheet handle.
+ * @param {number} row    First row (1-based).
+ * @param {number} col    First column (1-based).
+ * @param {number} rows   Row count.
+ * @param {number} cols   Column count.
+ * @param {Array<Array<*>>} values 2D array of cell values.
+ * @private
+ */
+function writePlain_(sh, row, col, rows, cols, values) {
+  var range = sh.getRange(row, col, rows, cols)
+  range.setNumberFormat(PLAIN_TEXT_FMT_)
+  range.setValues(values)
+}
+
+/**
  * Writes changed rows with setValues() in chunks of CHUNK_ROWS_ rows.
  * Modified rows are grouped into contiguous runs first, so untouched rows in
  * between are never written. Never does per-cell writes.
@@ -1419,7 +1476,7 @@ function flushRun_(sh, cols, run) {
     var part = run.slice(i, i + CHUNK_ROWS_)
     var values = []
     for (var p = 0; p < part.length; p++) values.push(part[p].values)
-    sh.getRange(run[i].row, 1, values.length, cols).setValues(values)
+    writePlain_(sh, run[i].row, 1, values.length, cols, values)
     chunks++
   }
   return chunks
@@ -1525,8 +1582,11 @@ function rowToRecord_(def, row) {
     var h = def.headers[i]
     if (h === 'data') continue
     var v = row[i]
-    if (h === 'deleted') {
-      rec.deleted = v === true || v === 1 || v === 'TRUE' || v === 'true'
+    if (h === 'deleted' || h === 'enabled') {
+      // Plain-text cells render booleans as "TRUE"/"FALSE" rather than keeping
+      // them as booleans, and a string is truthy — so a disabled key would
+      // otherwise come back switched on.
+      rec[h] = asBool_(v)
     } else if (h === 'updatedAt' || h === 'version') {
       var n = Number(v)
       rec[h] = isFinite(n) ? n : 0
@@ -1538,9 +1598,33 @@ function rowToRecord_(def, row) {
 }
 
 /**
+ * Reads a cell back as a boolean, tolerating the string forms plain-text
+ * cells produce ("TRUE"/"FALSE", "true"/"false", "1"/"0").
+ *
+ * @param {*} v Cell value as returned by getValues().
+ * @return {boolean} Coerced boolean.
+ * @private
+ */
+function asBool_(v) {
+  if (v === true || v === 1) return true
+  if (v === 'TRUE' || v === 'true' || v === '1') return true
+  return false
+}
+
+/**
  * Coerces a value into something Sheets accepts and keeps it under the cell
  * limit. Objects/arrays are JSON-encoded (they only arrive here when they
  * are declared scalar columns, so this is a safety net).
+ *
+ * Nothing is escaped here on purpose. The usual defence against formula
+ * injection is to prefix a value that starts with `=`, `+`, `-` or `@` with
+ * an apostrophe, but that marker does not round-trip: Sheets consumes it when
+ * the cell is read back, so a paragraph that opens with a hyphen bullet would
+ * return from the Sheet minus its bullet, and one that opened with an
+ * apostrophe plus a hyphen would lose both. Every call site writes through
+ * {@link writePlain_}, which makes the destination Plain Text instead — the
+ * value stored is the value written, so the round trip is exact and no
+ * formula is ever parsed.
  *
  * @param {*} value       Value to sanitise.
  * @param {Object} stats   Optional {truncated} counter (mutated).
@@ -1985,7 +2069,7 @@ function writeSyncLog_(ctx) {
         safeText_(ctx.message, 400),
       ],
     ]
-    sh.getRange(lastRow + 1, 1, 1, LOG_HEADERS_.length).setValues(row)
+    writePlain_(sh, lastRow + 1, 1, 1, LOG_HEADERS_.length, row)
   } catch (logErr) {
     // Audit logging must never propagate into the response path.
   } finally {

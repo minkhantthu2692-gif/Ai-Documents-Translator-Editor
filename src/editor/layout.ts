@@ -23,15 +23,19 @@
  *  3. **Never shrink into illegibility.** If the text will not fit even at the
  *     floor, keep the size the document itself used and raise `overflow`
  *     instead — a 6pt line that still spills is unreadable *and* wrong. The
- *     reflow pass (`src/export/reflow.ts`) makes room for it at export time.
+ *     reflow pass (`src/export/reflow.ts`, reached through `reflowForPage`
+ *     below) makes room for what is left, on the canvas and in the export
+ *     alike.
  *
  * The patch is empty whenever nothing changes, so a batch of translations that
  * all fit writes no font data and leaves no history behind.
  */
 
+import { reflowBlocks } from '@/export/reflow'
 import { SETTING_KEYS, settingsRepo } from '@/db/repo-settings'
 import type { BlockRecord } from '@/db/types'
-import { fitBlockText, measureBlock, type TextMeasurer } from './autofit'
+import { fitBlockText, measureBlock, textMeasurer, type TextMeasurer } from './autofit'
+import type { IndexedBlock } from './commands'
 import type { BlockPatch } from './types'
 
 /** The geometry and size state a fit decision needs. */
@@ -103,4 +107,32 @@ export function translationLayoutPatch(
   }
   if (overflow !== block.overflow) patch.overflow = overflow
   return Object.keys(patch).length === 0 ? null : patch
+}
+
+/**
+ * Where the editor should draw one page's blocks, once the ones that outgrew
+ * their box have moved the rest down.
+ *
+ * The same pass, on the same measurer, as the export — so a page cannot look
+ * broken on the canvas and clean in the file it prints to. Blocks that do not
+ * move come back as the very same objects, which keeps the per-frame render
+ * cheap and lets a caller diff by identity if it wants to.
+ *
+ * The overflow badges stay: reflow changes where a block sits, not whether it
+ * is bigger than the box the PDF cut for it, and the reader still needs to
+ * know that.
+ */
+export function reflowForPage(
+  blocks: IndexedBlock[],
+  pageHeight: number,
+  measure: TextMeasurer = textMeasurer(),
+): IndexedBlock[] {
+  if (blocks.length === 0) return blocks
+  return reflowBlocks(blocks, {
+    measure,
+    pageHeight,
+    // Exactly what BlockLayer renders — no list-marker prefix, because the
+    // canvas does not put one back either.
+    textOf: (block) => (block.translatedText.length > 0 ? block.translatedText : block.sourceText),
+  })
 }

@@ -2,7 +2,8 @@ import 'fake-indexeddb/auto'
 import { describe, expect, it } from 'vitest'
 import { SETTING_KEYS, settingsRepo } from '@/db/repo-settings'
 import type { TextMeasurer } from './autofit'
-import { autoFitEnabled, translationLayoutPatch, type LayoutBlock } from './layout'
+import type { IndexedBlock } from './commands'
+import { autoFitEnabled, reflowForPage, translationLayoutPatch, type LayoutBlock } from './layout'
 
 /** ~0.5 em average advance — deterministic, no canvas needed. */
 const measure: TextMeasurer = ({ text, fontSize }) => text.length * fontSize * 0.5
@@ -111,5 +112,100 @@ describe('autoFitEnabled', () => {
     expect(await autoFitEnabled()).toBe(false)
     await settingsRepo.remove(SETTING_KEYS.autoFit)
     expect(await autoFitEnabled()).toBe(true)
+  })
+})
+
+const LINE = 19.2 // 12pt × 1.6, in a 468pt column fifteen 'word ' tokens wide
+
+function indexed(overrides: Partial<IndexedBlock> = {}): IndexedBlock {
+  return {
+    id: 'blk_1',
+    createdAt: 0,
+    updatedAt: 0,
+    deviceId: 'dev',
+    version: 1,
+    projectId: 'prj_1',
+    pageId: 'page_1',
+    pageIndex: 0,
+    order: 0,
+    kind: 'paragraph',
+    sourceText: 'Source text',
+    translatedText: words(4),
+    x: 72,
+    y: 72,
+    width: 468,
+    height: LINE,
+    fontFamily: 'Noto Sans',
+    originalFontFamily: 'Noto Sans',
+    fontSize: 12,
+    originalFontSize: 12,
+    lineHeight: 1.6,
+    color: '#000000',
+    bold: false,
+    italic: false,
+    status: 'translated',
+    characterCount: 11,
+    region: 'body',
+    alignment: 'left',
+    lines: [],
+    skipRule: null,
+    placeholders: [],
+    listMarker: null,
+    headingLevel: null,
+    links: [],
+    translationConfidence: null,
+    translationFlag: null,
+    translatedAt: null,
+    suggestedText: null,
+    suggestedModel: null,
+    suggestedAt: null,
+    fontSizeMode: 'original',
+    overflow: false,
+    ...overrides,
+  }
+}
+
+describe('reflowForPage', () => {
+  it('moves the blocks under one that outgrew its box, and only those', () => {
+    const out = reflowForPage(
+      [indexed({ id: 'a', translatedText: words(20) }), indexed({ id: 'b', y: 95, order: 1 })],
+      792,
+      measure,
+    )
+    expect(out[0].y).toBe(72)
+    expect(out[1].y).toBe(110.4)
+  })
+
+  it('hands back the very same objects when nothing grew', () => {
+    const a = indexed({ id: 'a' })
+    const b = indexed({ id: 'b', y: 95, order: 1 })
+    const out = reflowForPage([a, b], 792, measure)
+    expect(out[0]).toBe(a)
+    expect(out[1]).toBe(b)
+  })
+
+  it('measures the source text for a block that has not been translated yet', () => {
+    const out = reflowForPage(
+      [
+        indexed({ id: 'a', translatedText: '', sourceText: words(20) }),
+        indexed({ id: 'b', y: 95, order: 1 }),
+      ],
+      792,
+      measure,
+    )
+    expect(out[1].y).toBe(110.4)
+  })
+
+  it('stops at the page edge rather than pushing a block off the sheet', () => {
+    const [block] = reflowForPage(
+      [indexed({ id: 'a', y: 750, translatedText: words(20) })],
+      792,
+      measure,
+    )
+    expect(block.y).toBe(750)
+  })
+
+  it('has nothing to lay out on an empty page', () => {
+    expect(reflowForPage([], 792, measure)).toEqual([])
   })
 })

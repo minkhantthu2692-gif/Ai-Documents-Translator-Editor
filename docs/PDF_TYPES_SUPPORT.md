@@ -300,9 +300,11 @@ surplus. Two rules keep that honest:
   overlap the source PDF already had: that is a layout question for the reader,
   not one a push-down can answer.
 
-This is HTML and the print document only. DOCX, EPUB and Markdown are flow
+The editor canvas runs the same pass, on the same measurer, so a page cannot
+look broken on screen and clean in the file it prints to. The formats with no
+geometry to push around are unchanged: DOCX, EPUB and Markdown are flow
 layouts with no box to overflow, and the raster export still paints the source
-geometry exactly as it was — which is the entire promise of that format.
+exactly as it was — which is the entire promise of that format.
 
 _Known limitations carried over: table cell truncation at 45k characters,
 style reset on re-parse, no equation rendering (type 23). Reading order is
@@ -320,6 +322,5 @@ has been through it end-to-end. Layout auto-adjust shares the fixture caveat and
 brings one of its own: reflow measures with the same canvas the raster path
 uses, so a document exported where that canvas refused to open falls back to a
 0.52em-per-character estimate and can shift a block a line further than it
-needed. Only HTML and the print document re-flow — the editor still shows the
-source geometry with its overflow badges, which is where the text came from,
-not where it now sits._
+needed. The overflow badges survive reflow on purpose: it changes where a
+block sits, not whether it outgrew the box the PDF cut for it._

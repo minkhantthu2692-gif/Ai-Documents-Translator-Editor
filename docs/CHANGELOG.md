@@ -77,7 +77,8 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   moves both columns under it, and an overlap the source PDF already had is left for the reader.
   HTML now emits `min-height` where it emitted `height`, so a box is a floor the translation may
   grow into rather than a ceiling it paints over. Formats with no geometry — DOCX, EPUB,
-  Markdown — and the raster export are unchanged.
+  Markdown — and the raster export are unchanged. The editor canvas runs the same pass through
+  `reflowForPage`, so a page cannot look broken on screen and clean in the file it prints to.
 
 ### Security
 

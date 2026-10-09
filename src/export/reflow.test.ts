@@ -55,7 +55,7 @@ function block(overrides: Partial<ExportBlock> = {}): ExportBlock {
   }
 }
 
-const options: ReflowOptions = {
+const options: ReflowOptions<ExportBlock> = {
   measure,
   pageHeight: 792,
   textOf: (b) => b.translatedText,
@@ -177,7 +177,7 @@ describe('reflowBlocks', () => {
     // what tips the last word onto a second line.
     const marked = block({ id: 'marked', listMarker: '123.', translatedText: words(15) })
     const plain = block({ id: 'plain', translatedText: words(15) })
-    const withMarker: ReflowOptions = {
+    const withMarker: ReflowOptions<ExportBlock> = {
       ...options,
       textOf: (b) => `${listPrefix(b, b.translatedText)}${b.translatedText}`,
     }

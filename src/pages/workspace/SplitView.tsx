@@ -16,6 +16,7 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { useTranslation } from 'react-i18next'
 import type { PageRecord } from '@/db/types'
 import type { IndexedBlock } from '@/editor/commands'
+import { reflowForPage } from '@/editor/layout'
 import type { EditorView } from '@/editor/types'
 import { BlockLayer, type BlockHighlight } from './BlockLayer'
 import { usePageUrl, useProjectFileId } from './usePageUrl'
@@ -102,6 +103,10 @@ function PageRow({ page, blocks, fileId, view, zoom, ...rest }: PageRowProps) {
   const { t } = useTranslation()
   const showOriginal = view !== 'translated'
   const showTranslated = view !== 'original'
+  // Draw the layout the export will produce, not the one the PDF was cut for:
+  // a block whose translation outgrew its box moves the blocks below it down
+  // here exactly as it will on the printed page.
+  const laidOut = useMemo(() => reflowForPage(blocks, page.height), [blocks, page.height])
 
   return (
     <div
@@ -140,7 +145,7 @@ function PageRow({ page, blocks, fileId, view, zoom, ...rest }: PageRowProps) {
               }}
             >
               <BlockLayer
-                blocks={blocks}
+                blocks={laidOut}
                 selected={rest.selected}
                 editingId={rest.editingId}
                 overflowIds={rest.overflowIds}

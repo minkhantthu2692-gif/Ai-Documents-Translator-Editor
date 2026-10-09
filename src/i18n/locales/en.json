@@ -449,6 +449,11 @@
       "keysImported": "Imported {{added}} keys · skipped {{skipped}}",
       "keysImportFailed": "Import failed",
       "keysLocked": "{{count}} keys are sealed with a vault passphrase and were left out — unlock the vault and export again.",
+      "keysPaste": "Paste JSON",
+      "keysPasteLabel": "Key file contents",
+      "keysPastePlaceholder": "Paste the JSON produced by Export keys here.",
+      "keysPasteImport": "Import pasted JSON",
+      "keysPastedSource": "pasted JSON",
       "status": {
         "healthy": "Healthy",
         "cooling": "Cooling down",

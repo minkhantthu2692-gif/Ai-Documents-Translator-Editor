@@ -17,6 +17,7 @@ import {
   createKeyBundle,
   dedupeKeys,
   importKeyBundle,
+  importKeyBundleFromText,
   parseKeyBundle,
   serializeKeyBundle,
 } from './keyBundle'
@@ -248,5 +249,37 @@ describe('export → import round trip', () => {
     expect(second.keysAdded).toBe(0)
     expect(second.keysSkipped).toBe(1)
     expect(await apiKeyRepo.list()).toHaveLength(1)
+  })
+})
+
+describe('importKeyBundleFromText (paste path)', () => {
+  beforeEach(async () => {
+    const db = new AppDatabase(`aidt-paste-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+    setDb(db)
+    await db.open()
+    await db.apiKeys.clear()
+    await db.settings.clear()
+  })
+
+  it('imports a bundle pasted as text exactly like one read from a file', async () => {
+    await apiKeyRepo.create({ provider: 'gemini', label: 'Main', secret: SECRET })
+    const { bundle } = await createKeyBundle()
+
+    const report = await importKeyBundleFromText(serializeKeyBundle(bundle))
+    expect(report.keysAdded).toBe(0)
+    expect(report.keysSkipped).toBe(1)
+    expect(await apiKeyRepo.list()).toHaveLength(1)
+  })
+
+  it('writes nothing when the pasted text fails validation', async () => {
+    // The paste box is a direct line into the database, so a rejected bundle
+    // must not leave even a half-applied provider setting behind.
+    await expect(importKeyBundleFromText('{ not json')).rejects.toThrow(KeyBundleError)
+    await expect(
+      importKeyBundleFromText(JSON.stringify({ format: 'aidt-backup', schemaVersion: 1 })),
+    ).rejects.toThrow(KeyBundleError)
+
+    expect(await apiKeyRepo.list()).toHaveLength(0)
+    await expect(settingsRepo.get('ai.model.groq', '')).resolves.toBe('')
   })
 })

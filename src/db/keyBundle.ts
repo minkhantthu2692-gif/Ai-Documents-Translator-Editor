@@ -363,6 +363,13 @@ export async function importKeyBundle(bundle: KeyBundle): Promise<KeyBundleImpor
   }
 }
 
-export async function importKeyBundleFromFile(file: File): Promise<KeyBundleImportReport> {
-  return importKeyBundle(parseKeyBundle(await file.text()))
+/**
+ * The import path shared by the file picker and the paste box.
+ *
+ * Both feed an untrusted string through the same validator, so pasted text
+ * gets no more trust than a downloaded file: parse everything, write nothing
+ * until the whole bundle checks out.
+ */
+export async function importKeyBundleFromText(json: string): Promise<KeyBundleImportReport> {
+  return importKeyBundle(parseKeyBundle(json))
 }

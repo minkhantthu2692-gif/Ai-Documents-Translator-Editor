@@ -363,6 +363,19 @@ try {
       })()`,
     )
 
+  // Same trick for a <textarea>: bypass React's value tracker so onChange fires.
+  const setArea = (selector, value) =>
+    evalJs(
+      `(() => {
+        const el = document.querySelector('${selector}')
+        if (!el) return false
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+        setter.call(el, ${JSON.stringify(value)})
+        el.dispatchEvent(new Event('input', { bubbles: true }))
+        return true
+      })()`,
+    )
+
   const statusOf = (id) =>
     evalJs(
       `document.querySelector('[data-testid="check-${id}"]')?.getAttribute('data-status') ?? null`,
@@ -539,6 +552,37 @@ try {
     } else {
       check('re-importing the same key file is deduplicated', false, 'no keys-file input')
     }
+
+    // The same bundle again, pasted as text rather than written to a file.
+    await waitFor(`!/Imported 0 keys/i.test(document.body.innerText)`, 15000)
+    const toggledPaste = await clickWhenReady('[data-testid="keys-paste-toggle"]')
+    const pasteArea = await waitFor(`!!document.querySelector('[data-testid="keys-paste"]')`, 5000)
+    check('paste box opens with a JSON textarea', toggledPaste && pasteArea)
+
+    await setArea('[data-testid="keys-paste"]', '{ this is not json')
+    await clickWhenReady('[data-testid="keys-paste-import"]')
+    check(
+      'pasting invalid JSON is rejected by the same validator',
+      await waitFor(`/Import failed/i.test(document.body.innerText)`, 15000),
+    )
+    check(
+      'a rejected paste keeps its text for correction',
+      await evalJs(
+        `(document.querySelector('[data-testid="keys-paste"]')?.value?.length ?? 0) > 0`,
+      ),
+    )
+
+    await waitFor(`!/Import failed/i.test(document.body.innerText)`, 15000)
+    await setArea('[data-testid="keys-paste"]', JSON.stringify(bundle))
+    await clickWhenReady('[data-testid="keys-paste-import"]')
+    check(
+      'pasting a valid bundle imports it',
+      await waitFor(`/Imported 0 keys/i.test(document.body.innerText)`, 15000),
+    )
+    check(
+      'paste box closes after a successful import',
+      await waitFor(`!document.querySelector('[data-testid="keys-paste"]')`, 5000),
+    )
   }
 
   // 6a) A scanned PDF is flagged and offered OCR.
@@ -1326,10 +1370,15 @@ try {
     const fallbackActions = await evalJs(
       `document.querySelectorAll('[data-testid^="assistant-action-"]').length`,
     )
+    // The title is worth keeping in the detail: if this ever fails again it
+    // names the rule that answered, which is otherwise invisible.
+    const answerTitle = await evalJs(
+      `document.querySelector('[data-testid="assistant-answer"] h4')?.innerText ?? ''`,
+    )
     check(
       'offline answer offers >= 3 safe actions',
       fallbackActions >= 3,
-      `actions=${fallbackActions}`,
+      `actions=${fallbackActions} title=${answerTitle}`,
     )
   }
 

@@ -9,6 +9,7 @@ import {
   Input,
   Select,
   Switch,
+  Textarea,
   type BadgeTone,
 } from '@/components/ui'
 import {
@@ -23,7 +24,7 @@ import { PROVIDERS, defaultModelFor, type ProviderId } from '@/config/models.con
 import { logEvent } from '@/core/eventLogger'
 import { isVaultUnlocked, unlockVault, vaultPassphrase } from '@/core/vault'
 import { apiKeyRepo, type ApiKeySummary } from '@/db/repo-apiKeys'
-import { downloadKeyBundle, importKeyBundleFromFile } from '@/db/keyBundle'
+import { downloadKeyBundle, importKeyBundleFromText } from '@/db/keyBundle'
 import { SETTING_KEYS, settingsRepo } from '@/db/repo-settings'
 import { useImportedModelsStore } from '@/stores/importedModelsStore'
 import { getAdapter } from '@/providers'
@@ -610,6 +611,8 @@ function KeyTransferCard({ onChanged }: { onChanged: () => void }) {
   const { t } = useTranslation()
   const fileRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
+  const [pasting, setPasting] = useState(false)
+  const [pasted, setPasted] = useState('')
 
   async function handleExport() {
     setBusy(true)
@@ -638,10 +641,14 @@ function KeyTransferCard({ onChanged }: { onChanged: () => void }) {
     }
   }
 
-  async function handleImport(file: File) {
+  /**
+   * The one entry point every source uses — the file picker and the paste
+   * box — so both run the same validation before a single write happens.
+   */
+  async function handleImportJson(json: string, source: string) {
     setBusy(true)
     try {
-      const report = await importKeyBundleFromFile(file)
+      const report = await importKeyBundleFromText(json)
       // The imported-model list is cached in a store — make it re-read.
       useImportedModelsStore.setState({ loaded: false })
       await useImportedModelsStore.getState().ensureLoaded()
@@ -652,7 +659,8 @@ function KeyTransferCard({ onChanged }: { onChanged: () => void }) {
         severity: 'success',
         messageMy: `သော့ ${report.keysAdded} ခု ထည့်ပြီး`,
         messageEn: `Imported ${report.keysAdded} API keys`,
-        technicalDetail: JSON.stringify(report),
+        // Counts and a source label — never the bundle contents.
+        technicalDetail: JSON.stringify({ ...report, source }),
       })
       toast(
         report.keysAdded === 0 ? 'info' : 'success',
@@ -660,14 +668,18 @@ function KeyTransferCard({ onChanged }: { onChanged: () => void }) {
           added: report.keysAdded,
           skipped: report.keysSkipped,
         }),
-        report.activeProvider ?? file.name,
+        report.activeProvider ?? source,
       )
+      // Cleared only on success: a rejected paste keeps its text so the user
+      // can fix one line instead of pasting the whole bundle again.
+      setPasted('')
+      setPasting(false)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       logEvent({
         state: 'SETTINGS',
         action: 'provider.importKeys.failed',
-        reasonCode: 'BACKUP_INVALID',
+        reasonCode: 'KEY_BUNDLE_INVALID',
         severity: 'error',
         technicalDetail: message,
       })
@@ -710,7 +722,17 @@ function KeyTransferCard({ onChanged }: { onChanged: () => void }) {
             aria-label={t('settings.providers.keysImport')}
             onChange={(event) => {
               const file = event.target.files?.[0]
-              if (file) void handleImport(file)
+              if (!file) return
+              void file
+                .text()
+                .then((json) => handleImportJson(json, file.name))
+                .catch((error: unknown) => {
+                  toast(
+                    'danger',
+                    t('settings.providers.keysImportFailed'),
+                    error instanceof Error ? error.message : String(error),
+                  )
+                })
             }}
           />
           <Button
@@ -722,7 +744,58 @@ function KeyTransferCard({ onChanged }: { onChanged: () => void }) {
           >
             {t('settings.providers.keysImport')}
           </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-expanded={pasting}
+            onClick={() => setPasting((open) => !open)}
+            data-testid="keys-paste-toggle"
+          >
+            {t('settings.providers.keysPaste')}
+          </Button>
         </div>
+
+        {pasting ? (
+          <div className="flex flex-col gap-2" data-testid="keys-paste-box">
+            <Textarea
+              id="keys-paste-input"
+              data-testid="keys-paste"
+              rows={6}
+              spellCheck={false}
+              autoComplete="off"
+              aria-label={t('settings.providers.keysPasteLabel')}
+              placeholder={t('settings.providers.keysPastePlaceholder')}
+              className="font-mono text-xs"
+              value={pasted}
+              onChange={(event) => setPasted(event.target.value)}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="primary"
+                disabled={pasted.trim().length === 0}
+                loading={busy}
+                onClick={() =>
+                  void handleImportJson(pasted, t('settings.providers.keysPastedSource'))
+                }
+                data-testid="keys-paste-import"
+              >
+                {t('settings.providers.keysPasteImport')}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setPasting(false)
+                  setPasted('')
+                }}
+                data-testid="keys-paste-cancel"
+              >
+                {t('common.cancel')}
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </div>
     </Card>
   )

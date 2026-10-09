@@ -23,6 +23,7 @@ export type ReasonCode =
   | 'EXPORT_FONT_MISSING'
   | 'SYNC_FAILED'
   | 'BACKUP_INVALID'
+  | 'KEY_BUNDLE_INVALID'
   | 'INVALID_STATE_TRANSITION'
   | 'FILE_NOT_PDF'
   | 'FILE_TOO_LARGE'
@@ -235,6 +236,22 @@ export const REASON_CODES: Record<ReasonCode, ReasonCodeDefinition> = {
     fixActions: [
       act('choose_file', 'data', 'Choose another file', 'တစ်ခြားဖိုင် ရွေးရန်'),
       act('export_new', 'data', 'Export a fresh backup', 'မိတ္တူအသစ် ထုတ်ရန်'),
+    ],
+  },
+  KEY_BUNDLE_INVALID: {
+    code: 'KEY_BUNDLE_INVALID',
+    severity: 'error',
+    messageMy: 'ပေးထားသော သော့ဖိုင် မမှန်ကန်ပါ။',
+    messageEn: 'The provided key file is not valid.',
+    technicalHint: 'aidt-keys bundle failed format or schema validation',
+    // Deliberately three, and deliberately on three different targets: the
+    // offline dialog answers from this code, and `mapFixActionId` collapses
+    // any id it cannot place onto `open-logs`, so two fix actions sharing a
+    // target would render the same button twice.
+    fixActions: [
+      act('open_providers', 'config', 'Open AI providers', 'AI ပံ့ပိုးသူ ဖွင့်ရန်'),
+      act('retry_import_again', 'retry', 'Try the import again', 'ပြန်တင်သွင်းကြည့်ရန်'),
+      act('open_logs', 'navigation', 'Open logs', 'မှတ်တမ်း ဖွင့်ရန်'),
     ],
   },
   INVALID_STATE_TRANSITION: {

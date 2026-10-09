@@ -143,6 +143,18 @@ describe('ruleAnswer', () => {
     expect(answer.steps.length).toBeGreaterThanOrEqual(2)
   })
 
+  it('explains a rejected key bundle with three distinct safe actions', () => {
+    // A failed key import is what the paste box reports, so it drives the
+    // dialog the same way a blank question does. It must still offer the full
+    // trio — and three *different* ids, because `mapFixActionId` folds
+    // anything it cannot place onto `open-logs` and two fix actions landing
+    // there would render one button twice.
+    const answer = ruleAnswer('', ctx({ reasonCode: 'KEY_BUNDLE_INVALID' }), 'en')
+    expect(answer.title).toMatch(/key file/i)
+    expect(answer.actions).toHaveLength(3)
+    expect(new Set(answer.actions.map((action) => action.id)).size).toBe(3)
+  })
+
   it('matches sync keywords before falling back', () => {
     const answer = ruleAnswer('google sheet sync keeps failing', ctx(), 'en')
     expect(answer.title).toMatch(/sync/i)

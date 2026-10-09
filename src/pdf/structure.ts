@@ -4,6 +4,8 @@
  * Turns the flat line list of a page into ordered, translatable blocks:
  *   - reading order (column detection first, then top-to-bottom)
  *   - paragraph merging (font, indent, vertical gap, list markers)
+ *   - footnote regions (small, marked type under the text block — see
+ *     `footnotes.ts`, which has to run before any merging decision)
  *   - header / footer bands (repeated-across-pages detection + page labels)
  *   - table rows (aligned multi-column short cells)
  *   - alignment and line-spacing estimation
@@ -16,10 +18,12 @@ import { classifyLine, type SkipContext, type SkipRule } from './skipRules'
 import { tokenizePlaceholders, type Placeholder } from './placeholders'
 import { medianFontSize, type GroupedLine, type LineStyle } from './lineGrouping'
 import { kmeansMidpoint, orderBodyLines, splitMergedLines } from './readingOrder'
+import { footnoteMarker, markFootnoteRegions } from './footnotes'
 import { splitRow } from './rowSplit'
 import { blockId, type BBox } from './stableId'
 
-export type BlockKind = 'heading' | 'paragraph' | 'list' | 'table' | 'caption' | 'shape'
+export type BlockKind =
+  'heading' | 'paragraph' | 'list' | 'table' | 'caption' | 'footnote' | 'shape'
 export type BlockRegion = 'body' | 'header' | 'footer'
 export type BlockAlignment = 'left' | 'center' | 'right' | 'justified'
 
@@ -302,6 +306,14 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
     splitMergedLines(bodyCandidates, options),
     options.pageWidth,
   )
+  // Footnote regions are marked on the *ordered* body, so a note's
+  // continuation lines are the ones that directly follow its opener and the
+  // ids match the lines the block builder is about to see. Doing it earlier
+  // would mark lines that `splitMergedLines` then replaced with column parts.
+  const footnoteIds = markFootnoteRegions(orderedBody, {
+    pageHeight: options.pageHeight,
+    medianSize,
+  })
   // Ids of the lines that reached the body. A line split into column parts is
   // deliberately absent — its parts are here instead, and the original cannot
   // resurface as a margin line because it was already filtered to the body.
@@ -317,25 +329,40 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
   // --- merge into blocks ---------------------------------------------------
   interface OpenBlock {
     region: BlockRegion
+    /** The line that opened this block sits inside a footnote region. */
+    footnote: boolean
     lines: GroupedLine[]
   }
   const blocks: OpenBlock[] = []
 
   for (const line of ordered) {
     const region = regionOf(line, options)
+    const footnote = footnoteIds.has(line.id)
+    // Every note begins a block. Continuations of the *same* note carry no
+    // marker (see `markFootnoteRegions`), so this splits note from note
+    // without ever splitting a note in half — and it does so even when two
+    // adjacent notes are set identically and close enough that `canMerge`
+    // would happily read them as one paragraph.
+    const opensNote = footnote && footnoteMarker(line.text) !== null
     const current = blocks[blocks.length - 1]
-    if (!current || current.region !== region) {
-      blocks.push({ region, lines: [line] })
+    // A footnote is its own block whatever the geometry says: a note that
+    // shares the paragraph's size, indent and leading is still not part of the
+    // paragraph, and letting it in would bury its marker mid-sentence.
+    if (!current || current.region !== region || current.footnote !== footnote || opensNote) {
+      blocks.push({ region, footnote, lines: [line] })
       continue
     }
     const previous = current.lines[current.lines.length - 1]
     const gap = line.bbox.y - (previous.bbox.y + previous.bbox.h)
     const context = { gap, medianSize, bodyGap }
     // Columns of a table align horizontally — allow small x jumps for them.
+    // Footnote lines are excluded: citation spacing reads as cells to the row
+    // detector, but a note is prose.
     const previousRow = splitRow(previous)
     const currentRow = splitRow(line)
     if (
       region === 'body' &&
+      !footnote &&
       previousRow.isTable &&
       currentRow.isTable &&
       Math.abs(gap) <= previous.style.fontSize * 1.2
@@ -347,7 +374,7 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
       current.lines.push(line)
       continue
     }
-    blocks.push({ region, lines: [line] })
+    blocks.push({ region, footnote, lines: [line] })
   }
 
   // --- materialise ---------------------------------------------------------
@@ -357,7 +384,8 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
     const bbox = mergedBBox(open.lines)
     const rowSplit = splitRow(open.lines[0])
     const isTableRow = rowSplit.isTable && open.lines.length > 1
-    const isList = open.region === 'body' && BULLET.test(open.lines[0].text.trim())
+    const isFootnote = open.footnote
+    const isList = open.region === 'body' && !isFootnote && BULLET.test(open.lines[0].text.trim())
     const marker = isList ? (open.lines[0].text.trim().match(BULLET)?.[1] ?? null) : null
 
     const text = isTableRow
@@ -367,6 +395,7 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
     const sizeRatio = medianSize > 0 ? first.style.fontSize / medianSize : 1
     let kind: BlockKind = 'paragraph'
     if (open.region !== 'body') kind = 'paragraph'
+    else if (isFootnote) kind = 'footnote'
     else if (isTableRow) kind = 'table'
     else if (isList) kind = 'list'
     else if (sizeRatio >= 1.25 && text.replace(/\s+/g, ' ').length <= 140) kind = 'heading'

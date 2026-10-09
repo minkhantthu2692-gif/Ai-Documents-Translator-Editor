@@ -53,14 +53,14 @@ beyond one cached probe. Configure with `VITE_PDF_SIDECAR_URL` (default
 | 4  | Multi-Column PDF (2/3-col, newspaper, reading order) | ✅     | `complex` classification for ≥3 columns ✅ (item-level gutter detection); reading order ✅ — rows fused across a gutter are cut back into one line per column, columns are read left-to-right (2–4), and a title spanning the fold opens its own zone ahead of both columns |
 | 5  | PDF With Images (captions, diagrams, charts) | 🔶 | Images kept in the page render/background ✅; image-anchored extraction + caption linkage in phase c |
 | 6  | PDF With Tables (simple/complex, merged cells, multi-page) | 🔶→⏳ | Row detection + table blocks ✅ (text representation); table rows are explicitly exempt from the column split so merging cells stay one row; pdfplumber cell extraction implemented in the sidecar server (frontend integration pending), merged cells/multi-page ❌ |
-| 7  | Academic / Research PDF (footnotes, refs, citations, equations) | 🔶→⏳ | 2-column papers classified `text` ✅ and read in column order ✅; footnote region + heading hierarchy in phase c; equations ❌ (see #23) |
+| 7  | Academic / Research PDF (footnotes, refs, citations, equations) | 🔶→⏳ | 2-column papers classified `text` ✅ and read in column order ✅; footnote regions ✅ (see below); heading hierarchy in phase c; equations ❌ (see #23) |
 | 8  | Business / Report PDF (reports, invoices, financial) | 🔶 | Paragraph/table extraction ✅; invoice form layout understanding ❌ |
 | 9  | Forms / Structured PDF (fillable, checkboxes, signatures) | 🔶 | Field detection/counted in probe ✅, password-style unlock flow ✅; translating labels in phase c; form filling ❌ (out of scope) |
 | 10 | Presentation PDF (slides, big headings, text boxes) | 🔶→⏳ | Size-spread/complexity signal ✅; per-slide text-box reading order in phase c |
-| 11 | Book / Document PDF (chapters, TOC, headers/footers, page numbers, long docs) | 🔶→⏳ | Header/footer bands, page labels, running heads ✅; long-document chunked translation ✅; footnote region phase c |
+| 11 | Book / Document PDF (chapters, TOC, headers/footers, page numbers, long docs) | 🔶→⏳ | Header/footer bands, page labels, running heads ✅; long-document chunked translation ✅; footnote regions ✅ |
 | 12 | Magazine / Brochure (complex layouts, multi-column, text around images) | 🔶→⏳ | `complex` classification ✅ (columns, overlap, size spread); multi-column reading order ✅; text-around-image structure repair in phase c |
 | 13 | Technical PDF (manuals, code snippets, diagrams) | 🔶 | Extracts as text ✅; code formatting preservation ❌ (phase c) |
-| 14 | Legal PDF (contracts, numbered sections, footnotes) | 🔶→⏳ | Numbered-section/list handling ✅; footnote region phase c |
+| 14 | Legal PDF (contracts, numbered sections, footnotes) | 🔶→⏳ | Numbered-section/list handling ✅; footnote regions ✅ — `1.`, `1)`, `1` and `(a)` callouts are recognised, so numbered notes are not read as list items |
 | 15 | Password-Protected / Encrypted PDF | ✅     | Wizard password prompt, wrong-password explanation, unlocked pre-flight; graceful unsupported-encryption errors; fixture-tested (RC4) |
 | 16 | Large PDF (hundreds/thousands of pages) | ✅     | 300-page fixture: worker-side probe/parse, main thread stays responsive, resumable queue, progress UI, chunked translation |
 | 17 | Unicode / Multilingual (Burmese, CJK, Arabic, Devanagari, Cyrillic) | 🔶→⏳ | Language detection + Zawgyi/Unicode handling ✅, Myanmar rendering ✅; OCR validated for English end-to-end, other scripts need their tesseract traineddata (mya available, untested) |
@@ -80,7 +80,7 @@ beyond one cached probe. Configure with `VITE_PDF_SIDECAR_URL` (default
 | (a) Classification | `complex` class, complexity scoring, item-level column detection, wizard metadata | 4, 12, 22 classification ✅ |
 | (b) Extraction methods | Browser Tesseract OCR auto-runs per window (status lifecycle, confidence, cached recognition), hybrid merge with geometric dedup, run-OCR setting persisted per project, Python sidecar server (protocol v1, 20 tests) | 2, 3 extraction ✅ |
 | (b2) Sidecar wiring | `src/sidecar/sidecarClient.ts`: cached `GET /health` probe, `POST /ocr` with page/language/password, per-line confidence added to the server response, lazy render so a sidecar page never rasterises in the browser, automatic fall-back to browser Tesseract on any failure (22 client + 5 pipeline + 1 Python test) | 2 extraction ✅ with a native-OCR fast path |
-| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. Remaining in this phase: footnote regions, real table cells, links, code blocks, headings | 4 ✅, reading order for 3 / 7 / 12 ✅; then 5, 6, 9, 11, 13, 14, 19, 24, 25 |
+| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. **Footnote regions ✅** — `src/pdf/footnotes.ts` marks them before any merging happens. Remaining in this phase: real table cells, links, code blocks, headings | 4 ✅, reading order for 3 / 7 / 12 ✅, footnotes for 7 / 11 / 14 ✅; then 5, 6, 9, 13, 19, 24, 25 |
 | (d) Layout auto-adjust | Auto-fit/reflow when translated text grows (EN→MY), export height handling | 1, 8, 10, 12 (translation-time layout) |
 
 ### Why reading order needed two detectors
@@ -100,8 +100,36 @@ scoring) deliberately keeps refusing pages whose title bridges the gutter; that
 refusal is correct for scoring and wrong for order, which is why
 `structurePage` does not use it.
 
+### Why footnotes need three signals
+
+A footnote is the one kind of body text that must *not* behave like body text:
+it is set small, it sits where a caption could sit, and it is close enough to
+the paragraph above to be swallowed by the paragraph merger — after which its
+marker is buried mid-sentence and the note is translated as part of the wrong
+text. But each signal alone is also a trap: size alone swallows captions (a
+figure note is small too), placement alone swallows any small print at the foot
+of a page, and a marker alone swallows every numbered section of a legal
+contract. `src/pdf/footnotes.ts` therefore requires **all three** — type below
+`0.92 ×` the page's body size, a line starting at or below `55%` of the page
+height, and a callout marker (`1`, `1.`, `1)`, `[3]`, `(a)`, `*`, `†`, Myanmar
+digits) — for the line that *opens* a note. The lines continuing it only have
+to be small, flush with the opener and directly below, because requiring a
+marker on every line would miss every continuation.
+
+Marking runs on the already-ordered body and before any merging, and
+`structurePage` then enforces two block boundaries: a note never joins the
+paragraph above it, and a note never joins the note below it (openers carry a
+marker, continuations do not). `footnote` is a new `BlockKind`; the note's
+marker deliberately stays **inside the block text** rather than becoming a
+`listMarker`, because exports re-attach `listMarker` in front of the text and
+the callout would print twice.
+
 _Known limitations carried over: table cell truncation at 45k characters,
 style reset on re-parse, no equation rendering (type 23). Reading order is
 unit-tested against synthetic column geometries (2/3/4 columns, fused rows,
 spanning titles, tables); no real multi-column PDF has been run through it
-end-to-end yet._
+end-to-end yet. Footnote detection is likewise tested on synthetic geometry: a
+note set at the *same* size as the body is not detected (nothing separates it
+but the horizontal rule above it, which is a graphics path pdf.js never hands
+over), and a page whose text is mostly note type reports the note size as its
+body median — so neither is recognised._

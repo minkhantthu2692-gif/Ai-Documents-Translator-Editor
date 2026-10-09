@@ -71,7 +71,7 @@ Phase A replaced the flat constant with the model's real budget and made it a
 
 - `minLines: 15` was a **floor consulted before the token budget**, so a page of long lines could push a batch far past budget — **fixed in Phase A** (§5.1);
 - a single oversized line had no path at all: if the model answered it badly the line silently kept its source text — **fixed in Phase B** (§5.2), which cuts it at sentence/row boundaries in the ladder's last resort;
-- `BlockKind` (`heading | paragraph | list | table | caption | shape`, `db/types.ts:88`) was **never consulted** — a table was split at an arbitrary line boundary and a heading could be stranded at the end of a batch — **fixed in Phase B** (§5.2);
+- `BlockKind` (`heading | paragraph | list | table | caption | footnote | shape`, `db/types.ts`) was **never consulted** — a table was split at an arbitrary line boundary and a heading could be stranded at the end of a batch — **fixed in Phase B** (§5.2);
 - ~~only **one** neighbour line is passed as context~~ — **fixed in Phase C** (§5.3): every batch also carries the nearest enclosing heading and, when known, its translation.
 
 ### 1.4 The second direction of the size problem

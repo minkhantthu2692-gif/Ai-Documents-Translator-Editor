@@ -259,6 +259,230 @@ describe('structurePage', () => {
   })
 })
 
+/**
+ * Footnotes are the one kind of body text that must *not* behave like body
+ * text: they are set small, they sit where a caption could sit, and they are
+ * close enough to the paragraph above to be swallowed by the merger. Each of
+ * the three signals has to hold on its own — size alone would eat captions,
+ * placement alone would eat any small print, a marker alone would eat every
+ * numbered section — so each test below removes exactly one of them.
+ */
+describe('structurePage footnote regions', () => {
+  const BODY: Partial<LineStyle> = { fontSize: 10 }
+  const NOTE: Partial<LineStyle> = { fontSize: 9 }
+
+  /**
+   * Body 10pt, notes 9pt — one point apart, which is exactly the awkward
+   * case: close enough for `canMerge`'s size check to wave the note through,
+   * so only the region marking can keep it out of the paragraph.
+   */
+  function footnotePage(): GroupedLine[] {
+    return [
+      line(
+        'The question then becomes whether the model generalises',
+        { x: 72, y: 407, w: 420, h: 12 },
+        BODY,
+      ),
+      line('beyond the training distribution at all', { x: 72, y: 421, w: 420, h: 12 }, BODY),
+      line('and, if so, under exactly which assumptions', { x: 72, y: 435, w: 420, h: 12 }, BODY),
+      line(
+        'the guarantee is supposed to survive the shift',
+        { x: 72, y: 449, w: 420, h: 12 },
+        BODY,
+      ),
+      line(
+        '1 Smith (2001) argues that the effect persists',
+        { x: 72, y: 463, w: 420, h: 11 },
+        NOTE,
+      ),
+      line(
+        '2 Jones (2003) disagrees with the reading above',
+        { x: 72, y: 477, w: 420, h: 11 },
+        NOTE,
+      ),
+    ]
+  }
+
+  it('keeps notes out of the paragraph above and labels them footnotes', () => {
+    const blocks = structurePage(footnotePage(), options())
+
+    expect(blocks).toHaveLength(3)
+    expect(blocks.map((block) => block.kind)).toEqual(['paragraph', 'footnote', 'footnote'])
+    expect(blocks.map((block) => block.order)).toEqual([0, 1, 2])
+    // The paragraph keeps its four lines: the note is not swallowed, so its
+    // marker cannot vanish mid-sentence and its text cannot be translated as
+    // part of the body.
+    expect(blocks[0].lines).toHaveLength(4)
+    expect(blocks[0].text).not.toContain('Smith')
+    expect(blocks[1].lines).toHaveLength(1)
+    expect(blocks[1].text).toBe('1 Smith (2001) argues that the effect persists')
+    expect(blocks[1].region).toBe('body')
+    expect(blocks[2].text).toBe('2 Jones (2003) disagrees with the reading above')
+  })
+
+  it('never turns a note marker into a list marker', () => {
+    const blocks = structurePage(footnotePage(), options())
+    // `1 Smith…` would have matched the bullet pattern had the note stayed a
+    // list block, and exports re-attach `listMarker` *in front of* the text —
+    // the marker would print twice. It stays inside the text instead, where a
+    // reader sees it even before translation.
+    for (const block of blocks.filter((entry) => entry.kind === 'footnote')) {
+      expect(block.listMarker).toBeNull()
+      expect(block.text.trim()).toMatch(/^[\d၀-၉][.)]?\s/)
+    }
+  })
+
+  it('reads a full-width note after both columns it sits under', () => {
+    const left = Array.from({ length: 6 }, (_u, index) =>
+      line(`Left column line ${index}`, { x: 72, y: 100 + index * 20, w: 200, h: 14 }, BODY),
+    )
+    const right = Array.from({ length: 6 }, (_u, index) =>
+      line(`Right column line ${index}`, { x: 330, y: 100 + index * 20, w: 200, h: 14 }, BODY),
+    )
+    const note = line(
+      '1 Full references appear in the appendix.',
+      { x: 72, y: 470, w: 468, h: 11 },
+      NOTE,
+    )
+
+    const blocks = structurePage([...left, ...right, note], options())
+
+    expect(blocks.map((block) => block.kind)).toEqual(['paragraph', 'paragraph', 'footnote'])
+    expect(blocks[0].lines).toHaveLength(6)
+    expect(blocks[1].lines).toHaveLength(6)
+    expect(blocks[2].text).toContain('Full references')
+    expect(blocks[2].order).toBe(2)
+  })
+
+  it('starts a new block where body text resumes after a note', () => {
+    // The mirror image of the swallowing case: here the note is already its
+    // own block, and the body-size line under it shares its indent, its
+    // leading and a 10-vs-9pt size difference small enough for `canMerge` to
+    // accept. Without the region boundary the paragraph would be re-absorbed
+    // into the note and inherit the footnote label.
+    const blocks = structurePage(
+      [
+        line(
+          'The ablation study removes one component at a time',
+          {
+            x: 72,
+            y: 400,
+            w: 420,
+            h: 12,
+          },
+          BODY,
+        ),
+        line(
+          'and reports the drop in accuracy for each removal',
+          {
+            x: 72,
+            y: 414,
+            w: 420,
+            h: 12,
+          },
+          BODY,
+        ),
+        line(
+          'across the three benchmark datasets we care about',
+          {
+            x: 72,
+            y: 428,
+            w: 420,
+            h: 12,
+          },
+          BODY,
+        ),
+        line(
+          'that the paper is built to defend at length',
+          {
+            x: 72,
+            y: 442,
+            w: 420,
+            h: 12,
+          },
+          BODY,
+        ),
+        line('1 Smith (2001) argues the opposite', { x: 72, y: 456, w: 420, h: 11 }, NOTE),
+        line(
+          'The appendix then lists every dataset used',
+          {
+            x: 72,
+            y: 468,
+            w: 420,
+            h: 12,
+          },
+          BODY,
+        ),
+      ],
+      options(),
+    )
+
+    expect(blocks).toHaveLength(3)
+    expect(blocks.map((block) => block.kind)).toEqual(['paragraph', 'footnote', 'paragraph'])
+    expect(blocks[1].lines).toHaveLength(1)
+    expect(blocks[2].text).toBe('The appendix then lists every dataset used')
+  })
+
+  it('leaves a caption alone — small and low is not enough without a marker', () => {
+    const blocks = structurePage(
+      [
+        line(
+          'The ablation study removes one component at a time',
+          { x: 72, y: 300, w: 420, h: 12 },
+          BODY,
+        ),
+        line(
+          'and reports the drop in accuracy for each removal',
+          { x: 72, y: 314, w: 420, h: 12 },
+          BODY,
+        ),
+        line(
+          'across the three benchmark datasets we care about',
+          { x: 72, y: 328, w: 420, h: 12 },
+          BODY,
+        ),
+        line(
+          'Figure 3: Results of the ablation study',
+          { x: 72, y: 460, w: 420, h: 10 },
+          { fontSize: 8 },
+        ),
+      ],
+      options(),
+    )
+
+    expect(blocks).toHaveLength(2)
+    expect(blocks[1].kind).toBe('caption')
+  })
+
+  it('leaves a marked line alone when it sits above the footnote zone', () => {
+    const blocks = structurePage(
+      [
+        line(
+          'The ablation study removes one component at a time',
+          { x: 72, y: 300, w: 420, h: 12 },
+          BODY,
+        ),
+        line(
+          'and reports the drop in accuracy for each removal',
+          { x: 72, y: 314, w: 420, h: 12 },
+          BODY,
+        ),
+        line(
+          'across the three benchmark datasets we care about',
+          { x: 72, y: 328, w: 420, h: 12 },
+          BODY,
+        ),
+        line('1 Smith (2001) argues the opposite', { x: 72, y: 350, w: 420, h: 11 }, NOTE),
+      ],
+      options(),
+    )
+
+    expect(blocks).toHaveLength(2)
+    expect(blocks[1].kind).toBe('paragraph')
+    expect(blocks.map((block) => block.kind)).not.toContain('footnote')
+  })
+})
+
 describe('detectColumns vs orderBodyLines', () => {
   it('the conservative split still refuses a page whose title bridges the gutter', () => {
     // This is deliberate and must stay that way: `detectColumns` feeds layout

@@ -85,7 +85,8 @@ export function pageNeedsOcr(page: Pick<PageRecord, 'contentClass' | 'ocrStatus'
   )
 }
 
-export type BlockKind = 'heading' | 'paragraph' | 'list' | 'table' | 'caption' | 'shape'
+export type BlockKind =
+  'heading' | 'paragraph' | 'list' | 'table' | 'caption' | 'footnote' | 'shape'
 export type BlockStatus = 'pending' | 'translated' | 'edited' | 'locked' | 'skipped'
 
 export interface BlockRecord extends BaseRecord {

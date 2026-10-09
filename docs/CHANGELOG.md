@@ -81,7 +81,9 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   `reflowForPage`, so a page cannot look broken on screen and clean in the file it prints to. A browser that
   will not give the export a canvas to measure with now says so: reflow falls back to an estimated character
   width, and the export raises an `EXPORT_LAYOUT_ESTIMATED` warning (EN + MY) instead of placing blocks
-  silently.
+  silently. The other silent case is gone too: a block the bottom edge stopped — the page box is fixed, so the
+  push runs out of room — is counted and reported as `EXPORT_LAYOUT_CLIPPED` (EN + MY) rather than left
+  to overlap in quiet.
 
 ### Security
 

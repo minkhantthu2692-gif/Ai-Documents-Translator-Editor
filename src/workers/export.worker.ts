@@ -165,6 +165,9 @@ async function build(request: ExportBuildRequest): Promise<ExportArtifact> {
       const measure = workerMeasurer(() => {
         measured = false
       })
+      // A block reflow could not clear — the page edge stopped the push. It is
+      // still printed, in the same order, overlapping the block above it.
+      const clipped: string[] = []
       const html = buildHtmlDocument(
         doc,
         {
@@ -183,6 +186,7 @@ async function build(request: ExportBuildRequest): Promise<ExportArtifact> {
           // raster path already measures with.
         },
         measure,
+        (blockId) => clipped.push(blockId),
       )
       if (!measured) {
         issues.push({
@@ -190,6 +194,14 @@ async function build(request: ExportBuildRequest): Promise<ExportArtifact> {
           fonts: [],
           detail:
             'this browser gave the export no text measurer, so blocks were re-flowed from an estimated character width and may sit a line out',
+        })
+      }
+      if (clipped.length > 0) {
+        issues.push({
+          code: 'EXPORT_LAYOUT_CLIPPED',
+          fonts: [],
+          count: clipped.length,
+          detail: `${clipped.length} blocks could not be re-flowed: the page box is fixed and the push ran out of edge, so they overlap the block above`,
         })
       }
       blob = new Blob([html], { type: WORKER_MIME[format] })

@@ -60,6 +60,13 @@ export interface ReflowOptions<T extends ReflowBlock> {
    * is what a surface without a fixed page would want.
    */
   pageHeight: number
+  /**
+   * Called once per block that is *still* inside the one above it after the
+   * pass — today only reachable by the bottom-edge clamp, but named for the
+   * outcome rather than the cause, because either way the reader is looking at
+   * an overlap and the export should say so.
+   */
+  onOverlap?: (block: T) => void
 }
 
 /** Same-column test: the horizontal ranges must share most of the narrower one. */
@@ -115,18 +122,20 @@ export function reflowBlocks<T extends ReflowBlock>(blocks: T[], options: Reflow
   for (const block of sorted) {
     const need = heights.get(block.id) ?? block.height
     let top = block.y
-
-    for (const other of placed) {
-      if (!overlapsInX(other.block, block)) continue
-      // A block that reached this far down in the source was beside us, not
-      // above us — a neighbouring column, or a band the columns sit under.
-      if (other.block.y + other.block.height > block.y + EPSILON) continue
-      top = Math.max(top, other.bottom)
-    }
+    // The blocks the push-down answers to: the ones that sat above us in the
+    // source and share our column.
+    const above = placed.filter(
+      (other) =>
+        overlapsInX(other.block, block) && other.block.y + other.block.height <= block.y + EPSILON,
+    )
+    for (const other of above) top = Math.max(top, other.bottom)
 
     if (options.pageHeight > 0 && top > options.pageHeight - need) {
       // Park the block as low as it still fits; never move one up.
       top = Math.max(block.y, options.pageHeight - need)
+      // The clamp handed back room the block above us was owed, so this one
+      // is drawn where the page ends rather than where it would have cleared.
+      if (above.some((other) => other.bottom > top + EPSILON)) options.onOverlap?.(block)
     }
 
     tops.set(block.id, top)

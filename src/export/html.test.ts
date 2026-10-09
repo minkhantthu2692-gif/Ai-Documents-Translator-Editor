@@ -471,4 +471,36 @@ describe('absolute export height handling', () => {
     const html = buildHtmlDocument(twoBlocks({ translatedText: words(25) }), base, measure)
     expect(html).toContain('min-height:14pt')
   })
+
+  it('names the blocks the page edge stopped it from clearing', () => {
+    // a grows at the foot of the page; the push lands b past 792pt, so b is
+    // parked at the edge — still under a. That is worth a name, because the
+    // reader is looking at an overlap and the export said nothing.
+    const page = doc({
+      pages: [
+        {
+          index: 0,
+          width: 612,
+          height: 792,
+          rotation: 0,
+          contentClass: 'text',
+          blocks: [
+            block({ id: 'a', y: 750, translatedText: words(25) }),
+            block({ id: 'b', y: 773, order: 1 }),
+          ],
+        },
+      ],
+    })
+    const clipped: string[] = []
+    buildHtmlDocument(page, base, measure, (id) => clipped.push(id))
+    expect(clipped).toEqual(['b'])
+  })
+
+  it('reports nothing when every block clears', () => {
+    const clipped: string[] = []
+    buildHtmlDocument(twoBlocks({ translatedText: words(25) }), base, measure, (id) =>
+      clipped.push(id),
+    )
+    expect(clipped).toEqual([])
+  })
 })

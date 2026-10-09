@@ -141,6 +141,37 @@ describe('reflowBlocks', () => {
     expect(topOf(out, 'b')).toBe(773)
   })
 
+  it('names the blocks the page edge stopped it from clearing', () => {
+    const a = block({ id: 'a', y: 750, translatedText: words(20) })
+    const b = block({ id: 'b', y: 773 })
+    const c = block({ id: 'c', y: 95, order: 1 })
+    const clipped: string[] = []
+    reflowBlocks([a, b, c], {
+      ...options,
+      onOverlap: (placed) => clipped.push(placed.id),
+    })
+    // b is still under a, and only b: c had all the room in the world.
+    expect(clipped).toEqual(['b'])
+  })
+
+  it('says nothing when every block clears', () => {
+    const a = block({ id: 'a', translatedText: words(20) })
+    const b = block({ id: 'b', y: 95 })
+    const clipped: string[] = []
+    reflowBlocks([a, b], { ...options, onOverlap: (placed) => clipped.push(placed.id) })
+    expect(clipped).toEqual([])
+  })
+
+  it('does not report an overlap the source already had', () => {
+    // Nothing was pushed, so nothing was "stopped" — the report is about the
+    // clamp giving back room, not about the PDF's own geometry.
+    const a = block({ id: 'a', height: 40, translatedText: words(20) })
+    const b = block({ id: 'b', y: 105 })
+    const clipped: string[] = []
+    reflowBlocks([a, b], { ...options, onOverlap: (placed) => clipped.push(placed.id) })
+    expect(clipped).toEqual([])
+  })
+
   it('never moves a block up to make room', () => {
     const tall = block({ id: 'tall', y: 760, translatedText: words(20) })
     const out = reflowBlocks([tall], options)

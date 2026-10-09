@@ -196,6 +196,12 @@ export function ExportDialog({ open, onClose, projectId }: ExportDialogProps) {
           )
         } else if (issue.code === 'EXPORT_LAYOUT_ESTIMATED') {
           toast('warning', t('export.issueLayoutTitle'), t('export.issueLayoutBody'))
+        } else if (issue.code === 'EXPORT_LAYOUT_CLIPPED') {
+          toast(
+            'warning',
+            t('export.issueClippedTitle', { count: issue.count ?? 0 }),
+            t('export.issueClippedBody'),
+          )
         } else {
           toast('warning', t('export.issueTitle'), issue.detail)
         }

@@ -183,6 +183,7 @@ function absolutePage(
   options: HtmlOptions,
   measure: TextMeasurer,
   image?: string,
+  onOverlap?: (blockId: string) => void,
 ): string {
   const blocks = reflowBlocks(pageBlocks(page), {
     measure,
@@ -190,6 +191,7 @@ function absolutePage(
     // Marker included: a bullet that pushes the first word onto a second line
     // has to be counted by the layout too.
     textOf: (block) => printedLine(block, options),
+    onOverlap: onOverlap ? (block) => onOverlap(block.id) : undefined,
   })
     .map((block) => blockHtml(block, options, ['block']))
     .filter(Boolean)
@@ -352,12 +354,14 @@ export function buildHtmlDocument(
   doc: ExportDocument,
   options: HtmlOptions,
   measure: TextMeasurer = textMeasurer(),
+  /** Ids of blocks reflow could not clear — the page edge stopped it. */
+  onOverlap?: (blockId: string) => void,
 ): string {
   const images = new Map((options.pageImages ?? []).map((entry) => [entry.index, entry.dataUrl]))
   const sections = doc.pages
     .map((page) =>
       options.layout === 'absolute'
-        ? absolutePage(page, options, measure, images.get(page.index))
+        ? absolutePage(page, options, measure, images.get(page.index), onOverlap)
         : flowPage(page, options),
     )
     .join('\n')
@@ -399,6 +403,7 @@ export function buildPrintDocument(
   doc: ExportDocument,
   options: HtmlOptions,
   measure: TextMeasurer = textMeasurer(),
+  onOverlap?: (blockId: string) => void,
 ): string {
   return buildHtmlDocument(
     doc,
@@ -408,6 +413,7 @@ export function buildPrintDocument(
       generator: options.generator || 'AI Documents Translator',
     },
     measure,
+    onOverlap,
   )
 }
 

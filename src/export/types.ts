@@ -189,11 +189,19 @@ export type ExportIssueCode =
    * a line further down (or up) than it needed to.
    */
   | 'EXPORT_LAYOUT_ESTIMATED'
+  /**
+   * A block is still inside the one above it after reflow, because the page
+   * box is fixed and the push ran out of edge. Nothing is missing, but two
+   * blocks overlap in the printed output.
+   */
+  | 'EXPORT_LAYOUT_CLIPPED'
 
 export interface ExportIssue {
   code: ExportIssueCode
   /** Missing font families (only for `EXPORT_FONT_MISSING`). */
   fonts: string[]
+  /** How many blocks were affected (only for `EXPORT_LAYOUT_CLIPPED`). */
+  count?: number
   detail: string
 }
 

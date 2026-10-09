@@ -296,9 +296,11 @@ surplus. Two rules keep that honest:
   was, while a band that grew moves both columns under it.
 - **The page cannot grow.** `@page { size }` is fixed, so a push stops at the
   bottom edge rather than printing half a block onto the next sheet, and a box
-  too tall to fit anywhere is left alone. Reflow also refuses to repair an
-  overlap the source PDF already had: that is a layout question for the reader,
-  not one a push-down can answer.
+  too tall to fit anywhere is left alone. A block the edge stopped is named in
+  the export summary — `EXPORT_LAYOUT_CLIPPED`, with how many — because the
+  reader is then looking at an overlap and silence would be the wrong default.
+  Reflow also refuses to repair an overlap the source PDF already had: that is
+  a layout question for the reader, not one a push-down can answer.
 
 The editor canvas runs the same pass, on the same measurer, so a page cannot
 look broken on screen and clean in the file it prints to. The formats with no

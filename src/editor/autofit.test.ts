@@ -136,4 +136,30 @@ describe('createCanvasMeasurer', () => {
     // 12pt → 16px font.
     expect(ctx.font).toContain('16px')
   })
+
+  it('reports the fallback once, not once per measured line', () => {
+    const onFallback = vi.fn()
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
+    const measurer = createCanvasMeasurer(undefined, onFallback)
+
+    measurer({ text: 'abc', fontFamily: 'Noto Sans', fontSize: 10, bold: false, italic: false })
+    measurer({ text: 'defgh', fontFamily: 'Noto Sans', fontSize: 10, bold: false, italic: false })
+
+    // An export measures every line of every block; the reason has not
+    // changed between them.
+    expect(onFallback).toHaveBeenCalledTimes(1)
+  })
+
+  it('says nothing when a context does open', () => {
+    const onFallback = vi.fn()
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      font: '',
+      measureText: (text: string) => ({ width: text.length * 10 }),
+    } as unknown as CanvasRenderingContext2D)
+    const measurer = createCanvasMeasurer(undefined, onFallback)
+
+    measurer({ text: 'abc', fontFamily: 'Noto Sans', fontSize: 12, bold: false, italic: false })
+
+    expect(onFallback).not.toHaveBeenCalled()
+  })
 })

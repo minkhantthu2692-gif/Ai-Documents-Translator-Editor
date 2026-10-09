@@ -179,7 +179,16 @@ export interface ExportProgress {
 }
 
 export type ExportIssueCode =
-  'EXPORT_FONT_MISSING' | 'EXPORT_EMPTY' | 'EXPORT_UNSUPPORTED' | 'EXPORT_FAILED'
+  | 'EXPORT_FONT_MISSING'
+  | 'EXPORT_EMPTY'
+  | 'EXPORT_UNSUPPORTED'
+  | 'EXPORT_FAILED'
+  /**
+   * The export ran without a canvas to measure text with, so block reflow was
+   * placed from a metric-free estimate. The file is complete; a block may sit
+   * a line further down (or up) than it needed to.
+   */
+  | 'EXPORT_LAYOUT_ESTIMATED'
 
 export interface ExportIssue {
   code: ExportIssueCode

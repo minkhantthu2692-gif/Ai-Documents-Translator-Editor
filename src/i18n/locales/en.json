@@ -1150,6 +1150,8 @@
     "issueTitle": "Export finished with a warning",
     "issueFontsTitle": "Some fonts were substituted",
     "issueFontsBody": "Missing families were replaced: {{mappings}}",
+    "issueLayoutTitle": "Layout was estimated, not measured",
+    "issueLayoutBody": "This browser gave the export no way to measure text, so blocks were re-flowed from an estimated character width. A block may sit a line further down than it needed to — nothing is missing.",
     "summary": "{{pages}} pages · {{blocks}} blocks · {{translated}} translated"
   }
 }

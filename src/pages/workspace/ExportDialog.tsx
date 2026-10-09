@@ -194,6 +194,8 @@ export function ExportDialog({ open, onClose, projectId }: ExportDialogProps) {
             t('export.issueFontsTitle'),
             t('export.issueFontsBody', { mappings: issue.detail || issue.fonts.join(', ') }),
           )
+        } else if (issue.code === 'EXPORT_LAYOUT_ESTIMATED') {
+          toast('warning', t('export.issueLayoutTitle'), t('export.issueLayoutBody'))
         } else {
           toast('warning', t('export.issueTitle'), issue.detail)
         }

@@ -26,11 +26,11 @@ export interface CompositeOptions {
 }
 
 /** Canvas measuring context for a worker thread (no DOM available there). */
-export function workerMeasurer(): TextMeasurer {
+export function workerMeasurer(onFallback?: () => void): TextMeasurer {
   return createCanvasMeasurer(() => {
     if (typeof OffscreenCanvas === 'undefined') return null
     return new OffscreenCanvas(1, 1).getContext('2d')
-  })
+  }, onFallback)
 }
 
 function alignmentOf(block: ExportBlock): CanvasTextAlign {

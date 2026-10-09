@@ -263,8 +263,16 @@ export type MeasurerContextFactory = () => TextContext | null
  *
  * Pass a factory to measure inside a worker (`OffscreenCanvas`) — the export
  * compositor does exactly that.
+ *
+ * `onFallback` fires once, when no context could be opened. It matters to a
+ * caller that is *positioning* text rather than merely guessing at it: reflow
+ * moves a block by what this returns, so an estimated width can leave a page a
+ * line out and the reader should be told the export was approximate.
  */
-export function createCanvasMeasurer(factory?: MeasurerContextFactory): TextMeasurer {
+export function createCanvasMeasurer(
+  factory?: MeasurerContextFactory,
+  onFallback?: () => void,
+): TextMeasurer {
   let ctx: TextContext | null = null
   let probed = false
   return (input) => {
@@ -277,6 +285,7 @@ export function createCanvasMeasurer(factory?: MeasurerContextFactory): TextMeas
       else if (typeof document !== 'undefined') {
         ctx = document.createElement('canvas').getContext('2d') ?? null
       }
+      if (!ctx) onFallback?.()
     }
     const px = (input.fontSize * 96) / 72
     if (ctx) {

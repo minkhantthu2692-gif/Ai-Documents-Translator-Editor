@@ -322,5 +322,7 @@ has been through it end-to-end. Layout auto-adjust shares the fixture caveat and
 brings one of its own: reflow measures with the same canvas the raster path
 uses, so a document exported where that canvas refused to open falls back to a
 0.52em-per-character estimate and can shift a block a line further than it
-needed. The overflow badges survive reflow on purpose: it changes where a
+needed. That is no longer silent — the export reports an
+`EXPORT_LAYOUT_ESTIMATED` warning, in English and Myanmar, when it happened.
+The overflow badges survive reflow on purpose: it changes where a
 block sits, not whether it outgrew the box the PDF cut for it._

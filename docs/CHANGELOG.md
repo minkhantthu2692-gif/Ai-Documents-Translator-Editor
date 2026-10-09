@@ -78,7 +78,10 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   HTML now emits `min-height` where it emitted `height`, so a box is a floor the translation may
   grow into rather than a ceiling it paints over. Formats with no geometry — DOCX, EPUB,
   Markdown — and the raster export are unchanged. The editor canvas runs the same pass through
-  `reflowForPage`, so a page cannot look broken on screen and clean in the file it prints to.
+  `reflowForPage`, so a page cannot look broken on screen and clean in the file it prints to. A browser that
+  will not give the export a canvas to measure with now says so: reflow falls back to an estimated character
+  width, and the export raises an `EXPORT_LAYOUT_ESTIMATED` warning (EN + MY) instead of placing blocks
+  silently.
 
 ### Security
 

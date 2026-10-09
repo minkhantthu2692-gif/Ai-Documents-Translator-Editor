@@ -156,6 +156,15 @@ async function build(request: ExportBuildRequest): Promise<ExportArtifact> {
     case 'html': {
       const bilingual = format === 'bilingual-pdf'
       const includeOriginal = bilingual || options.includeOriginal
+      // Reflow decides where a block *sits*, so a browser that will not hand
+      // the worker a 2D context is worth naming: the page still exports, but
+      // its blocks were placed from a metric-free estimate and may sit a line
+      // out. Only raised if a measurement was actually attempted — a flowing
+      // layout, or a document that never needs one, has nothing to report.
+      let measured = true
+      const measure = workerMeasurer(() => {
+        measured = false
+      })
       const html = buildHtmlDocument(
         doc,
         {
@@ -173,8 +182,16 @@ async function build(request: ExportBuildRequest): Promise<ExportArtifact> {
           // Reflow needs real glyph widths: the offscreen canvas is what the
           // raster path already measures with.
         },
-        workerMeasurer(),
+        measure,
       )
+      if (!measured) {
+        issues.push({
+          code: 'EXPORT_LAYOUT_ESTIMATED',
+          fonts: [],
+          detail:
+            'this browser gave the export no text measurer, so blocks were re-flowed from an estimated character width and may sit a line out',
+        })
+      }
       blob = new Blob([html], { type: WORKER_MIME[format] })
       break
     }

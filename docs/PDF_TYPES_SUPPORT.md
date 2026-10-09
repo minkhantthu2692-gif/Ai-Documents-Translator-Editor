@@ -81,7 +81,7 @@ beyond one cached probe. Configure with `VITE_PDF_SIDECAR_URL` (default
 | (b) Extraction methods | Browser Tesseract OCR auto-runs per window (status lifecycle, confidence, cached recognition), hybrid merge with geometric dedup, run-OCR setting persisted per project, Python sidecar server (protocol v1, 20 tests) | 2, 3 extraction ✅ |
 | (b2) Sidecar wiring | `src/sidecar/sidecarClient.ts`: cached `GET /health` probe, `POST /ocr` with page/language/password, per-line confidence added to the server response, lazy render so a sidecar page never rasterises in the browser, automatic fall-back to browser Tesseract on any failure (22 client + 5 pipeline + 1 Python test) | 2 extraction ✅ with a native-OCR fast path |
 | (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. `fixtures/complex.pdf` (3 columns + rotated watermark) now reads col 1 → col 2 → col 3 → watermark end-to-end. **Footnote regions ✅** — `src/pdf/footnotes.ts` marks them before any merging happens. **Heading hierarchy ✅** — `src/pdf/headings.ts` builds one document-wide ladder of heading font sizes during the probe and every page levels its headings against it; exporters render `h1`–`h6`, `HeadingLevel.HEADING_1–6` and ATX hashes. **Links ✅** — `src/pdf/links.ts` turns every external `/Link` rectangle into the words it covers and every exporter renders them as a real anchor (see below). Remaining in this phase: real table cells, code blocks, image-anchored extraction, form labels | 4 ✅, reading order for 3 / 7 / 12 ✅, footnotes for 7 / 11 / 14 ✅, heading hierarchy for 7 ✅, links for 19 / 25 ✅; then 5, 6, 9, 13, 24 |
-| (d) Layout auto-adjust | Auto-fit/reflow when translated text grows (EN→MY), export height handling | 1, 8, 10, 12 (translation-time layout) |
+| (d) Layout auto-adjust | **Translation-time auto-fit ✅** — `src/editor/layout.ts` re-measures a block the moment a translation lands and takes the largest size in `[6pt, originalFontSize]` whose wrapped text still fits the original bbox; never a size the reader pinned, and never below the floor — an unfittable block keeps the document's own size and is flagged rather than shrunk into illegibility. Runs on the bulk queue, on inline re-apply and on accept-suggestion, never on a person typing; `layout.autoFit` in Settings → General turns it off. **Reflow ✅** — `src/export/reflow.ts` pushes the blocks under one that outgrew its box down by exactly the growth, within their own column, stopping at the page edge; HTML emits `min-height` where it emitted `height`, so a box is a floor the translation may grow into | 1, 8, 10, 12 ✅ (translation-time layout + the absolute HTML/print export) |
 
 ### Why reading order needed two detectors
 
@@ -272,6 +272,38 @@ than the annotation was cut from, so its anchors are missed; DOCX uses an
 explicit `0563C1` underline rather than the `Hyperlink` style, which exists only
 inside Word's own stylesheet._
 
+### Why a grown block is pushed instead of clipped
+
+An EN→MY translation comes back taller than the line it replaced — often by
+half — inside a box that was cut from the *source* PDF. An absolutely-positioned
+layout has exactly three options: shrink the text, clip it, or move whatever is
+underneath. Clipping is what "breaking them" means, so the two commits of this
+phase take the other two in order, and only in that order.
+
+Shrinking is `src/editor/autofit.ts`'s job and it is deliberately timid: the
+band is `[6pt, originalFontSize]`, it runs only when a *translation* lands
+(a person typing is never re-sized under their fingers), a size the reader
+picked by hand is never overridden, and text that will not fit even at the floor
+keeps the document's own size and is flagged — a 6pt line that still spills is
+unreadable *and* wrong. What the band cannot absorb is handed to
+`src/export/reflow.ts`, which moves the blocks below down by exactly the
+surplus. Two rules keep that honest:
+
+- **Only a block that sat above you can move you.** "Above" is judged on the
+  *extracted* boxes, so two blocks that shared a row in the source — a second
+  column, or a full-width band and the columns it sits on — are never treated as
+  cause and effect. Growth in column one leaves column two exactly where it
+  was, while a band that grew moves both columns under it.
+- **The page cannot grow.** `@page { size }` is fixed, so a push stops at the
+  bottom edge rather than printing half a block onto the next sheet, and a box
+  too tall to fit anywhere is left alone. Reflow also refuses to repair an
+  overlap the source PDF already had: that is a layout question for the reader,
+  not one a push-down can answer.
+
+This is HTML and the print document only. DOCX, EPUB and Markdown are flow
+layouts with no box to overflow, and the raster export still paints the source
+geometry exactly as it was — which is the entire promise of that format.
+
 _Known limitations carried over: table cell truncation at 45k characters,
 style reset on re-parse, no equation rendering (type 23). Reading order is
 unit-tested against synthetic column geometries (2/3/4 columns, fused rows,
@@ -284,4 +316,10 @@ but the horizontal rule above it, which is a graphics path pdf.js never hands
 over), and a page whose text is mostly note type reports the note size as its
 body median — so neither is recognised. Heading levels have the same caveat:
 the ladder is exercised against generated fixtures, and no real academic paper
-has been through it end-to-end._
+has been through it end-to-end. Layout auto-adjust shares the fixture caveat and
+brings one of its own: reflow measures with the same canvas the raster path
+uses, so a document exported where that canvas refused to open falls back to a
+0.52em-per-character estimate and can shift a block a line further than it
+needed. Only HTML and the print document re-flow — the editor still shows the
+source geometry with its overflow badges, which is where the text came from,
+not where it now sits._

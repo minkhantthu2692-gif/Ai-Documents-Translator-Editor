@@ -63,6 +63,21 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   a scheme-less `www.…` is promoted to `https://`, and a URL over 2048 characters is refused.
   Internal `/Dest` links (TOC, cross-references) are deliberately not rendered: a page index is
   not a URL.
+- **Layout auto-adjust when a translation grows** (phase (d) of
+  `docs/PDF_TYPES_SUPPORT.md`): `src/editor/layout.ts` re-measures a block the moment a
+  translation lands — on the bulk queue, on inline re-apply and on accept-suggestion, but never
+  while a person is typing — and takes the largest size in `[6pt, originalFontSize]` whose
+  wrapped text still fits the original bbox. A size the reader pinned by hand is left alone, and
+  a block that will not fit even at the floor keeps the document's own size and is flagged
+  rather than shrunk into illegibility. A Layout card in Settings → General turns it off.
+- **Reflow of what auto-fit could not shrink**: `src/export/reflow.ts` pushes the blocks under a
+  block that outgrew its box down by exactly the growth, within their own column, chaining
+  through a stack and stopping at the page edge (`@page` is fixed, so nothing is printed half off
+  the next sheet). Growth in column one leaves column two untouched, a full-width band that grew
+  moves both columns under it, and an overlap the source PDF already had is left for the reader.
+  HTML now emits `min-height` where it emitted `height`, so a box is a floor the translation may
+  grow into rather than a ceiling it paints over. Formats with no geometry — DOCX, EPUB,
+  Markdown — and the raster export are unchanged.
 
 ### Security
 

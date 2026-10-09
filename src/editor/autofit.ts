@@ -266,11 +266,16 @@ export type MeasurerContextFactory = () => TextContext | null
  */
 export function createCanvasMeasurer(factory?: MeasurerContextFactory): TextMeasurer {
   let ctx: TextContext | null = null
+  let probed = false
   return (input) => {
-    if (!ctx) {
+    if (!probed) {
+      // Probe once. A measurer is called once per wrapped line, and an export
+      // measures every block on the page, so re-trying a missing canvas (jsdom,
+      // a context that refuses to open) would pay for itself never.
+      probed = true
       if (factory) ctx = factory()
       else if (typeof document !== 'undefined') {
-        ctx = document.createElement('canvas').getContext('2d')
+        ctx = document.createElement('canvas').getContext('2d') ?? null
       }
     }
     const px = (input.fontSize * 96) / 72

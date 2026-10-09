@@ -17,8 +17,10 @@
  * more before it reaches the iframe.
  */
 
+import { textMeasurer, type TextMeasurer } from '@/editor/autofit'
 import { directionOf } from '@/lib/text'
 import type { LinkRef } from '@/pdf/links'
+import { reflowBlocks } from './reflow'
 import {
   applyLinks,
   escapeHtml,
@@ -86,7 +88,10 @@ function blockStyle(block: ExportBlock, options: HtmlOptions): string {
   ]
   if (block.bold) parts.push('font-weight:700')
   if (block.italic) parts.push('font-style:italic')
-  if (block.height > 0) parts.push(`height:${pt(block.height)}`)
+  // A floor, not a ceiling: the box is at least as tall as the PDF cut it, and
+  // grows if the translation needs more — `reflowBlocks` has already moved the
+  // neighbours down to make that room, so nothing is painted over.
+  if (block.height > 0) parts.push(`min-height:${pt(block.height)}`)
   return parts.join(';')
 }
 
@@ -119,16 +124,33 @@ function htmlText(text: string, links: readonly LinkRef[]): string {
   )
 }
 
-function blockHtml(block: ExportBlock, options: HtmlOptions, classes: string[]): string {
-  const text = options.includeOriginal
+/**
+ * The text `blockHtml` is about to print for a block.
+ *
+ * Deliberately not `textOf(...).primary`: `includeOriginal` falls back to the
+ * translation when the source is empty, which is the inverse of what a flow
+ * bilingual column does. `reflowBlocks` measures this exact string, so what the
+ * layout leaves room for is what the page actually shows.
+ */
+function printedText(block: ExportBlock, options: HtmlOptions): string {
+  return options.includeOriginal
     ? block.sourceText.length > 0
       ? block.sourceText
       : block.translatedText
     : block.translatedText.length > 0
       ? block.translatedText
       : block.sourceText
-  if (text.trim().length === 0) return ''
+}
 
+/** Everything `blockHtml` renders as text, list marker included. */
+function printedLine(block: ExportBlock, options: HtmlOptions): string {
+  const text = printedText(block, options)
+  return `${listPrefix(block, text)}${text}`
+}
+
+function blockHtml(block: ExportBlock, options: HtmlOptions, classes: string[]): string {
+  const text = printedText(block, options)
+  if (text.trim().length === 0) return ''
   const marker = listPrefix(block, text)
   const content = `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${htmlText(
     text,
@@ -159,9 +181,16 @@ function blockHtml(block: ExportBlock, options: HtmlOptions, classes: string[]):
 function absolutePage(
   page: ExportDocument['pages'][number],
   options: HtmlOptions,
+  measure: TextMeasurer,
   image?: string,
 ): string {
-  const blocks = pageBlocks(page)
+  const blocks = reflowBlocks(pageBlocks(page), {
+    measure,
+    pageHeight: page.height,
+    // Marker included: a bullet that pushes the first word onto a second line
+    // has to be counted by the layout too.
+    textOf: (block) => printedLine(block, options),
+  })
     .map((block) => blockHtml(block, options, ['block']))
     .filter(Boolean)
     .join('\n')
@@ -319,12 +348,16 @@ function screenHeader(doc: ExportDocument, options: HtmlOptions): string {
  * Builds the whole document. Pure: no DOM, no I/O — font CSS and page images
  * arrive already prepared so the function runs inside the export worker.
  */
-export function buildHtmlDocument(doc: ExportDocument, options: HtmlOptions): string {
+export function buildHtmlDocument(
+  doc: ExportDocument,
+  options: HtmlOptions,
+  measure: TextMeasurer = textMeasurer(),
+): string {
   const images = new Map((options.pageImages ?? []).map((entry) => [entry.index, entry.dataUrl]))
   const sections = doc.pages
     .map((page) =>
       options.layout === 'absolute'
-        ? absolutePage(page, options, images.get(page.index))
+        ? absolutePage(page, options, measure, images.get(page.index))
         : flowPage(page, options),
     )
     .join('\n')
@@ -362,12 +395,20 @@ ${sections}
 }
 
 /** Convenience wrapper: the exact source handed to `iframe.srcdoc`. */
-export function buildPrintDocument(doc: ExportDocument, options: HtmlOptions): string {
-  return buildHtmlDocument(doc, {
-    ...options,
-    mode: 'print',
-    generator: options.generator || 'AI Documents Translator',
-  })
+export function buildPrintDocument(
+  doc: ExportDocument,
+  options: HtmlOptions,
+  measure: TextMeasurer = textMeasurer(),
+): string {
+  return buildHtmlDocument(
+    doc,
+    {
+      ...options,
+      mode: 'print',
+      generator: options.generator || 'AI Documents Translator',
+    },
+    measure,
+  )
 }
 
 /** Default options for the plain HTML export. */

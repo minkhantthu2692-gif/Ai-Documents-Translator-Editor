@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { TextMeasurer } from '@/editor/autofit'
 import { buildHtmlDocument, buildPrintDocument, htmlExportOptions, type HtmlOptions } from './html'
 import {
   DEFAULT_EXPORT_OPTIONS,
@@ -428,5 +429,46 @@ describe('links', () => {
   it('renders nothing extra for a block with no links', () => {
     const html = buildHtmlDocument(linkedDoc({ links: [] }), base)
     expect(html).not.toContain('<a href=')
+  })
+})
+
+describe('absolute export height handling', () => {
+  /** ~0.5 em average advance — deterministic, no canvas needed. */
+  const measure: TextMeasurer = ({ text, fontSize }) => text.length * fontSize * 0.5
+
+  /** `n` space-separated words: `wrapLines` cannot break a single long token. */
+  const words = (n: number) => Array.from({ length: n }, () => 'word').join(' ')
+
+  function twoBlocks(first: Partial<ExportBlock>): ExportDocument {
+    return doc({
+      pages: [
+        {
+          index: 0,
+          width: 612,
+          height: 792,
+          rotation: 0,
+          contentClass: 'text',
+          blocks: [block({ id: 'a', ...first }), block({ id: 'b', y: 95, order: 1 })],
+        },
+      ],
+    })
+  }
+
+  it('moves the block below one that outgrew its box, and only that block', () => {
+    // Twenty-five words are two lines at 11pt/1.7 — 37.4pt in a 14pt box.
+    const html = buildHtmlDocument(twoBlocks({ translatedText: words(25) }), base, measure)
+    expect(html).toContain('top:72pt')
+    expect(html).toContain('top:109.4pt')
+  })
+
+  it('leaves a page whose text still fits exactly as the PDF drew it', () => {
+    const html = buildHtmlDocument(twoBlocks({}), base, measure)
+    expect(html).toContain('top:72pt')
+    expect(html).toContain('top:95pt')
+  })
+
+  it('emits the source box as a floor the text may grow into', () => {
+    const html = buildHtmlDocument(twoBlocks({ translatedText: words(25) }), base, measure)
+    expect(html).toContain('min-height:14pt')
   })
 })

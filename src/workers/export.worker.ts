@@ -13,6 +13,7 @@
 /// <reference lib="webworker" />
 
 import { buildFontCss, toBase64, type FontFaceInfo } from '@/fonts'
+import { workerMeasurer } from '@/export/composite'
 import { blobToDataUrl } from '@/export/imageCodec'
 import { buildCsv, buildTsv } from '@/export/delimited'
 import { buildDocx } from '@/export/docx'
@@ -155,19 +156,25 @@ async function build(request: ExportBuildRequest): Promise<ExportArtifact> {
     case 'html': {
       const bilingual = format === 'bilingual-pdf'
       const includeOriginal = bilingual || options.includeOriginal
-      const html = buildHtmlDocument(doc, {
-        ...DEFAULT_HTML_OPTIONS,
-        mode: format === 'html' ? 'screen' : 'print',
-        layout: includeOriginal ? 'flow' : 'absolute',
-        bilingual: bilingual ? options.bilingual : 'none',
-        includeOriginal,
-        fontCss,
-        fontStack: options.fontStack,
-        title: doc.title,
-        lang: doc.targetLang,
-        generator: 'AI Documents Translator',
-        pageImages: await pageImageUrls(images),
-      })
+      const html = buildHtmlDocument(
+        doc,
+        {
+          ...DEFAULT_HTML_OPTIONS,
+          mode: format === 'html' ? 'screen' : 'print',
+          layout: includeOriginal ? 'flow' : 'absolute',
+          bilingual: bilingual ? options.bilingual : 'none',
+          includeOriginal,
+          fontCss,
+          fontStack: options.fontStack,
+          title: doc.title,
+          lang: doc.targetLang,
+          generator: 'AI Documents Translator',
+          pageImages: await pageImageUrls(images),
+          // Reflow needs real glyph widths: the offscreen canvas is what the
+          // raster path already measures with.
+        },
+        workerMeasurer(),
+      )
       blob = new Blob([html], { type: WORKER_MIME[format] })
       break
     }

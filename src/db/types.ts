@@ -10,6 +10,7 @@ import type { ReasonCode, Severity } from '@/core/reasonCodes'
 import type { BBox } from '@/pdf/stableId'
 import type { LineStyle } from '@/pdf/lineGrouping'
 import type { SkipRule } from '@/pdf/skipRules'
+import type { LinkRef } from '@/pdf/structure'
 import type { Placeholder } from '@/pdf/placeholders'
 
 export interface BaseRecord {
@@ -137,6 +138,12 @@ export interface BlockRecord extends BaseRecord {
    * levels existed simply has no value and every reader must default it.
    */
   headingLevel?: number | null
+  /**
+   * External `/Link` annotations that landed on this block, in reading order.
+   * Optional for the same reason `headingLevel` is: a row parsed before links
+   * were captured simply has none, and every reader must default it.
+   */
+  links?: LinkRef[]
   /** 0..1 heuristic quality of the last successful translation (null = none). */
   translationConfidence: number | null
   /** Flag from the last translation pass (null = clean). */

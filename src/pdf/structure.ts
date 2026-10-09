@@ -35,6 +35,17 @@ export interface BlockLine {
   style: LineStyle
 }
 
+/**
+ * One hyperlink occurrence: the words an annotation covered and where it
+ * goes. Lives here rather than in `links.ts` so the block shape does not have
+ * to import from the module that fills it; `links.ts` re-exports it.
+ */
+export interface LinkRef {
+  /** Always a substring of the block it is attached to. */
+  text: string
+  url: string
+}
+
 export interface PageBlock {
   id: string
   kind: BlockKind
@@ -57,6 +68,13 @@ export interface PageBlock {
    * are already emitting, never as an absolute size.
    */
   headingLevel: number | null
+  /**
+   * External `/Link` annotations that landed on this block, in reading order.
+   * Always an array (possibly empty) so a caller never tests for `undefined`.
+   * Each `text` is a substring of `text`, which is what lets an exporter wrap
+   * it without re-parsing the string.
+   */
+  links: LinkRef[]
   /** Estimated line spacing as a multiple of the font size (≥ 1). */
   lineSpacing: number
   fontFamily: string
@@ -452,6 +470,7 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
       placeholders: placeholderResult.placeholders,
       listMarker: marker,
       headingLevel: null,
+      links: [],
       lineSpacing: Number.isFinite(spacing) ? spacing : 1.4,
       fontFamily: first.style.fontFamily,
       fontSize: first.style.fontSize,

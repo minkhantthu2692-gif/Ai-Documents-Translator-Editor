@@ -237,6 +237,7 @@ function toBlockPatch(
     placeholders: block.placeholders,
     listMarker: block.listMarker,
     headingLevel: block.headingLevel,
+    links: block.links ?? [],
     // A re-parse re-reads the PDF: any auto-fit/manual size and any overflow
     // warning from the previous layout are stale the moment geometry changes.
     fontSizeMode: 'original',

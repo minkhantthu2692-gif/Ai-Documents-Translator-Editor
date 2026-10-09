@@ -18,7 +18,9 @@
  */
 
 import { directionOf } from '@/lib/text'
+import type { LinkRef } from '@/pdf/links'
 import {
+  applyLinks,
   escapeHtml,
   fontStackFor,
   headingOffset,
@@ -95,6 +97,28 @@ function alignmentOf(block: ExportBlock): string {
   return 'left'
 }
 
+/**
+ * Escapes `text`, turning any link that landed on it into a real `<a>`.
+ *
+ * Escaping happens segment by segment through `applyLinks`, so a URL's own
+ * `&` is escaped for the attribute while the same URL in the body is escaped
+ * for a text node — and neither is passed through the escaping twice. The
+ * scheme was already allow-listed at extraction time; `applyLinks` checks it
+ * again here because this is the string that ends up in somebody else's
+ * browser.
+ */
+function htmlText(text: string, links: readonly LinkRef[]): string {
+  return applyLinks(
+    text,
+    links,
+    (url, anchor) =>
+      `<a href="${escapeHtml(url)}" rel="noopener noreferrer" target="_blank">${escapeHtml(
+        anchor,
+      )}</a>`,
+    escapeHtml,
+  )
+}
+
 function blockHtml(block: ExportBlock, options: HtmlOptions, classes: string[]): string {
   const text = options.includeOriginal
     ? block.sourceText.length > 0
@@ -106,7 +130,10 @@ function blockHtml(block: ExportBlock, options: HtmlOptions, classes: string[]):
   if (text.trim().length === 0) return ''
 
   const marker = listPrefix(block, text)
-  const content = `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${escapeHtml(text)}`
+  const content = `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${htmlText(
+    text,
+    block.links,
+  )}`
   const dir = block.direction === 'rtl' ? ' dir="rtl"' : ''
   const style =
     options.layout === 'absolute'
@@ -168,10 +195,13 @@ function flowPage(page: ExportDocument['pages'][number], options: HtmlOptions): 
           `<p class="src" data-block-id="${escapeHtml(block.id)}"${
             sourceIsRtl ? ' dir="rtl"' : ''
           }">` +
-          `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${escapeHtml(source)}</p>` +
+          `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${htmlText(
+            source,
+            block.links,
+          )}</p>` +
           `<${tag} class="tgt" data-block-id="${escapeHtml(block.id)}" dir="${
             block.direction === 'rtl' ? 'rtl' : 'ltr'
-          }">${escapeHtml(target)}</${tag}>` +
+          }">${htmlText(target, block.links)}</${tag}>` +
           `</div>`,
       )
     } else {
@@ -181,7 +211,10 @@ function flowPage(page: ExportDocument['pages'][number], options: HtmlOptions): 
       rows.push(
         `<${tag} class="tgt" data-block-id="${escapeHtml(block.id)}"` +
           ` dir="${block.direction === 'rtl' ? 'rtl' : 'ltr'}">` +
-          `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${escapeHtml(text)}</${tag}>`,
+          `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${htmlText(
+            text,
+            block.links,
+          )}</${tag}>`,
       )
     }
   }

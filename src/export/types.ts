@@ -15,6 +15,7 @@ import type {
   PageContentClass,
 } from '@/db/types'
 import type { Placeholder } from '@/pdf/placeholders'
+import type { LinkRef } from '@/pdf/structure'
 import type { SkipRule } from '@/pdf/skipRules'
 
 /** Bump when the payload shape changes in a way old workers cannot read. */
@@ -83,6 +84,15 @@ export interface ExportBlock {
    * `shared.ts`.
    */
   headingLevel: number | null
+  /**
+   * External `/Link` annotations that landed on this block, in reading order.
+   * Every `text` is a substring of `sourceText` — that is what lets a builder
+   * wrap it without re-parsing the string — but it is a substring of
+   * `translatedText` only when the model kept the words, which is why the
+   * helpers in `shared.ts` fall back to wrapping a literal occurrence of the
+   * URL itself.
+   */
+  links: LinkRef[]
   sourceText: string
   translatedText: string
   characterCount: number

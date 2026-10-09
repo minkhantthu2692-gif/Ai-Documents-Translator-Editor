@@ -51,6 +51,7 @@ function projectBlock(block: ExportBlock): BlockWithoutGeometry {
     italic: block.italic,
     listMarker: block.listMarker,
     headingLevel: block.headingLevel,
+    links: block.links,
     sourceText: block.sourceText,
     translatedText: block.translatedText,
     characterCount: block.characterCount,

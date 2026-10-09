@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { buildHtmlDocument, buildPrintDocument, htmlExportOptions, type HtmlOptions } from './html'
-import { DEFAULT_EXPORT_OPTIONS, EXPORT_SCHEMA, type ExportDocument } from './types'
+import {
+  DEFAULT_EXPORT_OPTIONS,
+  EXPORT_SCHEMA,
+  type ExportBlock,
+  type ExportDocument,
+} from './types'
 
 function block(overrides: Partial<ExportDocument['pages'][number]['blocks'][number]> = {}) {
   return {
@@ -22,6 +27,7 @@ function block(overrides: Partial<ExportDocument['pages'][number]['blocks'][numb
     italic: false,
     listMarker: null,
     headingLevel: null,
+    links: [],
     sourceText: 'Hello world',
     translatedText: 'မြန်မာစာ စာသား',
     characterCount: 11,
@@ -340,5 +346,87 @@ describe('heading hierarchy', () => {
     })
     expect(html).toContain('<p class="src"')
     expect(html).toMatch(/<h\d class="tgt" data-block-id="blk_1"/)
+  })
+})
+
+describe('links', () => {
+  const link = {
+    text: 'pricing page',
+    url: 'https://example.com/pricing?x=1&y=2',
+  }
+
+  function linkedDoc(overrides: Partial<ExportBlock> = {}) {
+    return doc({
+      pages: [
+        {
+          index: 0,
+          width: 612,
+          height: 792,
+          rotation: 0,
+          contentClass: 'text',
+          blocks: [
+            block({
+              sourceText: 'See the pricing page for details.',
+              translatedText: 'See the pricing page for details.',
+              links: [link],
+              ...overrides,
+            }),
+          ],
+        },
+      ],
+    })
+  }
+
+  it('turns the anchor into a real <a> with an escaped href', () => {
+    const html = buildHtmlDocument(linkedDoc(), base)
+    // The `&` in the query string must be an entity *inside the attribute*,
+    // and the body text must not be escaped twice by the same pass.
+    expect(html).toContain('<a href="https://example.com/pricing?x=1&amp;y=2"')
+    expect(html).toContain('>pricing page</a>')
+    expect(html).toContain('See the ')
+  })
+
+  it('leaves the surrounding text escaped', () => {
+    const html = buildHtmlDocument(
+      linkedDoc({ sourceText: 'a & b', translatedText: 'a & b < c' }),
+      base,
+    )
+    expect(html).toContain('a &amp; b &lt; c')
+  })
+
+  it('refuses a URL that would not be safe to navigate', () => {
+    const html = buildHtmlDocument(
+      linkedDoc({
+        sourceText: 'Click me',
+        translatedText: 'Click me',
+        links: [{ text: 'Click me', url: 'javascript:alert(1)' }],
+      }),
+      base,
+    )
+    expect(html).not.toContain('javascript:')
+    expect(html).toContain('Click me')
+    expect(html).not.toContain('<a href=')
+  })
+
+  it('opens a new tab without handing the opener over', () => {
+    const html = buildHtmlDocument(linkedDoc(), base)
+    expect(html).toContain('rel="noopener noreferrer"')
+    expect(html).toContain('target="_blank"')
+  })
+
+  it('links the flow layout too, on the side that still has the words', () => {
+    const html = buildHtmlDocument(linkedDoc({ translatedText: 'စျေးနှုန်း' }), {
+      ...base,
+      layout: 'flow',
+      includeOriginal: true,
+      bilingual: 'side-by-side',
+    })
+    expect(html).toContain('>pricing page</a>')
+    expect(html.match(/<a href=/g)?.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('renders nothing extra for a block with no links', () => {
+    const html = buildHtmlDocument(linkedDoc({ links: [] }), base)
+    expect(html).not.toContain('<a href=')
   })
 })

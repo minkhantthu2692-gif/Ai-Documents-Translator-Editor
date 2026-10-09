@@ -6,6 +6,7 @@
  * Vitest unchanged.
  */
 
+import { safeLinkUrl, type LinkRef } from '@/pdf/links'
 import {
   DEFAULT_EXPORT_OPTIONS,
   type ExportBlock,
@@ -120,6 +121,92 @@ export function listPrefix(block: ExportBlock, text?: string): string {
 export function headingOffset(block: ExportBlock, levelsAbove: number): number | null {
   if (block.headingLevel === null) return null
   return Math.min(6, Math.max(1, block.headingLevel) + Math.max(0, levelsAbove))
+}
+
+/** How a builder escapes the stretches of text between links. */
+export type LinkPlain = (segment: string) => string
+
+/** Wraps one anchor, already proven safe to navigate to. */
+export type LinkWrap = (url: string, anchor: string) => string
+
+/** A stretch of a block's text: ordinary, or the target of one link. */
+export interface LinkSegment {
+  text: string
+  /** null = ordinary text; otherwise the URL this stretch points at. */
+  url: string | null
+}
+
+/**
+ * Splits `text` into ordinary stretches and linked anchors.
+ *
+ * An annotation never tells us *which* words it covered — `links.ts` recovers
+ * them geometrically and stores them as substrings of the block's source text.
+ * A translation moves those words somewhere else (or replaces them), so the
+ * match is attempted against whatever this builder is about to print and, when
+ * the words are gone, against a literal occurrence of the URL, which is the
+ * one thing a model reliably keeps.
+ *
+ * Two rules keep the output safe: a link fires at most once even though it is
+ * offered twice (words first, URL second), and the leftmost match wins so two
+ * anchors can never overlap — an `<a>` inside an `<a>`, or a Markdown link
+ * label cut in half.
+ */
+export function linkSegments(text: string, links: readonly LinkRef[]): LinkSegment[] {
+  if (text.length === 0 || links.length === 0) return [{ text, url: null }]
+
+  // Each link is offered as the words it covered, then — if that is not what
+  // came out of the translation — as the URL verbatim.
+  const offered: Array<{ link: LinkRef; needle: string }> = []
+  for (const link of links) {
+    if (safeLinkUrl(link.url) === null) continue
+    if (link.text.trim().length > 0) offered.push({ link, needle: link.text })
+    if (link.url.length > 0 && link.url !== link.text) offered.push({ link, needle: link.url })
+  }
+  if (offered.length === 0) return [{ text, url: null }]
+
+  const segments: LinkSegment[] = []
+  const fired = new Set<LinkRef>()
+  let cursor = 0
+  for (;;) {
+    let best: { link: LinkRef; needle: string; index: number } | null = null
+    for (const candidate of offered) {
+      if (fired.has(candidate.link)) continue
+      const index = text.indexOf(candidate.needle, cursor)
+      if (index < 0) continue
+      const wins =
+        best === null ||
+        index < best.index ||
+        (index === best.index && candidate.needle.length > best.needle.length)
+      if (wins) best = { link: candidate.link, needle: candidate.needle, index }
+    }
+    if (best === null) break
+    if (best.index > cursor) segments.push({ text: text.slice(cursor, best.index), url: null })
+    segments.push({ text: best.needle, url: best.link.url })
+    fired.add(best.link)
+    cursor = best.index + best.needle.length
+  }
+  if (cursor < text.length) segments.push({ text: text.slice(cursor), url: null })
+  return segments.length > 0 ? segments : [{ text, url: null }]
+}
+
+/**
+ * `linkSegments` with the markup already applied.
+ *
+ * `plain` is what every non-link stretch becomes, which is how HTML escapes
+ * text without the anchors being double-escaped by the same pass. Builders
+ * that emit objects instead of strings (docx) call `linkSegments` directly.
+ */
+export function applyLinks(
+  text: string,
+  links: readonly LinkRef[],
+  wrap: LinkWrap,
+  plain: LinkPlain = (segment) => segment,
+): string {
+  return linkSegments(text, links)
+    .map((segment) =>
+      segment.url === null ? plain(segment.text) : wrap(segment.url, segment.text),
+    )
+    .join('')
 }
 
 export interface DocumentStats {

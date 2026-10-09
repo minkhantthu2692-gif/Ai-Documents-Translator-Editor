@@ -224,6 +224,75 @@ describe('mixed.pdf', () => {
   })
 })
 
+describe('links.pdf', () => {
+  // Five `/Link` annotations over five three-line paragraphs, written in
+  // Courier so every rectangle is exact: a URL mid-line, a word mid-line, an
+  // internal destination, a `data:` URI and a URI with no scheme at all.
+  let blocks: Awaited<ReturnType<typeof extractPage>>['blocks']
+
+  beforeAll(async () => {
+    const doc = await open('links.pdf')
+    const page = await doc.getPage(1)
+    blocks = (await extractPage(page, { pageIndex: 0 })).blocks
+  })
+
+  const linksOf = (needle: string) => blocks.find((block) => block.text.includes(needle))?.links
+
+  it('attaches a mid-line URL to exactly the characters it covers', () => {
+    expect(linksOf('Read more at')).toEqual([
+      { text: 'https://example.com/api', url: 'https://example.com/api' },
+    ])
+  })
+
+  it('attaches an ordinary word without swallowing the rest of the line', () => {
+    expect(linksOf('pricing page')).toEqual([
+      { text: 'pricing page', url: 'https://example.com/pricing' },
+    ])
+  })
+
+  it('skips an internal destination, which is not a URL', () => {
+    expect(linksOf('Section 7')).toEqual([])
+  })
+
+  it('rejects a scheme a browser would execute rather than navigate', () => {
+    expect(linksOf('data:payload')).toEqual([])
+  })
+
+  it('keeps a URI pdf.js could only reach by giving it a scheme', () => {
+    // pdf.js canonicalises `www.example.org/spec` to `http://…` itself; what
+    // matters is that a scheme-less URI still ends up somewhere navigable and
+    // anchored on the words that were underlined in the source.
+    expect(linksOf('index lives')).toEqual([
+      { text: 'www.example.org/spec', url: 'http://www.example.org/spec' },
+    ])
+  })
+
+  it('splits the page into one block per paragraph, so links stay where they were read', () => {
+    // Three-line paragraphs: the leading is tight inside one and twice as
+    // wide between two, which is the only signal `structurePage` has. Each
+    // linked line therefore owns its anchor instead of sharing a block with
+    // four other annotations.
+    const paragraphs = blocks.filter((block) => block.lines.length === 3)
+    expect(paragraphs).toHaveLength(5)
+    // Paragraph 1 (the URL) and paragraph 2 (the word) hold their own link;
+    // paragraphs 3 and 4 (internal, `data:`) hold nothing at all.
+    expect(paragraphs.map((block) => block.links.length)).toEqual([1, 1, 0, 0, 1])
+  })
+
+  it('never offers an anchor that is not part of the block it sits on', () => {
+    for (const block of blocks) {
+      for (const link of block.links) {
+        expect(block.text).toContain(link.text)
+      }
+    }
+  })
+
+  it('leaves every block holding a list, never undefined', () => {
+    expect(blocks.length).toBeGreaterThan(4)
+    expect(blocks.every((block) => Array.isArray(block.links))).toBe(true)
+  })
+})
+
 describe('complex.pdf', () => {
   it('classifies the three-column watermark page as complex', async () => {
     const doc = await open('complex.pdf')

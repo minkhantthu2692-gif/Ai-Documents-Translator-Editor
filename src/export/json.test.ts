@@ -23,6 +23,7 @@ function block(overrides: Partial<ExportBlock>): ExportBlock {
     italic: false,
     listMarker: null,
     headingLevel: null,
+    links: [],
     sourceText: '',
     translatedText: '',
     characterCount: 0,
@@ -182,6 +183,38 @@ describe('buildJsonDocument', () => {
     expect(stripped.translatedText).toBe('မြန်မာစာ')
     expect(parsed.pages[0].width).toBe(612)
     expect(parsed.pages[0].blocks[1].listMarker).toBe('•')
+  })
+
+  it('carries links with or without geometry, and back unchanged', () => {
+    const links = [
+      { text: 'pricing page', url: 'https://example.com/pricing' },
+      { text: 'www.example.org', url: 'https://www.example.org/' },
+    ]
+    const doc: ExportDocument = {
+      ...makeDoc(),
+      pages: [
+        {
+          index: 0,
+          width: 612,
+          height: 792,
+          rotation: 0,
+          contentClass: 'text',
+          blocks: [block({ id: 'linked', links, sourceText: 'See the pricing page' })],
+        },
+      ],
+    }
+
+    for (const includeGeometry of [true, false]) {
+      const parsed = parseJsonDocument(buildJsonDocument(doc, { pretty: false, includeGeometry }))
+      expect(parsed.pages[0].blocks[0].links).toEqual(links)
+    }
+  })
+
+  it('writes an empty array rather than omitting a block with no links', () => {
+    const parsed = parseJsonDocument(
+      buildJsonDocument(makeDoc(), { pretty: false, includeGeometry: true }),
+    )
+    expect(parsed.pages[0].blocks[0].links).toEqual([])
   })
 })
 

@@ -71,6 +71,7 @@ export async function collectExportDocument(options: CollectOptions): Promise<Ex
         italic: block.italic,
         listMarker: block.listMarker,
         headingLevel: block.headingLevel ?? null,
+        links: block.links ?? [],
         sourceText: block.sourceText,
         translatedText: block.translatedText,
         characterCount: block.characterCount,

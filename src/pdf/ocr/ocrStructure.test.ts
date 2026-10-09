@@ -39,6 +39,7 @@ function block(order: number, x: number, y: number, w: number, h: number, text =
     placeholders: [],
     listMarker: null,
     headingLevel: null,
+    links: [],
     lineSpacing: 1.2,
     fontFamily: 'Helvetica',
     fontSize: 10,

@@ -23,6 +23,7 @@ function block(partial: Partial<ExportBlock>): ExportBlock {
     italic: false,
     listMarker: null,
     headingLevel: null,
+    links: [],
     sourceText: '',
     translatedText: '',
     characterCount: 0,
@@ -242,5 +243,52 @@ describe('buildDocx', () => {
       },
     } as unknown as ExportDocument
     await expect(buildDocx(broken, options())).rejects.toThrow('DOCX_FAILED: boom')
+  })
+})
+
+describe('buildDocx links', () => {
+  async function bytesFor(links: ExportBlock['links'], text = 'See the pricing page for details.') {
+    const doc: ExportDocument = {
+      ...fixtureDoc(),
+      pages: [page(0, [block({ id: 'linked', links, sourceText: text, translatedText: text })])],
+    }
+    return buildDocx(doc, options())
+  }
+
+  it('emits a hyperlink that keeps the run and declares an external relationship', async () => {
+    const bytes = await bytesFor([{ text: 'pricing page', url: 'https://example.com/pricing' }])
+    const xml = await zipText(bytes, 'word/document.xml')
+    const rels = await zipText(bytes, 'word/_rels/document.xml.rels')
+
+    expect(xml).toContain('<w:hyperlink')
+    expect(xml).toContain('pricing page')
+    expect(rels).toContain('Target="https://example.com/pricing"')
+    expect(rels).toContain('TargetMode="External"')
+  })
+
+  it('keeps the surrounding text as ordinary runs', async () => {
+    const xml = await zipText(
+      await bytesFor([{ text: 'pricing page', url: 'https://example.com/pricing' }]),
+      'word/document.xml',
+    )
+    // Three runs: before, inside, after — the hyperlink must not swallow the
+    // paragraph, or the font and size of the rest are lost with it.
+    expect(xml).toContain('See the ')
+    expect(xml).toContain(' for details.')
+    expect(xml.match(/<w:hyperlink/g)).toHaveLength(1)
+  })
+
+  it('drops a link whose URL would not be safe to navigate', async () => {
+    const bytes = await bytesFor([{ text: 'Click me', url: 'javascript:alert(1)' }], 'Click me now')
+    const xml = await zipText(bytes, 'word/document.xml')
+    const rels = await zipText(bytes, 'word/_rels/document.xml.rels')
+    expect(xml).not.toContain('<w:hyperlink')
+    expect(rels).not.toContain('javascript:')
+    expect(xml).toContain('Click me now')
+  })
+
+  it('writes no hyperlink for a block with no links', async () => {
+    const xml = await zipText(await bytesFor([]), 'word/document.xml')
+    expect(xml).not.toContain('<w:hyperlink')
   })
 })

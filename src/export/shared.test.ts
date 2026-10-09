@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_FONT_STACK,
+  applyLinks,
   documentStats,
   escapeHtml,
   cssFontName,
@@ -9,6 +10,7 @@ import {
   headingOffset,
   isDocumentEmpty,
   langTag,
+  linkSegments,
   listPrefix,
   pageBlocks,
   pt,
@@ -38,6 +40,7 @@ function block(overrides: Partial<ExportBlock> = {}): ExportBlock {
     italic: false,
     listMarker: null,
     headingLevel: null,
+    links: [],
     sourceText: 'Hello',
     translatedText: 'မင်္ဂလာပါ',
     characterCount: 10,
@@ -227,5 +230,113 @@ describe('headingOffset', () => {
   it('never returns a level below one, whatever the record says', () => {
     expect(headingOffset(block({ headingLevel: 0 }), 0)).toBe(1)
     expect(headingOffset(block({ headingLevel: -3 }), 0)).toBe(1)
+  })
+})
+
+describe('linkSegments', () => {
+  const url = 'https://example.com/api'
+  const priced = { text: 'pricing page', url: 'https://example.com/pricing' }
+
+  it('returns the text untouched when there is nothing to link', () => {
+    expect(linkSegments('Hello', [])).toEqual([{ text: 'Hello', url: null }])
+    expect(linkSegments('', [{ text: 'x', url }])).toEqual([{ text: '', url: null }])
+  })
+
+  it('cuts the anchor out and keeps the rest as ordinary text', () => {
+    expect(linkSegments('Read more at https://example.com/api now', [{ text: url, url }])).toEqual([
+      { text: 'Read more at ', url: null },
+      { text: url, url },
+      { text: ' now', url: null },
+    ])
+  })
+
+  it('offers the URL verbatim when the model rewrote the words around it', () => {
+    // `link.text` is a substring of the *source*; a translation moves it. The
+    // URL is the one thing that reliably survives, so it is the fallback.
+    const source = 'See the pricing page for details.'
+    expect(linkSegments(source, [priced])).toEqual([
+      { text: 'See the ', url: null },
+      { text: 'pricing page', url: priced.url },
+      { text: ' for details.', url: null },
+    ])
+    const rewritten = 'ကုန်ကျစရိတ် https://example.com/pricing ကို ကြည့်ပါ'
+    expect(linkSegments(rewritten, [priced])).toEqual([
+      { text: 'ကုန်ကျစရိတ် ', url: null },
+      { text: 'https://example.com/pricing', url: priced.url },
+      { text: ' ကို ကြည့်ပါ', url: null },
+    ])
+  })
+
+  it('never nests two anchors, even when their words overlap', () => {
+    const links = [
+      { text: 'pricing page', url: priced.url },
+      { text: 'page for details', url },
+    ]
+    const segments = linkSegments('See the pricing page for details.', links)
+    expect(segments.filter((segment) => segment.url !== null)).toHaveLength(1)
+    // Leftmost wins, so the first link is the one that fires.
+    expect(segments[1]).toEqual({ text: 'pricing page', url: priced.url })
+    expect(segments.map((segment) => segment.text).join('')).toBe(
+      'See the pricing page for details.',
+    )
+  })
+
+  it('fires a link once even though it is offered twice', () => {
+    const link = { text: url, url }
+    const segments = linkSegments(`Read ${url} then ${url} again`, [link])
+    expect(segments.filter((segment) => segment.url !== null)).toHaveLength(1)
+    // The second occurrence stays plain text.
+    expect(segments.map((segment) => segment.text).join('')).toBe(`Read ${url} then ${url} again`)
+  })
+
+  it('drops a link whose URL would not be safe to navigate', () => {
+    const text = 'Click data:text/html;base64,PHNjcmlwdD4= now'
+    expect(
+      linkSegments(text, [
+        { text: 'data:text/html;base64,PHNjcmlwdD4=', url: 'data:text/html;base64,PHNjcmlwdD4=' },
+      ]),
+    ).toEqual([{ text, url: null }])
+  })
+
+  it('ignores an empty anchor, which would otherwise match everywhere', () => {
+    expect(linkSegments('Hello', [{ text: '   ', url }])).toEqual([{ text: 'Hello', url: null }])
+  })
+})
+
+describe('applyLinks', () => {
+  const wrap = (url: string, anchor: string) => `<${anchor}|${url}>`
+  const escape = (segment: string) => segment.replace(/&/g, '&amp;')
+
+  it('escapes only the stretches that are not links', () => {
+    // The classic double-escaping bug: the URL's own `&` must be escaped for
+    // the attribute and once for the body — never twice over.
+    const out = applyLinks(
+      'a & b https://example.com/a?x=1&y=2 c & d',
+      [{ text: 'https://example.com/a?x=1&y=2', url: 'https://example.com/a?x=1&y=2' }],
+      wrap,
+      escape,
+    )
+    expect(out).toBe(
+      'a &amp; b <https://example.com/a?x=1&y=2|https://example.com/a?x=1&y=2> c &amp; d',
+    )
+  })
+
+  it('leaves the text alone when nothing matches', () => {
+    expect(applyLinks('nothing here', [{ text: 'gone', url: 'https://a.com' }], wrap, escape)).toBe(
+      'nothing here',
+    )
+    expect(applyLinks('', [], wrap, escape)).toBe('')
+  })
+
+  it('wraps in reading order across several links', () => {
+    const out = applyLinks(
+      'See pricing or docs',
+      [
+        { text: 'pricing', url: 'https://a.com/p' },
+        { text: 'docs', url: 'https://a.com/d' },
+      ],
+      wrap,
+    )
+    expect(out).toBe('See <pricing|https://a.com/p> or <docs|https://a.com/d>')
   })
 })

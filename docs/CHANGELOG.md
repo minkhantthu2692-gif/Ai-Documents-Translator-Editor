@@ -53,6 +53,16 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   headings and Markdown ATX hashes — each offset past the structural headings that builder
   already prints and clamped at six, with `.block` neutralising the browser's default heading
   styles so the printed page is unchanged.
+- **Clickable links** in PDF extraction (phase (c) of `docs/PDF_TYPES_SUPPORT.md`): every
+  external `/Link` annotation becomes a `LinkRef[]` on the block it sits over
+  (`src/pdf/links.ts`), anchored on the words the rectangle actually covered. HTML and EPUB emit
+  `<a href rel="noopener noreferrer" target="_blank">`, Markdown `[text](url)` with the label's
+  brackets escaped, DOCX an `ExternalHyperlink` run that keeps the surrounding font, size,
+  weight, italics and direction, and JSON carries the pairs for a round trip. Destinations are
+  allow-listed before anything else sees them — `javascript:`, `data:` and `file:` are dropped,
+  a scheme-less `www.…` is promoted to `https://`, and a URL over 2048 characters is refused.
+  Internal `/Dest` links (TOC, cross-references) are deliberately not rendered: a page index is
+  not a URL.
 
 ### Security
 

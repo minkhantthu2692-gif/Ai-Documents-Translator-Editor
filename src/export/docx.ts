@@ -19,6 +19,7 @@
 import {
   AlignmentType,
   Document,
+  ExternalHyperlink,
   HeadingLevel,
   LineRuleType,
   Packer,
@@ -27,7 +28,15 @@ import {
   TextRun,
 } from 'docx'
 import { directionOf } from '@/lib/text'
-import { contentPages, headingOffset, langTag, listPrefix, pageBlocks, textOf } from './shared'
+import {
+  contentPages,
+  headingOffset,
+  langTag,
+  linkSegments,
+  listPrefix,
+  pageBlocks,
+  textOf,
+} from './shared'
 import type { ExportBlock, ExportDocument } from './types'
 
 /** Options the export worker fills from the export dialog. */
@@ -83,6 +92,9 @@ function docxColor(color: string): string | undefined {
   return /^[0-9a-f]{6}$/i.test(hex) ? hex.toUpperCase() : undefined
 }
 
+/** Word's hyperlink blue — what a reader already expects a link to look like. */
+const LINK_COLOR = '0563C1'
+
 /** One run carrying the block's font, size, emphasis and script direction. */
 function blockRun(text: string, block: ExportBlock, font: string): TextRun {
   const color = docxColor(block.color)
@@ -97,7 +109,44 @@ function blockRun(text: string, block: ExportBlock, font: string): TextRun {
   })
 }
 
-/** One paragraph: alignment, RTL direction, line spacing, exactly one run. */
+/**
+ * The paragraph's children: ordinary stretches as runs, anchors as
+ * `ExternalHyperlink`s.
+ *
+ * Word keeps a hyperlink's run-level properties, so an anchor in a Burmese
+ * paragraph shapes exactly like the rest of it — same font, size, emphasis,
+ * direction. The colour and underline are written out rather than inherited
+ * from Word's built-in `Hyperlink` character style, because that style only
+ * exists inside Word: LibreOffice and Google Docs render `<w:rStyle
+ * w:val="Hyperlink"/>` as nothing at all, and a link a reader cannot see is a
+ * link nobody clicks.
+ */
+function blockChildren(
+  text: string,
+  block: ExportBlock,
+  font: string,
+): Array<TextRun | ExternalHyperlink> {
+  return linkSegments(text, block.links).map((segment) => {
+    if (segment.url === null) return blockRun(segment.text, block, font)
+    return new ExternalHyperlink({
+      children: [
+        new TextRun({
+          text: segment.text,
+          font,
+          size: halfPoints(block.fontSize),
+          ...(block.bold ? { bold: true } : {}),
+          ...(block.italic ? { italics: true } : {}),
+          ...(directionOf(segment.text) === 'rtl' ? { rightToLeft: true } : {}),
+          color: LINK_COLOR,
+          underline: {},
+        }),
+      ],
+      link: segment.url,
+    })
+  })
+}
+
+/** One paragraph: alignment, RTL direction, line spacing, one run per stretch. */
 function blockParagraph(
   text: string,
   block: ExportBlock,
@@ -110,7 +159,7 @@ function blockParagraph(
     ...(rtl ? { bidirectional: true } : {}),
     ...(heading !== null ? { heading: DOCX_HEADING[heading] } : {}),
     spacing: { line: lineUnits(block.lineHeight), lineRule: LineRuleType.AUTO },
-    children: [blockRun(text, block, font)],
+    children: blockChildren(text, block, font),
   })
 }
 

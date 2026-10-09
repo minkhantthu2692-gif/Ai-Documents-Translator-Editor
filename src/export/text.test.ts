@@ -23,6 +23,7 @@ function block(overrides: Partial<ExportBlock>): ExportBlock {
     italic: false,
     listMarker: null,
     headingLevel: null,
+    links: [],
     sourceText: '',
     translatedText: '',
     characterCount: 0,

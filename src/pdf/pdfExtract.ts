@@ -24,6 +24,7 @@ import { estimateTokens } from '@/translate/tokenEstimate'
 import { classifyPage, coverageOf, emptyTally, type ContentTally } from './pageClassify'
 import { analyzeLayout, itemBoxesOf, type LayoutComplexity } from './layoutComplexity'
 import { headingTiers } from './headings'
+import { attachLinks, linkAnchors, linksFromAnnotations } from './links'
 import {
   groupItemsIntoLines,
   type GroupedLine,
@@ -556,7 +557,7 @@ export async function extractPage(
   page: PDFPageProxy,
   options: ExtractPageOptions,
 ): Promise<ExtractedPage> {
-  const prepared = await readPage(page, { annotations: false })
+  const prepared = await readPage(page, { annotations: true })
   const structureOptions: StructureOptions = {
     pageIndex: options.pageIndex,
     pageWidth: prepared.width,
@@ -587,6 +588,13 @@ export async function extractPage(
   }
 
   const blocks = structurePage(lines, structureOptions)
+  // `/Link` annotations are rectangles plus a URI and nothing else: the words
+  // they cover are recovered from the *lines*, not from the blocks, because a
+  // rectangle that spans two paragraphs would otherwise have no block to
+  // belong to, and one that lands mid-paragraph would be sliced against a
+  // merged line of text that never existed on the page.
+  const pageLinks = linksFromAnnotations(prepared.annotations, prepared.height)
+  attachLinks(blocks, linkAnchors(pageLinks, lines, prepared.items))
   return {
     pageIndex: options.pageIndex,
     width: prepared.width,

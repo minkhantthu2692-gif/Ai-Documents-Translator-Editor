@@ -10,6 +10,9 @@
  *   fixtures/mixed.pdf       page 1 = image + text, page 2 = plain text
  *   fixtures/encrypted.pdf   3 pages, RC4 40-bit (V1/R2), password "secret123"
  *   fixtures/complex.pdf     1 page, three text columns + rotated watermark
+ *   fixtures/links.pdf       1 page, five /Link annotations: a mid-line URL,
+ *                            a mid-line word, an internal destination, a
+ *                            `data:` URI and a URI with no scheme
  *
  * Everything is written by hand (xref offsets computed exactly) so the script
  * only depends on node:crypto for MD5. Content is ASCII so a latin-1 stream
@@ -125,6 +128,8 @@ const FONT_REGULAR =
   '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>'
 const FONT_BOLD =
   '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>'
+/** Courier: 0.6em advance for every glyph, so link rectangles can be exact. */
+const FONT_MONO = '<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>'
 const LETTER = '/MediaBox [0 0 612 792]'
 
 function escape(text) {
@@ -136,13 +141,15 @@ function addPagesObject(writer) {
   return writer.add('<< /Type /Pages /Kids [] /Count 0 >>') // object 2
 }
 
-function addPage(writer, pagesNum, resources, contents) {
+function addPage(writer, pagesNum, resources, contents, annots = []) {
   const contentsRef = Array.isArray(contents)
     ? `[${contents.map((num) => `${num} 0 R`).join(' ')}]`
     : `${contents} 0 R`
+  const annotsRef =
+    annots.length > 0 ? ` /Annots [${annots.map((num) => `${num} 0 R`).join(' ')}]` : ''
   return writer.add(
     `<< /Type /Page /Parent ${pagesNum} 0 R ${LETTER} ` +
-      `/Resources << ${resources} >> /Contents ${contentsRef} >>`,
+      `/Resources << ${resources} >> /Contents ${contentsRef}${annotsRef} >>`,
   )
 }
 
@@ -520,6 +527,122 @@ function buildEncryptedPdf(pageCount) {
 
 /* ------------------------------------------------------------------ */
 
+/**
+ * One page of `/Link` annotations, laid out in Courier so every rectangle can
+ * be computed exactly: at 10pt, each glyph is 6pt wide, so the anchor of a
+ * link is a known character range rather than a guess.
+ *
+ * Five three-line paragraphs (tight leading, blank line between) rather than
+ * one evenly spaced block: the paragraph merger sets its reference gap from
+ * the page's own median, so a page where every line is equally far apart
+ * merges all of it and nothing can be asserted per block.
+ *
+ * Covers the five shapes the extractor has to tell apart:
+ *   1. a URL in the middle of a line  — the usual bare link
+ *   2. an ordinary word mid-line      — a citation-style hyperlink
+ *   3. an internal `/Dest`            — not a URL, must be skipped
+ *   4. a `data:` URI                  — must be rejected, not escaped
+ *   5. a URI with no scheme           — navigable once pdf.js gives it one
+ */
+function buildLinksPdf() {
+  const writer = new PdfWriter()
+  const pagesNum = addPagesObject(writer)
+  const regular = writer.add(FONT_REGULAR)
+  const bold = writer.add(FONT_BOLD)
+  const mono = writer.add(FONT_MONO)
+  const resources = `/Font << /F1 ${regular} 0 R /F2 ${bold} 0 R /F3 ${mono} 0 R >>`
+
+  const CH = 6 // Courier advance at 10pt
+  const LEFT = 72
+  /**
+   * The rectangle, bottom-left origin. Tight around the glyph box — 13pt for
+   * 10pt type on 13pt leading — because a generous one reaches onto the next
+   * line and every fixture assertion then counts an anchor that is not there.
+   */
+  const rectFor = (y, from, to) => `[${LEFT + from * CH} ${y - 2} ${LEFT + to * CH} ${y + 11}]`
+  const uri = (rect, target) =>
+    writer.add(
+      `<< /Type /Annot /Subtype /Link /Rect ${rect} /Border [0 0 0] ` +
+        `/A << /S /URI /URI (${escape(target)}) >> >>`,
+    )
+
+  // The five linked lines: text, baseline, and the anchor as `[from, to)` in
+  // glyphs. `null` marks the internal destination, which carries no URI.
+  const linked = [
+    ['Read more at https://example.com/api now', 660, 13, 36, 'https://example.com/api'],
+    ['See the pricing page for details.', 608, 8, 20, 'https://example.com/pricing'],
+    ['Section 7 explains the batching rules.', 556, 0, 9, null],
+    [
+      'A saved copy sits at data:payload in the archive.',
+      504,
+      21,
+      33,
+      'data:text/html;base64,PHNjcmlwdD4=',
+    ],
+    ['The index lives at www.example.org/spec weekly.', 452, 19, 39, 'www.example.org/spec'],
+  ]
+  const fillers = [
+    ['The endpoint returns JSON and nothing else.', 'Rate limits apply per key.'],
+    ['Enterprise plans are quoted separately.', 'Billing runs monthly in advance.'],
+    ['It is the authoritative reference.', 'Ask support if anything is unclear.'],
+    ['That address is not a download.', 'Use the release page instead.'],
+    ['It lists every published revision.', 'Subscribe to get a notification.'],
+  ]
+
+  const annots = linked.map(([, y, from, to, target]) => {
+    const rect = rectFor(y, from, to)
+    if (target === null) {
+      // An internal destination: no URI, so it is not a hyperlink at all.
+      return writer.add(
+        `<< /Type /Annot /Subtype /Link /Rect ${rect} /Border [0 0 0] /Dest (chapter-7) >>`,
+      )
+    }
+    return uri(rect, target)
+  })
+
+  // Baselines are absolute in the table above; `Td` is relative, so every
+  // draw subtracts from a running cursor instead of trusting the deltas to
+  // happen to add up.
+  const body = ['BT\n', '/F2 16 Tf\n0 0 0 rg\n', '72 690 Td\n']
+  let cursor = 690
+  const move = (target, text) => {
+    const dy = cursor - target
+    cursor = target
+    return dy === 0 ? `(${escape(text)}) Tj\n` : `0 -${dy} Td (${escape(text)}) Tj\n`
+  }
+  body.push(move(690, 'Useful Links'))
+  for (let index = 0; index < linked.length; index += 1) {
+    const [line, y] = linked[index]
+    body.push('/F3 10 Tf\n')
+    body.push(move(y, line))
+    body.push(move(y - 13, fillers[index][0]))
+    body.push(move(y - 26, fillers[index][1]))
+    // A blank line: advance again without drawing, which is what separates
+    // one paragraph from the next. The cursor moves in the PDF as well as in
+    // here, or the next paragraph lands on this one's last line.
+    body.push('0 -26 Td\n')
+    cursor -= 26
+  }
+  body.push('ET\n')
+
+  const content = Buffer.from(
+    [
+      'BT\n',
+      '/F2 9 Tf\n1 0 0 rg\n',
+      `72 770 Td (${escape('Annual Report 2026')}) Tj\n`,
+      '0 0 0 rg\n/F1 9 Tf\n',
+      `0 -712 Td (${escape('Page 1 of 1')}) Tj\n`,
+      'ET\n',
+      ...body,
+    ].join(''),
+    'latin1',
+  )
+  const stream = writer.addStream('', content)
+  const page = addPage(writer, pagesNum, resources, stream, annots)
+  finalizePages(writer, pagesNum, [page])
+  return writer.render()
+}
+
 mkdirSync(OUT, { recursive: true })
 const outputs = [
   ['text-300p.pdf', buildTextPdf(300)],
@@ -527,6 +650,7 @@ const outputs = [
   ['mixed.pdf', buildMixedPdf()],
   ['encrypted.pdf', buildEncryptedPdf(3)],
   ['complex.pdf', buildComplexPdf()],
+  ['links.pdf', buildLinksPdf()],
 ]
 for (const [name, buffer] of outputs) {
   writeFileSync(join(OUT, name), buffer)

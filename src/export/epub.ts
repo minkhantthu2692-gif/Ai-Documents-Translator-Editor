@@ -20,8 +20,10 @@
 
 import JSZip from 'jszip'
 import { directionOf } from '@/lib/text'
+import type { LinkRef } from '@/pdf/links'
 import {
   DEFAULT_FONT_STACK,
+  applyLinks,
   contentPages,
   cssFontName,
   escapeHtml,
@@ -110,13 +112,30 @@ function chapterLabel(pages: ExportPage[]): string {
   return first === last ? `Page ${first}` : `Page ${first}–${last}`
 }
 
-/** One paragraph: classes (`source`/`block`/`rtl`), lang, direction and style. */
+/**
+ * Escapes an anchor and the URL it points at, as an `<a>` for XHTML.
+ *
+ * Escaped separately: the label is text and the attribute is text, and neither
+ * is allowed to leak a raw `&` — epubcheck rejects the file for it.
+ */
+function linkHtml(url: string, anchor: string): string {
+  return `<a href="${escapeHtml(url)}">${escapeHtml(anchor)}</a>`
+}
+
+/**
+ * One paragraph: classes (`source`/`block`/`rtl`), lang, direction and style.
+ *
+ * `links` are wrapped into `<a>` elements; the words come from the source
+ * PDF, so they match the source paragraph exactly and match the translated one
+ * only when the model kept them (see `applyLinks`).
+ */
 function paragraph(
   text: string,
   classes: readonly string[],
   lang: string,
   style: string,
   heading: number | null = null,
+  links: readonly LinkRef[] = [],
 ): string {
   const rtl = directionOf(text) === 'rtl'
   const all = rtl ? [...classes, 'rtl'] : classes
@@ -126,7 +145,8 @@ function paragraph(
   // reader's own heading stylesheet is what makes it stand out — the same way
   // it did in the source PDF, where it was simply set larger.
   const tag = heading === null ? 'p' : `h${heading}`
-  return `<${tag} class="${escapeHtml(all.join(' '))}" xml:lang="${safeLang}" lang="${safeLang}"${dir}${style}>${escapeHtml(text)}</${tag}>`
+  const inner = applyLinks(text, links, linkHtml, escapeHtml)
+  return `<${tag} class="${escapeHtml(all.join(' '))}" xml:lang="${safeLang}" lang="${safeLang}"${dir}${style}>${inner}</${tag}>`
 }
 
 /**
@@ -164,6 +184,7 @@ function blockParagraphs(block: ExportBlock, doc: ExportDocument, options: EpubO
       lang,
       style,
       index === headingIndex ? headingOffset(block, CHAPTER_LEVELS_ABOVE) : null,
+      block.links,
     )
   })
 }

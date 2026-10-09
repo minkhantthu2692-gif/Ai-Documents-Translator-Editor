@@ -23,6 +23,7 @@ function block(partial: Partial<ExportBlock>): ExportBlock {
     italic: false,
     listMarker: null,
     headingLevel: null,
+    links: [],
     sourceText: '',
     translatedText: '',
     characterCount: 0,
@@ -273,5 +274,51 @@ describe('buildEpub', () => {
     expect(chapter).toContain('<p class="block"')
     expect(chapter.match(/<h3 /g)).toHaveLength(1)
     expectWellFormed(chapter, 'chap_1.xhtml')
+  })
+})
+
+describe('buildEpub links', () => {
+  async function chapterOf(
+    links: ExportBlock['links'],
+    text = 'See the pricing page for details.',
+  ) {
+    const doc: ExportDocument = {
+      ...fixtureDoc(),
+      pages: [page(0, [block({ id: 'linked', links, sourceText: text, translatedText: text })])],
+    }
+    const zip = await JSZip.loadAsync(await buildEpub(doc, epubOptions()))
+    return zipText(zip, 'OEBPS/text/chap_1.xhtml')
+  }
+
+  it('emits an <a> whose label and href are both escaped', async () => {
+    const chapter = await chapterOf([
+      { text: 'pricing page', url: 'https://example.com/pricing?x=1&y=2' },
+    ])
+    expect(chapter).toContain('<a href="https://example.com/pricing?x=1&amp;y=2">pricing page</a>')
+    expectWellFormed(chapter, 'chap_1.xhtml')
+  })
+
+  it('keeps the chapter well-formed when the text itself needs escaping', async () => {
+    const chapter = await chapterOf(
+      [{ text: 'Click me', url: 'https://example.com/a?b=1&c=2' }],
+      'Tom & Jerry <3 say Click me',
+    )
+    expect(chapter).toContain('Tom &amp; Jerry &lt;3 say ')
+    expectWellFormed(chapter, 'chap_1.xhtml')
+  })
+
+  it('drops a link whose URL would not be safe to navigate', async () => {
+    const chapter = await chapterOf(
+      [{ text: 'Click me', url: 'javascript:alert(1)' }],
+      'Click me now',
+    )
+    expect(chapter).not.toContain('javascript:')
+    expect(chapter).toContain('Click me now')
+    expectWellFormed(chapter, 'chap_1.xhtml')
+  })
+
+  it('writes no <a> at all for a block with no links', async () => {
+    const chapter = await chapterOf([])
+    expect(chapter).not.toContain('<a href=')
   })
 })

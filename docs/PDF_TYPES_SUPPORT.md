@@ -65,13 +65,13 @@ beyond one cached probe. Configure with `VITE_PDF_SIDECAR_URL` (default
 | 16 | Large PDF (hundreds/thousands of pages) | ✅     | 300-page fixture: worker-side probe/parse, main thread stays responsive, resumable queue, progress UI, chunked translation |
 | 17 | Unicode / Multilingual (Burmese, CJK, Arabic, Devanagari, Cyrillic) | 🔶→⏳ | Language detection + Zawgyi/Unicode handling ✅, Myanmar rendering ✅; OCR validated for English end-to-end, other scripts need their tesseract traineddata (mya available, untested) |
 | 18 | RTL PDF (Arabic, Hebrew, mixed) | 🔶     | RTL line ordering in grouping ✅; bidi/visual-order edge cases ❌ |
-| 19 | PDF With Annotations (comments, highlights, stamps, links) | 🔶→⏳ | Annotation/link counting in probe ✅; links preserved as clickable text in exports phase c |
+| 19 | PDF With Annotations (comments, highlights, stamps, links) | 🔶→⏳ | Annotation/link counting in probe ✅; `/Annots` `/Link` rectangles now become anchored `<a>` / `[text](url)` / docx `ExternalHyperlink` ✅ (external only — see below); comments, highlights and stamps still carry no text of their own ❌ |
 | 20 | Damaged / Invalid PDF | 🔶     | Load/probe failures surface as actionable errors ✅; partial repair ❌ |
 | 21 | PDF With Embedded Fonts (subset/custom/fallback) | ✅     | Font inventory (embedded/standard/other) in metadata ✅, subset-prefix cleaning ✅, Myanmar fallback stack in export ✅ |
 | 22 | PDF With Complex Layout (text boxes, overlap, sidebars, watermarks) | ⏳→✅   | `complex` class + scoring ✅ (this phase); column/sidebar reading order ✅; text-box + overlap repair in phase c |
 | 23 | PDF With Equations / Math content | ❌     | Formulas extract as plain text (lossy); LaTeX/OCR-of-equations not implemented |
 | 24 | PDF With Code (syntax, monospace, formatting) | 🔶→⏳ | Monospace font extracted as style ✅; block-level code formatting phase c |
-| 25 | PDF With Hyperlinks (external, internal, TOC, cross-references) | 🔶→⏳ | Link annotations counted ✅; URL text preserved as text ✅; clickable links phase c |
+| 25 | PDF With Hyperlinks (external, internal, TOC, cross-references) | 🔶→⏳ | External links ✅ — rectangle → words → `LinkRef[]` → anchored output in HTML/EPUB/Markdown/DOCX/JSON; URL text preserved as plain text ✅ in every format; **internal `/Dest` links (TOC, cross-references) are deliberately not rendered** ❌ — a destination is a page index, not a URL, and carrying it would invent anchors the target document does not have |
 
 ## Phase roadmap for this matrix
 
@@ -80,7 +80,7 @@ beyond one cached probe. Configure with `VITE_PDF_SIDECAR_URL` (default
 | (a) Classification | `complex` class, complexity scoring, item-level column detection, wizard metadata | 4, 12, 22 classification ✅ |
 | (b) Extraction methods | Browser Tesseract OCR auto-runs per window (status lifecycle, confidence, cached recognition), hybrid merge with geometric dedup, run-OCR setting persisted per project, Python sidecar server (protocol v1, 20 tests) | 2, 3 extraction ✅ |
 | (b2) Sidecar wiring | `src/sidecar/sidecarClient.ts`: cached `GET /health` probe, `POST /ocr` with page/language/password, per-line confidence added to the server response, lazy render so a sidecar page never rasterises in the browser, automatic fall-back to browser Tesseract on any failure (22 client + 5 pipeline + 1 Python test) | 2 extraction ✅ with a native-OCR fast path |
-| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. `fixtures/complex.pdf` (3 columns + rotated watermark) now reads col 1 → col 2 → col 3 → watermark end-to-end. **Footnote regions ✅** — `src/pdf/footnotes.ts` marks them before any merging happens. **Heading hierarchy ✅** — `src/pdf/headings.ts` builds one document-wide ladder of heading font sizes during the probe and every page levels its headings against it; exporters render `h1`–`h6`, `HeadingLevel.HEADING_1–6` and ATX hashes. Remaining in this phase: real table cells, links, code blocks | 4 ✅, reading order for 3 / 7 / 12 ✅, footnotes for 7 / 11 / 14 ✅, heading hierarchy for 7 ✅; then 5, 6, 9, 13, 19, 24, 25 |
+| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. `fixtures/complex.pdf` (3 columns + rotated watermark) now reads col 1 → col 2 → col 3 → watermark end-to-end. **Footnote regions ✅** — `src/pdf/footnotes.ts` marks them before any merging happens. **Heading hierarchy ✅** — `src/pdf/headings.ts` builds one document-wide ladder of heading font sizes during the probe and every page levels its headings against it; exporters render `h1`–`h6`, `HeadingLevel.HEADING_1–6` and ATX hashes. **Links ✅** — `src/pdf/links.ts` turns every external `/Link` rectangle into the words it covers and every exporter renders them as a real anchor (see below). Remaining in this phase: real table cells, code blocks, image-anchored extraction, form labels | 4 ✅, reading order for 3 / 7 / 12 ✅, footnotes for 7 / 11 / 14 ✅, heading hierarchy for 7 ✅, links for 19 / 25 ✅; then 5, 6, 9, 13, 24 |
 | (d) Layout auto-adjust | Auto-fit/reflow when translated text grows (EN→MY), export height handling | 1, 8, 10, 12 (translation-time layout) |
 
 ### Why reading order needed two detectors
@@ -223,6 +223,54 @@ exactly one paragraph per block takes the level, and it is the translation's —
 a navigation pane should name what the document became, not repeat the text the
 reader already had. Blocks parsed before this change carry `kind: 'heading'`
 with no level and export as ordinary paragraphs until the page is re-parsed.
+
+### Why a link's anchor has to be rebuilt from geometry
+
+A PDF `/Link` annotation carries a **rectangle and a destination**, never the
+words inside it. The text on that line came from `getTextContent()` and is
+completely unaware an annotation sits over it, so nothing links unless the two
+are put back together — and the rectangle says only *where*, not *which*.
+`linkAnchors` therefore takes the rect's top-left corner, finds every line it
+covers, and re-locates the runs underneath it by walking `indexOf(item.str,
+cursor)` across the line's items in order. That recovers the run the annotation
+began in and the run it ended in; what it does **not** recover is where inside
+those runs the rectangle started, because pdf.js emits one item per `Tj` and a
+whole 40-glyph line is a single item. The slice is narrowed proportionally
+across the run's width instead — exact in Courier, approximate in a proportional
+face, and always a substring of the line, which is the property every exporter
+depends on. One anchor per line: an anchor that straddled the line break would
+put a URL inside a newline.
+
+Two rules keep the result honest. The destination goes through `safeLinkUrl`
+before anything else happens — an allow-list of `http`, `https`, `mailto`, `ftp`
+and `tel` compared as `scheme + ':'`, so `javascript:` and `data:` never reach a
+browser no matter what a hostile PDF asked for, and a scheme-less
+`www.example.com/...` is promoted to `https://`. That is the only guard between
+the file and the exported HTML; internal `/Dest` links are dropped outright,
+because a page index is not a URL and rendering one would invent an anchor the
+target document does not have.
+
+Attachment is geometric too: `attachLinks` puts each anchor on the block whose
+rectangle contains the rect's centre, or failing that overlaps it most while
+covering at least 30% of its area — so a link at the end of a paragraph lands on
+the paragraph, not on whichever line happened to be nearest. The rectangle is
+deliberately tight (13pt around 10pt type): a generous one reaches onto the
+neighbouring line and attaches the same URL twice.
+
+What survives translation is the **words**, not the geometry, so the exporters
+re-locate the anchor rather than reposition it. `linkSegments(text, links)`
+offers each link's source text first and its URL as a fallback — the URL is the
+one thing a translation usually leaves alone — takes the leftmost match, fires
+each link once and never nests two anchors, so `[text](url)` cannot swallow a
+neighbour. When neither is found the text is emitted unchanged, which is why a
+block with no surviving anchor still exports correctly instead of dropping
+content.
+
+_Links carry these caveats: anchors only survive if the model keeps the words
+or the URL; a page converted to Zawgyi before parsing reports different bytes
+than the annotation was cut from, so its anchors are missed; DOCX uses an
+explicit `0563C1` underline rather than the `Hyperlink` style, which exists only
+inside Word's own stylesheet._
 
 _Known limitations carried over: table cell truncation at 45k characters,
 style reset on re-parse, no equation rendering (type 23). Reading order is

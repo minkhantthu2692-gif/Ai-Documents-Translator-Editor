@@ -11,7 +11,7 @@
  * Pure string building: no DOM, no worker state, safe in Vitest.
  */
 
-import { contentPages, headingOffset, listPrefix, pageBlocks, textOf } from './shared'
+import { applyLinks, contentPages, headingOffset, listPrefix, pageBlocks, textOf } from './shared'
 import type { ExportBlock, ExportDocument } from './types'
 
 export interface MarkdownOptions {
@@ -43,17 +43,30 @@ function escapeMarkdown(text: string): string {
  * separators, so nothing in the outline collides with anything else.
  * Returns `''` for a block whose text is empty so it is skipped entirely.
  */
+/**
+ * `[anchor](url)` with the characters that would end the label early
+ * backslashed. Only the label needs escaping: a URL is matched verbatim and
+ * lives between the parentheses, where `)` in the destination is legal and
+ * cannot be escaped without changing what the browser is sent.
+ */
+function linkMarkdown(url: string, anchor: string): string {
+  return `[${anchor.replace(/[\\[\]]/g, '\\$&')}](${url})`
+}
+
 function blockGroup(block: ExportBlock, includeOriginal: boolean, levelsAbove: number): string {
   const { source, primary } = textOf(block, false)
   if (primary.trim().length === 0) return ''
   const lines: string[] = []
   // Never emit an empty blockquote, and skip it when it would repeat the line.
   if (includeOriginal && source.trim().length > 0 && source !== primary) {
-    for (const line of source.split('\n')) lines.push(`> ${line}`)
+    for (const line of applyLinks(source, block.links, linkMarkdown).split('\n')) {
+      lines.push(`> ${line}`)
+    }
   }
+  const body = applyLinks(primary, block.links, linkMarkdown)
   const level = headingOffset(block, levelsAbove)
   lines.push(
-    level === null ? `${listPrefix(block, primary)}${primary}` : `${'#'.repeat(level)} ${primary}`,
+    level === null ? `${listPrefix(block, primary)}${body}` : `${'#'.repeat(level)} ${body}`,
   )
   // Guard the "exactly one blank line between blocks" invariant against text
   // that ends (or starts) with a newline.

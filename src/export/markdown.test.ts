@@ -23,6 +23,7 @@ function block(overrides: Partial<ExportBlock>): ExportBlock {
     italic: false,
     listMarker: null,
     headingLevel: null,
+    links: [],
     sourceText: '',
     translatedText: '',
     characterCount: 0,
@@ -350,5 +351,78 @@ describe('heading hierarchy', () => {
     const out = buildMarkdown(headingDoc([null]), opts(false))
     expect(out).toContain('အချက် 0')
     expect(out.split('\n').some((line) => line.startsWith('# အချက်'))).toBe(false)
+  })
+})
+
+describe('links', () => {
+  const opts = { title: 'Sample', includeOriginal: false, includePageHeadings: false }
+
+  function linkedDoc(
+    links: ExportBlock['links'],
+    text = 'See the pricing page for details.',
+    translated = text,
+  ): ExportDocument {
+    return {
+      ...makeDoc(),
+      pages: [
+        {
+          index: 0,
+          width: 612,
+          height: 792,
+          rotation: 0,
+          contentClass: 'text',
+          blocks: [block({ links, sourceText: text, translatedText: translated })],
+        },
+      ],
+    }
+  }
+
+  it('writes a Markdown link around the words the annotation covered', () => {
+    const out = buildMarkdown(
+      linkedDoc([{ text: 'pricing page', url: 'https://example.com/pricing' }]),
+      opts,
+    )
+    expect(out).toContain('See the [pricing page](https://example.com/pricing) for details.')
+  })
+
+  it('falls back to the URL when the words are gone', () => {
+    const out = buildMarkdown(
+      linkedDoc(
+        [{ text: 'pricing page', url: 'https://example.com/pricing' }],
+        'Read https://example.com/pricing today',
+      ),
+      opts,
+    )
+    expect(out).toContain('[https://example.com/pricing](https://example.com/pricing)')
+  })
+
+  it('escapes the brackets a label would otherwise break on', () => {
+    const out = buildMarkdown(
+      linkedDoc([{ text: '[new]', url: 'https://example.com/new' }], 'Try [new] today'),
+      opts,
+    )
+    expect(out).toContain('Try [\\[new\\]](https://example.com/new) today')
+  })
+
+  it('drops a link whose URL would not be safe to navigate', () => {
+    const out = buildMarkdown(
+      linkedDoc([{ text: 'Click me', url: 'javascript:alert(1)' }], 'Click me now'),
+      opts,
+    )
+    expect(out).not.toContain('javascript:')
+    expect(out).toContain('Click me now')
+  })
+
+  it('links the blockquote that carries the source text too', () => {
+    const out = buildMarkdown(
+      linkedDoc(
+        [{ text: 'pricing page', url: 'https://example.com/pricing' }],
+        'See the pricing page for details.',
+        'စျေးနှုန်းကို ကြည့်ပါ',
+      ),
+      { ...opts, includeOriginal: true },
+    )
+    expect(out).toContain('> See the [pricing page](https://example.com/pricing) for details.')
+    expect(out).toContain('စျေးနှုန်းကို ကြည့်ပါ')
   })
 })

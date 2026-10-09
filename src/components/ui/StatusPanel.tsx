@@ -103,8 +103,9 @@ export function StatusPanel({
       className={cn('flex min-w-0 flex-col gap-3', className)}
     >
       {/* --- headline ------------------------------------------------- */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+      {/* Two lines, not one: badge + counts on top, run controls beneath. */}
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span data-testid="status-overall" data-overall={overall}>
             <Badge
               size="md"
@@ -122,7 +123,11 @@ export function StatusPanel({
             })}
           </span>
         </div>
-        {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
+        {actions ? (
+          <div className="flex flex-wrap items-center gap-2" data-testid="status-actions">
+            {actions}
+          </div>
+        ) : null}
       </div>
 
       {/* --- why can't I start --------------------------------------- */}
@@ -250,13 +255,15 @@ export function StatusPanel({
       {checks.length === 0 ? <p className="text-xs text-muted">{t('common.loading')}</p> : null}
 
       {/* --- Start ------------------------------------------------------ */}
+      {/* The one action this panel exists for: full-width and primary so it
+          reads as the next step rather than as one more control. */}
       {onStart ? (
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs text-muted">
-            {blocked && counts.fail > 0 ? t('status.startHint') : ''}
-          </p>
+        <div className="flex flex-col gap-2">
           <Button
             type="button"
+            variant="primary"
+            size="lg"
+            fullWidth
             onClick={onStart}
             disabled={startDisabled || !ready}
             data-testid="status-start"
@@ -264,6 +271,7 @@ export function StatusPanel({
           >
             {startLabel ?? t('newProject.startLabel')}
           </Button>
+          {!ready ? <p className="text-xs text-muted">{t('status.startHint')}</p> : null}
         </div>
       ) : null}
       {!ready ? (

@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Badge, Button, Card, Progress, Select, StatusPanel, Switch } from '@/components/ui'
 import { PageContainer, PageHeader, PageLayout } from '@/components/layout/Page'
+import { IconDownload } from '@/components/layout/icons'
+import { ExportDialog } from '@/pages/workspace/ExportDialog'
 import { detectLanguage } from '@/core/langDetect'
 import type { FsmState } from '@/core/fsm'
 import { REASON_CODES } from '@/core/reasonCodes'
@@ -86,6 +88,7 @@ export function TranslatePage() {
   const [detected, setDetected] = useState<string | null>(null)
   const [confirmed, setConfirmed] = useState(true)
   const [now, setNow] = useState(() => Date.now())
+  const [exportOpen, setExportOpen] = useState(false)
   const [sample, setSample] = useState<{ ok: boolean; text: string } | null>(null)
   const [sampleBusy, setSampleBusy] = useState(false)
 
@@ -552,11 +555,23 @@ export function TranslatePage() {
         subtitle={project ? project.name : t('translate.subtitle')}
         meta={<Badge tone={phase === 'failed' ? 'danger' : 'primary'}>{phaseLabel}</Badge>}
         actions={
-          <Link to={`/workspace/${projectId}`}>
-            <Button variant="ghost" size="sm">
-              {t('translate.backToWorkspace')}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Link to={`/workspace/${projectId}`}>
+              <Button variant="ghost" size="sm">
+                {t('translate.backToWorkspace')}
+              </Button>
+            </Link>
+            {/* Exporting is the step *after* translation, so it lives in the
+                header too — not only behind a button that appears at the end. */}
+            <Button
+              variant={phase === 'done' ? 'primary' : 'secondary'}
+              iconLeft={<IconDownload className="h-4 w-4" />}
+              onClick={() => setExportOpen(true)}
+              data-testid="translate-export"
+            >
+              {t('translate.exportFile')}
             </Button>
-          </Link>
+          </div>
         }
       />
 
@@ -826,6 +841,29 @@ export function TranslatePage() {
                 tone={phase === 'failed' ? 'danger' : phase === 'done' ? 'success' : 'primary'}
               />
 
+              {/* The panel has no next step of its own once translation ends,
+                  so the export is offered here rather than left to a header
+                  button the user may never have noticed. */}
+              {phase === 'done' ? (
+                <div
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-success/40 bg-success-bg px-3 py-3"
+                  data-testid="translate-done-banner"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-text">{t('translate.doneTitle')}</p>
+                    <p className="mt-0.5 text-xs text-muted">{t('translate.doneBody')}</p>
+                  </div>
+                  <Button
+                    variant="primary"
+                    iconLeft={<IconDownload className="h-4 w-4" />}
+                    onClick={() => setExportOpen(true)}
+                    data-testid="translate-export-done"
+                  >
+                    {t('translate.exportFile')}
+                  </Button>
+                </div>
+              ) : null}
+
               <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
                 <div>
                   <p className="text-faint">{t('translate.pageProgress')}</p>
@@ -950,6 +988,12 @@ export function TranslatePage() {
           ) : null}
         </div>
       </PageLayout>
+
+      <ExportDialog
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        projectId={projectId ?? ''}
+      />
     </PageContainer>
   )
 }

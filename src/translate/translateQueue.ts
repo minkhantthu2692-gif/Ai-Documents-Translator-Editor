@@ -845,16 +845,49 @@ export async function persistKeyStates(states: PersistedKeyState[]): Promise<voi
 /* Progress                                                            */
 /* ------------------------------------------------------------------ */
 
+export interface PhaseInput {
+  /** Queue phase; `null` when no queue has been created yet. */
+  queuePhase: QueuePhase | null
+  /** A run-level failure (bad key, dead provider) that stopped dispatch. */
+  failure?: boolean
+  /** Epoch ms until which the run is holding for a rate limit. */
+  waitingUntil?: number | null
+  /** Phase kept alive across a reload when the queue itself says nothing. */
+  forcedPhase?: TranslatePhase | null
+  /** Injected for tests; defaults to the wall clock. */
+  now?: number
+}
+
+/**
+ * The phase the page renders — and therefore which buttons it offers.
+ *
+ * **A stopped queue outranks a pending rate-limit cooldown.** The cooldown
+ * clock keeps ticking while a run is paused, so reporting `waiting` for a
+ * queue that has already been paused or cancelled left the panel showing a
+ * Pause button that silently did nothing (`JobQueue.pause()` refuses to pause
+ * twice) and never offered Resume at all. From the user's side that is exactly
+ * "the buttons don't work, I have to press them repeatedly".
+ */
+export function phaseFor(input: PhaseInput): TranslatePhase {
+  if (input.failure) return 'failed'
+  const queuePhase = input.queuePhase ?? 'idle'
+  if (queuePhase === 'paused') return 'paused'
+  if (queuePhase === 'cancelled') return 'cancelled'
+  if (queuePhase === 'done') return 'done'
+  if (queuePhase === 'failed') return 'failed'
+  const now = input.now ?? Date.now()
+  if (input.waitingUntil != null && input.waitingUntil > now) return 'waiting'
+  if (queuePhase === 'running') return 'running'
+  return input.forcedPhase ?? 'idle'
+}
+
 function phaseOf(run: ActiveRun): TranslatePhase {
-  if (run.failure) return 'failed'
-  if (run.waitingUntil !== null && run.waitingUntil > Date.now()) return 'waiting'
-  const phase: QueuePhase = queue?.phase ?? 'idle'
-  if (phase === 'running') return 'running'
-  if (phase === 'paused') return 'paused'
-  if (phase === 'done') return 'done'
-  if (phase === 'failed') return 'failed'
-  if (phase === 'cancelled') return 'cancelled'
-  return run.forcedPhase ?? 'idle'
+  return phaseFor({
+    queuePhase: queue?.phase ?? null,
+    failure: run.failure !== null,
+    waitingUntil: run.waitingUntil,
+    forcedPhase: run.forcedPhase,
+  })
 }
 
 function failedLines(run: ActiveRun): number {

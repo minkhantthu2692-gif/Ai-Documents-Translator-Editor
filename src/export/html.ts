@@ -23,8 +23,10 @@ import type { LinkRef } from '@/pdf/links'
 import { reflowBlocks } from './reflow'
 import {
   applyLinks,
+  CODE_FONT_STACK,
   escapeHtml,
   fontStackFor,
+  fontStackForCode,
   headingOffset,
   langTag,
   listPrefix,
@@ -80,12 +82,16 @@ function blockStyle(block: ExportBlock, options: HtmlOptions): string {
     `left:${pt(block.x)}`,
     `top:${pt(block.y)}`,
     `width:${pt(block.width)}`,
-    `font-family:${fontStackFor(block, { fontStack: options.fontStack })}`,
+    `font-family:${fontStackForCode(block, { fontStack: options.fontStack })}`,
     `font-size:${pt(block.fontSize)}`,
     `line-height:${round(Math.max(block.lineHeight, 1.1), 3)}`,
     `color:${/^#[0-9a-f]{3,8}$/i.test(block.color) ? block.color : '#000000'}`,
     `text-align:${alignmentOf(block)}`,
   ]
+  // A tab the PDF drew as a run of spaces is already spaces by the time it
+  // reaches here, but a real tab that survived a hand-edited block still has
+  // to land on a column width rather than the browser's default 8.
+  if (block.kind === 'code') parts.push('tab-size:4')
   if (block.bold) parts.push('font-weight:700')
   if (block.italic) parts.push('font-style:italic')
   // A floor, not a ceiling: the box is at least as tall as the PDF cut it, and
@@ -160,21 +166,24 @@ function blockHtml(block: ExportBlock, options: HtmlOptions, classes: string[]):
   const style =
     options.layout === 'absolute'
       ? blockStyle(block, options)
-      : `font-family:${fontStackFor(block, { fontStack: options.fontStack })};font-size:${pt(
+      : `font-family:${fontStackForCode(block, { fontStack: options.fontStack })};font-size:${pt(
           block.fontSize,
         )};color:${block.color};${block.bold ? 'font-weight:700;' : ''}${
           block.italic ? 'font-style:italic;' : ''
-        }text-align:${alignmentOf(block)}`
+        }text-align:${alignmentOf(block)}${block.kind === 'code' ? ';tab-size:4' : ''}`
   const flagged = block.overflow ? ' overflow' : block.hasSuggestion ? ' suggested' : ''
 
   // The screen export opens with an `<h1>` title; the printed one has no
   // header at all, so its blocks start at level 1.
   const level = headingOffset(block, options.mode === 'print' ? 0 : 1)
-  const tag = level === null ? 'div' : `h${level}`
+  // A code snippet is never a heading: the size rule that would promote a
+  // short line runs *after* the code detector, but `headingLevel` is written by
+  // a pass over the whole ladder, so the tag is held back here as well.
+  const tag = level === null || block.kind === 'code' ? 'div' : `h${level}`
 
   return (
-    `<${tag} class="${classes.join(' ')}${flagged}" data-block-id="${escapeHtml(block.id)}"` +
-    `${dir} style="${style}">${content}</${tag}>`
+    `<${tag} class="${classes.join(' ')}${block.kind === 'code' ? ' code' : ''}${flagged}"` +
+    ` data-block-id="${escapeHtml(block.id)}"${dir} style="${style}">${content}</${tag}>`
   )
 }
 
@@ -217,6 +226,13 @@ function flowPage(page: ExportDocument['pages'][number], options: HtmlOptions): 
     const pair = options.bilingual === 'side-by-side' ? ' pair' : ''
     const level = headingOffset(block, levelsAbove)
     const tag = level === null ? 'p' : `h${level}`
+    // Code is never a heading, and it carries the `code` class so the flow
+    // stylesheet can set the monospace face — the flow layout puts no inline
+    // `font-family` on these elements at all.
+    const isCode = block.kind === 'code'
+    const openTag = isCode ? `<p` : `<${tag}`
+    const closeTag = isCode ? `p` : tag
+    const codeClass = isCode ? ' code' : ''
 
     if (options.includeOriginal && source.trim().length > 0 && source !== target) {
       const sourceIsRtl = directionOf(source) === 'rtl'
@@ -230,9 +246,9 @@ function flowPage(page: ExportDocument['pages'][number], options: HtmlOptions): 
             source,
             block.links,
           )}</p>` +
-          `<${tag} class="tgt" data-block-id="${escapeHtml(block.id)}" dir="${
+          `${openTag} class="tgt${codeClass}" data-block-id="${escapeHtml(block.id)}" dir="${
             block.direction === 'rtl' ? 'rtl' : 'ltr'
-          }">${htmlText(target, block.links)}</${tag}>` +
+          }">${htmlText(target, block.links)}</${closeTag}>` +
           `</div>`,
       )
     } else {
@@ -240,12 +256,12 @@ function flowPage(page: ExportDocument['pages'][number], options: HtmlOptions): 
       if (text.trim().length === 0) continue
       const marker = listPrefix(block, text)
       rows.push(
-        `<${tag} class="tgt" data-block-id="${escapeHtml(block.id)}"` +
+        `${openTag} class="tgt${codeClass}" data-block-id="${escapeHtml(block.id)}"` +
           ` dir="${block.direction === 'rtl' ? 'rtl' : 'ltr'}">` +
           `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${htmlText(
             text,
             block.links,
-          )}</${tag}>`,
+          )}</${closeTag}>`,
       )
     }
   }
@@ -313,6 +329,15 @@ ${print ? '.page { border: none; }' : ''}
 .block .marker { font-weight: 700; }
 .block.overflow { outline: 1px dashed #dc2626; outline-offset: 1px; }
 .block.suggested { box-shadow: inset 2px 0 0 #2563eb; }
+/* A code snippet keeps its line breaks and its columns. The absolute layout
+   already carries the monospace stack inline (fontStackForCode), so this
+   rule is what sets it for the flow layout, which puts no inline font on
+   its .src/.tgt elements at all. */
+.code {
+  font-family: ${CODE_FONT_STACK};
+  tab-size: 4;
+  white-space: pre-wrap;
+}
 .page.flow { padding: 18pt 22pt; overflow: hidden; }
 .page.flow .src, .page.flow .tgt {
   position: static;

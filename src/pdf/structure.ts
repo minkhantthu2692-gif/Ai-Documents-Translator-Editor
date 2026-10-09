@@ -20,11 +20,17 @@ import { headingLevelFor, sizeLadder } from './headings'
 import { medianFontSize, type GroupedLine, type LineStyle } from './lineGrouping'
 import { kmeansMidpoint, orderBodyLines, splitMergedLines } from './readingOrder'
 import { footnoteMarker, markFootnoteRegions } from './footnotes'
+import {
+  codeBlockText,
+  isMonospaceFamily,
+  looksLikeCodeBlock,
+  looksLikeCodeLine,
+} from './codeBlocks'
 import { splitRow } from './rowSplit'
 import { blockId, type BBox } from './stableId'
 
 export type BlockKind =
-  'heading' | 'paragraph' | 'list' | 'table' | 'caption' | 'footnote' | 'shape'
+  'heading' | 'paragraph' | 'list' | 'table' | 'caption' | 'footnote' | 'shape' | 'code'
 export type BlockRegion = 'body' | 'header' | 'footer'
 export type BlockAlignment = 'left' | 'center' | 'right' | 'justified'
 
@@ -305,7 +311,18 @@ function canMerge(
   if (styleA.color !== styleB.color) return false
   if (Math.abs(styleA.rotation - styleB.rotation) > 1) return false
 
-  const indentTolerance = Math.max(4, styleA.fontSize * 0.5)
+  // In a monospaced face a step sideways is a *column*, and columns are what a
+  // snippet is built out of: the 2–4 space step of a nesting level must not
+  // open a new paragraph. A monospaced advance is 0.5–0.6 em, which makes five
+  // em about eight columns — room enough for the steps most styles use. Only
+  // *both* lines being monospaced widens the tolerance, so a serif line beside
+  // a snippet still splits. Reading order has already cut rows fused across a
+  // column gutter back apart (`splitMergedLines`), so a two-column page cannot
+  // be re-fused here.
+  const monospaced = isMonospaceFamily(styleA.fontFamily) && isMonospaceFamily(styleB.fontFamily)
+  const indentTolerance = monospaced
+    ? Math.max(4, styleA.fontSize * 5)
+    : Math.max(4, styleA.fontSize * 0.5)
   if (Math.abs(previous.bbox.x - next.bbox.x) > indentTolerance) return false
 
   const referenceGap = context.bodyGap > 0 ? context.bodyGap : styleA.fontSize * 0.6
@@ -313,8 +330,12 @@ function canMerge(
   if (context.gap < -styleA.fontSize * 0.5) return false // overlapping → same visual row
   if (BULLET.test(next.text.trim())) return false
 
-  const endsSentence = /[.!?:;"'”’]$/.test(previous.text.trim())
-  if (endsSentence && context.gap > referenceGap * 1.15) return false
+  // The `;` that closes most code lines is not the end of a sentence, so a gap
+  // that would otherwise part two statements from each other leaves them be.
+  if (!(looksLikeCodeLine(previous) && looksLikeCodeLine(next))) {
+    const endsSentence = /[.!?:;"'”’]$/.test(previous.text.trim())
+    if (endsSentence && context.gap > referenceGap * 1.15) return false
+  }
   return true
 }
 
@@ -418,17 +439,26 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
     const rowSplit = splitRow(open.lines[0])
     const isTableRow = rowSplit.isTable && open.lines.length > 1
     const isFootnote = open.footnote
-    const isList = open.region === 'body' && !isFootnote && BULLET.test(open.lines[0].text.trim())
+    // A code snippet is decided ahead of the list, table and size rules: a
+    // `for (const x of xs) {` line can look like a bullet and an aligned block
+    // of `|` like a table, and both readings would wreck the indentation the
+    // block is about to get back from its own geometry.
+    const isCode = open.region === 'body' && !isFootnote && looksLikeCodeBlock(open.lines)
+    const isList =
+      !isCode && open.region === 'body' && !isFootnote && BULLET.test(open.lines[0].text.trim())
     const marker = isList ? (open.lines[0].text.trim().match(BULLET)?.[1] ?? null) : null
 
-    const text = isTableRow
-      ? open.lines.map((line) => splitRow(line).cells.join(' \t ')).join('\n')
-      : open.lines.map((line) => line.text).join('\n')
+    const text = isCode
+      ? codeBlockText(open.lines)
+      : isTableRow
+        ? open.lines.map((line) => splitRow(line).cells.join(' \t ')).join('\n')
+        : open.lines.map((line) => line.text).join('\n')
 
     const sizeRatio = medianSize > 0 ? first.style.fontSize / medianSize : 1
     let kind: BlockKind = 'paragraph'
     if (open.region !== 'body') kind = 'paragraph'
     else if (isFootnote) kind = 'footnote'
+    else if (isCode) kind = 'code'
     else if (isTableRow) kind = 'table'
     else if (isList) kind = 'list'
     else if (sizeRatio >= 1.25 && text.replace(/\s+/g, ' ').length <= 140) kind = 'heading'
@@ -466,7 +496,10 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
         })),
         options.pageWidth,
       ),
-      skipRule: decision.skip ? decision.rule : null,
+      // A code block is never handed to the model, even when its flattened
+      // text happens to read as prose line-by-line: `x = 1` four times over
+      // scores below the per-line threshold and would come back translated.
+      skipRule: decision.skip ? decision.rule : isCode ? 'code' : null,
       placeholders: placeholderResult.placeholders,
       listMarker: marker,
       headingLevel: null,

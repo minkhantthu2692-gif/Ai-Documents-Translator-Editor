@@ -322,3 +322,54 @@ describe('buildEpub links', () => {
     expect(chapter).not.toContain('<a href=')
   })
 })
+
+describe('buildEpub code blocks', () => {
+  async function codeChapter(overrides: Partial<ExportBlock> = {}) {
+    const doc: ExportDocument = {
+      ...fixtureDoc(),
+      pages: [
+        page(0, [
+          block({
+            id: 'snippet',
+            kind: 'code',
+            status: 'skipped',
+            skipRule: 'code',
+            fontFamily: 'Courier',
+            sourceText: 'if (a) {\n  b = 2;\n}',
+            ...overrides,
+          }),
+        ]),
+      ],
+    }
+    const zip = await JSZip.loadAsync(await buildEpub(doc, epubOptions()))
+    return zipText(zip, 'OEBPS/text/chap_1.xhtml')
+  }
+
+  it('emits a <pre> so the line breaks do not collapse into spaces', async () => {
+    const chapter = await codeChapter()
+    expect(chapter).toContain('<pre class="block"')
+    expect(chapter).toContain('>if (a) {\n  b = 2;\n}</pre>')
+    expectWellFormed(chapter, 'chap_1.xhtml')
+  })
+
+  it('sets the snippet in the monospace stack', async () => {
+    const chapter = await codeChapter()
+    expect(chapter).toContain('font-family: &quot;Courier New&quot;')
+  })
+
+  it('leaves a URL inside the snippet as data rather than an anchor', async () => {
+    const chapter = await codeChapter({
+      sourceText: 'fetch("https://example.com")',
+      links: [{ text: 'https://example.com', url: 'https://example.com' }],
+    })
+    expect(chapter).toContain('>fetch(&quot;https://example.com&quot;)</pre>')
+    expect(chapter).not.toContain('<a href=')
+    expectWellFormed(chapter, 'chap_1.xhtml')
+  })
+
+  it('does not prefix the document bullet into the program', async () => {
+    const chapter = await codeChapter({ sourceText: 'const a = 1;', listMarker: '•' })
+    expect(chapter).toContain('>const a = 1;</pre>')
+    expect(chapter).not.toContain('•const')
+  })
+})

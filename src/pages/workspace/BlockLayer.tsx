@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/cn'
 import { IconAlert, IconSparkle } from '@/components/layout/icons'
 import { directionOf } from '@/lib/text'
+import { CODE_FONT_STACK } from '@/pdf/codeBlocks'
 import type { IndexedBlock } from '@/editor/commands'
 
 export interface BlockHighlight {
@@ -49,7 +50,13 @@ export function blockStyle(block: IndexedBlock): CSSProperties {
     top: `${block.y}pt`,
     width: `${Math.max(1, block.width)}pt`,
     minHeight: `${Math.max(1, block.height)}pt`,
-    fontFamily: `"${block.fontFamily}", var(--font-mm), sans-serif`,
+    // A code snippet is drawn the way it will be exported: same monospace
+    // stack, same tab stops. Its own family already *is* monospaced most of
+    // the time — the detector reads it off the font name — but the stack wins
+    // for the snippets caught by their punctuation instead, so what the user
+    // sees never disagrees with what the exporters write.
+    fontFamily:
+      block.kind === 'code' ? CODE_FONT_STACK : `"${block.fontFamily}", var(--font-mm), sans-serif`,
     fontSize: `${block.fontSize}pt`,
     lineHeight: block.lineHeight,
     color: block.color,
@@ -59,6 +66,7 @@ export function blockStyle(block: IndexedBlock): CSSProperties {
     direction: directionOf(textOf(block)) === 'rtl' ? 'rtl' : 'ltr',
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
+    ...(block.kind === 'code' ? { tabSize: 4 } : {}),
   }
 }
 

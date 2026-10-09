@@ -628,6 +628,96 @@ describe('normalizeMarginText', () => {
   })
 })
 
+describe('code blocks', () => {
+  const courier = { fontFamily: 'ABCDEF+Courier' }
+
+  it('calls a monospaced, punctuated run of lines code and never translates it', () => {
+    const blocks = structurePage(
+      [
+        line('const total = sum(items);', { x: 72, y: 600, w: 150, h: 14 }, courier),
+        line('return total;', { x: 72, y: 616, w: 78, h: 14 }, courier),
+      ],
+      options(),
+    )
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].kind).toBe('code')
+    // The per-line classifier would have let this through on its own had the
+    // text been flatter; a code block is never handed to the model.
+    expect(blocks[0].skipRule).toBe('code')
+    expect(blocks[0].headingLevel).toBeNull()
+  })
+
+  it('keeps the nesting that would otherwise split the snippet apart', () => {
+    // Each step is twelve points — twice the six the paragraph rules allow —
+    // because a monospaced indent *is* the structure.
+    const blocks = structurePage(
+      [
+        line('if (a) {', { x: 72, y: 600, w: 48, h: 14 }, courier),
+        line('a = 1;', { x: 84, y: 616, w: 36, h: 14 }, courier),
+        line('}', { x: 72, y: 632, w: 6, h: 14 }, courier),
+      ],
+      options(),
+    )
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].kind).toBe('code')
+    expect(blocks[0].text).toBe('if (a) {\n  a = 1;\n}')
+  })
+
+  it('skips a nested monospaced block no single line of which reads as code', () => {
+    const blocks = structurePage(
+      [
+        line('server:', { x: 72, y: 600, w: 42, h: 14 }, { fontFamily: 'Menlo' }),
+        line('port: 8080', { x: 72, y: 616, w: 66, h: 14 }, { fontFamily: 'Menlo' }),
+        line('host: localhost', { x: 96, y: 632, w: 90, h: 14 }, { fontFamily: 'Menlo' }),
+      ],
+      options(),
+    )
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].kind).toBe('code')
+    expect(blocks[0].skipRule).toBe('code')
+  })
+
+  it('does not read a hyphen-leading statement as a list item', () => {
+    const blocks = structurePage(
+      [
+        line('- total = compute();', { x: 72, y: 600, w: 120, h: 14 }, courier),
+        line('- total += 1;', { x: 72, y: 616, w: 78, h: 14 }, courier),
+      ],
+      options(),
+    )
+    expect(blocks[0].kind).toBe('code')
+    expect(blocks[0].listMarker).toBeNull()
+    expect(blocks[0].text.split('\n')[0]).toBe('- total = compute();')
+  })
+
+  it('leaves a flush-left monospaced paragraph as a paragraph', () => {
+    const blocks = structurePage(
+      [
+        line('Head Office', { x: 72, y: 600, w: 66, h: 14 }, courier),
+        line('123 Main Street', { x: 72, y: 616, w: 90, h: 14 }, courier),
+      ],
+      options(),
+    )
+    expect(blocks[0].kind).toBe('paragraph')
+    expect(blocks[0].skipRule).toBeNull()
+  })
+
+  it('splits prose from the snippet beside it', () => {
+    const blocks = structurePage(
+      [
+        line('Run the following to install.', { x: 72, y: 580, w: 180, h: 14 }),
+        line('const x = 5;', { x: 72, y: 620, w: 78, h: 14 }, courier),
+        line('const y = 6;', { x: 72, y: 636, w: 78, h: 14 }, courier),
+      ],
+      options(),
+    )
+    const kinds = blocks.map((block) => block.kind)
+    expect(kinds).toContain('code')
+    expect(kinds).toContain('paragraph')
+    expect(blocks.find((block) => block.kind === 'code')?.text).toBe('const x = 5;\nconst y = 6;')
+  })
+})
+
 describe('countColumns', () => {
   /** Ten aligned lines at each x offset (130pt wide → ≥8pt gutters between columns). */
   const at = (...xs: number[]): GroupedLine[] =>

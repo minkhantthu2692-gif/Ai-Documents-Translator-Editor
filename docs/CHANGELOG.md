@@ -84,6 +84,24 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   silently. The other silent case is gone too: a block the bottom edge stopped — the page box is fixed, so the
   push runs out of room — is counted and reported as `EXPORT_LAYOUT_CLIPPED` (EN + MY) rather than left
   to overlap in quiet.
+- **Code blocks** in PDF extraction (phase (c) of `docs/PDF_TYPES_SUPPORT.md`, types 13 and 24):
+  `src/pdf/codeBlocks.ts` calls a run of lines code when two independent readings agree — a
+  monospaced face *and* statement punctuation, a monospaced face *and* nesting (which is what
+  catches YAML and JSON, whose lines carry no punctuation to score), or punctuation alone across
+  several lines with a brace somewhere. The block is given `kind: 'code'` and stamped
+  `skipRule: 'code'`, so the translator never rewrites a program even when no single line would
+  have tripped the per-line rule on its own. Indentation is the one thing extraction throws away
+  — `groupItemsIntoLines` collapses whitespace because prose does not care where a word began —
+  so it is measured back off the bounding boxes: in a monospaced face `bbox.w` over the character
+  count is the exact advance width, and `links.ts` already makes the same trade in the other
+  direction. `canMerge` used to refuse two lines whose left edges differed by more than half a
+  character, less than a single indent step, which shredded every nested snippet into one block
+  per nesting level; it now widens that tolerance when both lines are monospaced, and a `;` no
+  longer reads as the end of a sentence. Every exporter renders the result as code: fenced in
+  Markdown (with the fence widened past any backtick run inside), `<pre>` and a monospace stack in
+  EPUB, `Courier New` with real `<w:br/>` breaks in DOCX, and monospace with `white-space:
+  pre-wrap` in the HTML and print paths. The editor canvas draws the same face, so the page cannot
+  look wrong on screen and right in the file.
 
 ### Security
 

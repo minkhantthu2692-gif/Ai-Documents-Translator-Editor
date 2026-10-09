@@ -7,6 +7,7 @@
  */
 
 import { safeLinkUrl, type LinkRef } from '@/pdf/links'
+import { CODE_FONT_STACK } from '@/pdf/codeBlocks'
 import {
   DEFAULT_EXPORT_OPTIONS,
   type ExportBlock,
@@ -18,6 +19,26 @@ import {
 
 /** Fallback chain appended after a block's own family (Myanmar must shape). */
 export const DEFAULT_FONT_STACK = '"Noto Sans Myanmar", "Padauk", sans-serif'
+
+/**
+ * The face a `kind: 'code'` block is set in.
+ *
+ * Declared in the PDF layer (`codeBlocks.ts`) because that is where "this
+ * block is code" is decided; re-exported here so the builders keep one import.
+ */
+export { CODE_FONT_STACK }
+
+/**
+ * Font list for one block: code is pinned to a monospaced face ahead of
+ * everything else, ordinary blocks keep their own family in front.
+ */
+export function fontStackForCode(
+  block: ExportBlock,
+  options?: Pick<ExportOptions, 'fontStack'>,
+): string {
+  if (block.kind !== 'code') return fontStackFor(block, options)
+  return CODE_FONT_STACK
+}
 
 /** Escapes text for an HTML text node or attribute value. */
 export function escapeHtml(text: string): string {

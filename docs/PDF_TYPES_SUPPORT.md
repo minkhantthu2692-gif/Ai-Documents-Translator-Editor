@@ -59,7 +59,7 @@ beyond one cached probe. Configure with `VITE_PDF_SIDECAR_URL` (default
 | 10 | Presentation PDF (slides, big headings, text boxes) | 🔶→⏳ | Size-spread/complexity signal ✅; per-slide text-box reading order in phase c |
 | 11 | Book / Document PDF (chapters, TOC, headers/footers, page numbers, long docs) | 🔶→⏳ | Header/footer bands, page labels, running heads ✅; long-document chunked translation ✅; footnote regions ✅ |
 | 12 | Magazine / Brochure (complex layouts, multi-column, text around images) | 🔶→⏳ | `complex` classification ✅ (columns, overlap, size spread); multi-column reading order ✅; text-around-image structure repair in phase c |
-| 13 | Technical PDF (manuals, code snippets, diagrams) | 🔶 | Extracts as text ✅; code formatting preservation ❌ (phase c) |
+| 13 | Technical PDF (manuals, code snippets, diagrams) | 🔶→⏳ | Extracts as text ✅; **code blocks** ✅ — detected, kept as `kind: 'code'`, indentation rebuilt from the bounding boxes and rendered as code in every format; **blank lines inside a snippet are not recovered** ❌ — a line with no text has no bounding box to measure, so the gap between two statements closes up in the flow formats |
 | 14 | Legal PDF (contracts, numbered sections, footnotes) | 🔶→⏳ | Numbered-section/list handling ✅; footnote regions ✅ — `1.`, `1)`, `1` and `(a)` callouts are recognised, so numbered notes are not read as list items |
 | 15 | Password-Protected / Encrypted PDF | ✅     | Wizard password prompt, wrong-password explanation, unlocked pre-flight; graceful unsupported-encryption errors; fixture-tested (RC4) |
 | 16 | Large PDF (hundreds/thousands of pages) | ✅     | 300-page fixture: worker-side probe/parse, main thread stays responsive, resumable queue, progress UI, chunked translation |
@@ -70,7 +70,7 @@ beyond one cached probe. Configure with `VITE_PDF_SIDECAR_URL` (default
 | 21 | PDF With Embedded Fonts (subset/custom/fallback) | ✅     | Font inventory (embedded/standard/other) in metadata ✅, subset-prefix cleaning ✅, Myanmar fallback stack in export ✅ |
 | 22 | PDF With Complex Layout (text boxes, overlap, sidebars, watermarks) | ⏳→✅   | `complex` class + scoring ✅ (this phase); column/sidebar reading order ✅; text-box + overlap repair in phase c |
 | 23 | PDF With Equations / Math content | ❌     | Formulas extract as plain text (lossy); LaTeX/OCR-of-equations not implemented |
-| 24 | PDF With Code (syntax, monospace, formatting) | 🔶→⏳ | Monospace font extracted as style ✅; block-level code formatting phase c |
+| 24 | PDF With Code (syntax, monospace, formatting) | 🔶→⏳ | Monospace face extracted as style ✅; **block-level code formatting** ✅ — a snippet is fenced in Markdown, `<pre>` in EPUB, `Courier New` with real `<w:br/>` in DOCX, and monospace with `white-space: pre-wrap` in HTML/print; **syntax colouring** ❌ — the PDF never hands over which tokens were which colour per glyph, so a snippet is set in one colour like the prose around it |
 | 25 | PDF With Hyperlinks (external, internal, TOC, cross-references) | 🔶→⏳ | External links ✅ — rectangle → words → `LinkRef[]` → anchored output in HTML/EPUB/Markdown/DOCX/JSON; URL text preserved as plain text ✅ in every format; **internal `/Dest` links (TOC, cross-references) are deliberately not rendered** ❌ — a destination is a page index, not a URL, and carrying it would invent anchors the target document does not have |
 
 ## Phase roadmap for this matrix
@@ -80,7 +80,7 @@ beyond one cached probe. Configure with `VITE_PDF_SIDECAR_URL` (default
 | (a) Classification | `complex` class, complexity scoring, item-level column detection, wizard metadata | 4, 12, 22 classification ✅ |
 | (b) Extraction methods | Browser Tesseract OCR auto-runs per window (status lifecycle, confidence, cached recognition), hybrid merge with geometric dedup, run-OCR setting persisted per project, Python sidecar server (protocol v1, 20 tests) | 2, 3 extraction ✅ |
 | (b2) Sidecar wiring | `src/sidecar/sidecarClient.ts`: cached `GET /health` probe, `POST /ocr` with page/language/password, per-line confidence added to the server response, lazy render so a sidecar page never rasterises in the browser, automatic fall-back to browser Tesseract on any failure (22 client + 5 pipeline + 1 Python test) | 2 extraction ✅ with a native-OCR fast path |
-| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. `fixtures/complex.pdf` (3 columns + rotated watermark) now reads col 1 → col 2 → col 3 → watermark end-to-end. **Footnote regions ✅** — `src/pdf/footnotes.ts` marks them before any merging happens. **Heading hierarchy ✅** — `src/pdf/headings.ts` builds one document-wide ladder of heading font sizes during the probe and every page levels its headings against it; exporters render `h1`–`h6`, `HeadingLevel.HEADING_1–6` and ATX hashes. **Links ✅** — `src/pdf/links.ts` turns every external `/Link` rectangle into the words it covers and every exporter renders them as a real anchor (see below). Remaining in this phase: real table cells, code blocks, image-anchored extraction, form labels | 4 ✅, reading order for 3 / 7 / 12 ✅, footnotes for 7 / 11 / 14 ✅, heading hierarchy for 7 ✅, links for 19 / 25 ✅; then 5, 6, 9, 13, 24 |
+| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. `fixtures/complex.pdf` (3 columns + rotated watermark) now reads col 1 → col 2 → col 3 → watermark end-to-end. **Footnote regions ✅** — `src/pdf/footnotes.ts` marks them before any merging happens. **Heading hierarchy ✅** — `src/pdf/headings.ts` builds one document-wide ladder of heading font sizes during the probe and every page levels its headings against it; exporters render `h1`–`h6`, `HeadingLevel.HEADING_1–6` and ATX hashes. **Links ✅** — `src/pdf/links.ts` turns every external `/Link` rectangle into the words it covers and every exporter renders them as a real anchor (see below). **Code blocks ✅** — `src/pdf/codeBlocks.ts` calls a run of lines code when two independent readings agree: a monospaced face *and* statement punctuation; a monospaced face *and* nesting (which is what catches YAML and JSON, whose lines carry no punctuation to score); or punctuation alone across several lines with a brace somewhere. `structure.ts` gives it `kind: 'code'`, stamps `skipRule: 'code'` so the model never rewrites a program, and hands the indentation back — see below. Remaining in this phase: real table cells, image-anchored extraction, form labels | 4 ✅, reading order for 3 / 7 / 12 ✅, footnotes for 7 / 11 / 14 ✅, heading hierarchy for 7 ✅, links for 19 / 25 ✅, code blocks for 13 / 24 ✅; then 5, 6, 9 |
 | (d) Layout auto-adjust | **Translation-time auto-fit ✅** — `src/editor/layout.ts` re-measures a block the moment a translation lands and takes the largest size in `[6pt, originalFontSize]` whose wrapped text still fits the original bbox; never a size the reader pinned, and never below the floor — an unfittable block keeps the document's own size and is flagged rather than shrunk into illegibility. Runs on the bulk queue, on inline re-apply and on accept-suggestion, never on a person typing; `layout.autoFit` in Settings → General turns it off. **Reflow ✅** — `src/export/reflow.ts` pushes the blocks under one that outgrew its box down by exactly the growth, within their own column, stopping at the page edge; HTML emits `min-height` where it emitted `height`, so a box is a floor the translation may grow into | 1, 8, 10, 12 ✅ (translation-time layout + the absolute HTML/print export) |
 
 ### Why reading order needed two detectors
@@ -99,6 +99,31 @@ block into a stack of single-cell paragraphs. `detectColumns` (complexity
 scoring) deliberately keeps refusing pages whose title bridges the gutter; that
 refusal is correct for scoring and wrong for order, which is why
 `structurePage` does not use it.
+
+### Why a snippet's indentation has to be measured back
+
+`groupItemsIntoLines` collapses whitespace and trims every line, because prose
+does not care where a word began and the spacing pdf.js reports is full of
+incidental gaps. That is the right call for a paragraph and the wrong one for
+code, where the leading columns *are* the structure — so by the time
+`structurePage` sees a line, its indentation has gone from the string and lives
+only in the bounding box.
+
+The geometry is enough. In a monospaced face every glyph takes the same advance
+width, so `bbox.w` divided by the character count *is* that width, and
+`round((line.bbox.x − blockLeft) / charWidth)` is how many columns the line was
+stepped right by. `codeBlockText` writes them back as spaces. `links.ts` already
+makes the same "exact for monospaced, approximate for proportional" trade in
+the other direction, and it is the right way round to fail: a line lands a
+column off rather than at the margin.
+
+Two rules had to move for a snippet to survive that far. `canMerge` refused to
+join two lines whose left edges differed by more than half a character — less
+than a single indent step — so every nested snippet arrived as one block per
+nesting level; it now widens that tolerance when *both* lines are monospaced,
+which is safe because reading order has already cut a two-column page apart.
+And a line ending in `;` read as the end of a sentence, which parted one
+statement from the next; code lines are exempt.
 
 ### Why one fused row could still collapse a whole page
 
@@ -327,4 +352,17 @@ uses, so a document exported where that canvas refused to open falls back to a
 needed. That is no longer silent — the export reports an
 `EXPORT_LAYOUT_ESTIMATED` warning, in English and Myanmar, when it happened.
 The overflow badges survive reflow on purpose: it changes where a
-block sits, not whether it outgrew the box the PDF cut for it._
+block sits, not whether it outgrew the box the PDF cut for it.
+Code detection carries the fixture caveat hardest: the detector and the
+indentation rebuild are unit-tested against constructed geometry, and
+**no real-world PDF containing a code snippet has been through them**. Three
+gaps are known and unguarded. A blank line inside a snippet is lost — a line
+with no text has no bounding box to measure, so the gap between two statements
+closes up in the flow formats. The face is read off the family *name*, so a
+PDF that subsets a monospaced font under a name with no hint of one (some do)
+is caught only when its punctuation scores. And the wider `canMerge` tolerance
+means two unrelated monospaced blocks that sit close together can fuse into
+one, since "both lines are monospaced" is the whole of that test. No export
+format renders syntax colouring: the PDF does not record which tokens were
+which colour per glyph, so a snippet is set in one colour like the prose
+around it._

@@ -57,6 +57,29 @@ function countLatinLetters(text: string): number {
 }
 
 /**
+ * True when a line's *content* reads as code rather than prose: braces, a
+ * statement terminator, call syntax or a keyword, with enough Latin letters
+ * behind it that it is not a stray `};`.
+ *
+ * Deliberately requires a punctuation signal (`for`/`class` alone appear in
+ * prose — "for the estimate", "a new class of users"), so it is exported for
+ * the block-level detector in `codeBlocks.ts` to reuse. One definition means a
+ * line the translator skips and a block the exporters fence are the same line.
+ */
+export function looksLikeCodeFragment(text: string): boolean {
+  const trimmed = text.trim()
+  if (trimmed.length === 0) return false
+  const latinLetters = countLatinLetters(trimmed)
+  const hasCodePunctuation = CODE_PUNCTUATION.test(trimmed)
+  const codeScore =
+    (CODE_CALL.test(trimmed) ? 2 : 0) +
+    (CODE_KEYWORD.test(trimmed) ? 2 : 0) +
+    (hasCodePunctuation ? 1 : 0) +
+    (trimmed.includes(';') ? 1 : 0)
+  return hasCodePunctuation && codeScore >= 2 && latinLetters > 4
+}
+
+/**
  * Classifies a single line. Order matters: cheap structural rules first, then
  * language-aware rules, so a Myanmar page number is caught as `number` rather
  * than `alreadyTarget`.
@@ -82,16 +105,7 @@ export function classifyLine(text: string, ctx: SkipContext = {}): SkipDecision 
     return { skip: true, rule: 'number', detail: 'number / page label' }
   }
 
-  const latinLetters = countLatinLetters(trimmed)
-  // A punctuation signal is required: `for`/`class` alone appear in prose
-  // ("for the estimate", "a new class of users").
-  const hasCodePunctuation = CODE_PUNCTUATION.test(trimmed)
-  const codeScore =
-    (CODE_CALL.test(trimmed) ? 2 : 0) +
-    (CODE_KEYWORD.test(trimmed) ? 2 : 0) +
-    (hasCodePunctuation ? 1 : 0) +
-    (trimmed.includes(';') ? 1 : 0)
-  if (hasCodePunctuation && codeScore >= 2 && latinLetters > 4) {
+  if (looksLikeCodeFragment(trimmed)) {
     return { skip: true, rule: 'code', detail: 'code fragment' }
   }
 

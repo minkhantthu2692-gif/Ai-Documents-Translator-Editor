@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CODE_FONT_STACK,
   DEFAULT_FONT_STACK,
   applyLinks,
   documentStats,
@@ -7,6 +8,7 @@ import {
   cssFontName,
   fileNameFor,
   fontStackFor,
+  fontStackForCode,
   headingOffset,
   isDocumentEmpty,
   langTag,
@@ -110,6 +112,20 @@ describe('fontStackFor', () => {
   it('does not repeat a family that is already in the stack', () => {
     const value = fontStackFor(block({ fontFamily: 'Noto Sans Myanmar' }))
     expect(value.split('Noto Sans Myanmar')).toHaveLength(2)
+  })
+})
+
+describe('fontStackForCode', () => {
+  it('pins a snippet to a monospaced face ahead of its own family', () => {
+    const value = fontStackForCode(block({ kind: 'code', fontFamily: 'Inter' }))
+    expect(value).toBe(CODE_FONT_STACK)
+    expect(value).toContain('Courier New')
+    expect(value.endsWith('monospace')).toBe(true)
+  })
+
+  it('leaves an ordinary block exactly as fontStackFor writes it', () => {
+    const value = fontStackForCode(block({ fontFamily: 'Source Serif 4' }))
+    expect(value).toBe(fontStackFor(block({ fontFamily: 'Source Serif 4' })))
   })
 })
 

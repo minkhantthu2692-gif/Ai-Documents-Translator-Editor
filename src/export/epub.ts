@@ -27,7 +27,7 @@ import {
   contentPages,
   cssFontName,
   escapeHtml,
-  fontStackFor,
+  fontStackForCode,
   headingOffset,
   langTag,
   listPrefix,
@@ -136,6 +136,7 @@ function paragraph(
   style: string,
   heading: number | null = null,
   links: readonly LinkRef[] = [],
+  preformatted = false,
 ): string {
   const rtl = directionOf(text) === 'rtl'
   const all = rtl ? [...classes, 'rtl'] : classes
@@ -144,8 +145,12 @@ function paragraph(
   // A heading keeps its classes and inline style and only changes tag, so the
   // reader's own heading stylesheet is what makes it stand out — the same way
   // it did in the source PDF, where it was simply set larger.
-  const tag = heading === null ? 'p' : `h${heading}`
-  const inner = applyLinks(text, links, linkHtml, escapeHtml)
+  const tag = preformatted ? 'pre' : heading === null ? 'p' : `h${heading}`
+  // `<pre>` is literal text: the newlines inside are the only line breaks there
+  // are, so a program keeps its shape instead of being flattened onto one line
+  // by XHTML's whitespace collapsing — and a URL inside it stays data, so no
+  // anchors are woven in.
+  const inner = preformatted ? escapeHtml(text) : applyLinks(text, links, linkHtml, escapeHtml)
   return `<${tag} class="${escapeHtml(all.join(' '))}" xml:lang="${safeLang}" lang="${safeLang}"${dir}${style}>${inner}</${tag}>`
 }
 
@@ -173,18 +178,24 @@ function blockParagraphs(block: ExportBlock, doc: ExportDocument, options: EpubO
     0,
     entries.findIndex((entry) => !entry.source),
   )
-  const fontStack = escapeHtml(fontStackFor(block, { fontStack: options.fontStack }))
-  const style = ` style="font-family: ${fontStack}"`
+  const isCode = block.kind === 'code'
+  const fontStack = escapeHtml(fontStackForCode(block, { fontStack: options.fontStack }))
+  const style = ` style="font-family: ${fontStack}${isCode ? '; white-space: pre-wrap' : ''}"`
   return entries.map((entry, index) => {
     const lang = entry.source ? langTag(doc.sourceLang) : langTag(doc.targetLang)
-    const text = index === 0 ? `${listPrefix(block, entry.text)}${entry.text}` : entry.text
+    // A snippet's first line is a statement, not a list item: the bullet a
+    // manual printed beside the whole block belongs to the document, and
+    // prefixing it would land inside the program.
+    const text =
+      !isCode && index === 0 ? `${listPrefix(block, entry.text)}${entry.text}` : entry.text
     return paragraph(
       text,
       entry.source ? ['source', 'block'] : ['block'],
       lang,
       style,
-      index === headingIndex ? headingOffset(block, CHAPTER_LEVELS_ABOVE) : null,
+      isCode ? null : index === headingIndex ? headingOffset(block, CHAPTER_LEVELS_ABOVE) : null,
       block.links,
+      isCode,
     )
   })
 }

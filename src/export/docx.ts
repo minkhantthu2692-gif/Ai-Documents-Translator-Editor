@@ -95,13 +95,27 @@ function docxColor(color: string): string | undefined {
 /** Word's hyperlink blue — what a reader already expects a link to look like. */
 const LINK_COLOR = '0563C1'
 
+/**
+ * The face a `kind: 'code'` block is set in.
+ *
+ * Word wants one family rather than a stack, so this is named outright; it
+ * ships with Office on Windows, macOS and the web, and Word substitutes a
+ * monospace face for anything it lacks. Every glyph is one advance width, so
+ * the indentation measured back off the PDF's bounding boxes still lines up.
+ */
+const CODE_FONT = 'Courier New'
+
 /** One run carrying the block's font, size, emphasis and script direction. */
-function blockRun(text: string, block: ExportBlock, font: string): TextRun {
+function blockRun(text: string, block: ExportBlock, font: string, breakBefore = false): TextRun {
   const color = docxColor(block.color)
   return new TextRun({
     text,
     font,
     size: halfPoints(block.fontSize),
+    // Word discards a bare `\n` inside a run, so a snippet whose lines were
+    // joined with newlines would arrive as one unbroken sentence. Each line
+    // after the first gets its own run carrying an explicit `<w:br/>`.
+    ...(breakBefore ? { break: 1 } : {}),
     ...(block.bold ? { bold: true } : {}),
     ...(block.italic ? { italics: true } : {}),
     ...(color ? { color } : {}),
@@ -126,24 +140,35 @@ function blockChildren(
   block: ExportBlock,
   font: string,
 ): Array<TextRun | ExternalHyperlink> {
-  return linkSegments(text, block.links).map((segment) => {
-    if (segment.url === null) return blockRun(segment.text, block, font)
-    return new ExternalHyperlink({
-      children: [
-        new TextRun({
-          text: segment.text,
-          font,
-          size: halfPoints(block.fontSize),
-          ...(block.bold ? { bold: true } : {}),
-          ...(block.italic ? { italics: true } : {}),
-          ...(directionOf(segment.text) === 'rtl' ? { rightToLeft: true } : {}),
-          color: LINK_COLOR,
-          underline: {},
-        }),
-      ],
-      link: segment.url,
-    })
-  })
+  const runs: Array<TextRun | ExternalHyperlink> = []
+  for (const segment of linkSegments(text, block.links)) {
+    if (segment.url === null) {
+      // One run per line. Only a plain stretch can be split — a hyperlink is
+      // a single run, and breaking it apart would lose the anchor.
+      segment.text
+        .split('\n')
+        .forEach((part, index) => runs.push(blockRun(part, block, font, index > 0)))
+      continue
+    }
+    runs.push(
+      new ExternalHyperlink({
+        children: [
+          new TextRun({
+            text: segment.text,
+            font,
+            size: halfPoints(block.fontSize),
+            ...(block.bold ? { bold: true } : {}),
+            ...(block.italic ? { italics: true } : {}),
+            ...(directionOf(segment.text) === 'rtl' ? { rightToLeft: true } : {}),
+            color: LINK_COLOR,
+            underline: {},
+          }),
+        ],
+        link: segment.url,
+      }),
+    )
+  }
+  return runs
 }
 
 /** One paragraph: alignment, RTL direction, line spacing, one run per stretch. */
@@ -195,10 +220,25 @@ function blockParagraphs(block: ExportBlock, options: DocxOptions): Paragraph[] 
     entries.findIndex((entry) => !entry.source),
   )
   const marker = listPrefix(block, entries[0].text)
+  // Word takes a single family, not a stack, so the code face is named
+  // outright: Courier New ships with Office on every platform. It has no
+  // Myanmar coverage, but a block only reaches this path after the detector
+  // read its lines as Latin code.
+  const font = block.kind === 'code' ? CODE_FONT : options.font
+  const isCode = block.kind === 'code'
 
   return entries.map((entry, index) => {
-    const text = index === 0 ? `${marker}${entry.text}` : entry.text
-    return blockParagraph(text, block, options.font, index === headingIndex ? heading : null)
+    // A snippet's first line is a statement, not a list item, and never a
+    // heading: the size rule that promotes a short line runs *before* the
+    // ladder that writes `headingLevel`, so the outline level is held back
+    // here as well.
+    const text = !isCode && index === 0 ? `${marker}${entry.text}` : entry.text
+    return blockParagraph(
+      text,
+      block,
+      font,
+      isCode ? null : index === headingIndex ? heading : null,
+    )
   })
 }
 

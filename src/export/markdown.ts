@@ -53,6 +53,13 @@ function linkMarkdown(url: string, anchor: string): string {
   return `[${anchor.replace(/[\\[\]]/g, '\\$&')}](${url})`
 }
 
+/** Length of the longest run of backticks in `text` — a fence must beat it. */
+function longestBacktickRun(text: string): number {
+  let longest = 0
+  for (const run of text.match(/`+/g) ?? []) longest = Math.max(longest, run.length)
+  return longest
+}
+
 function blockGroup(block: ExportBlock, includeOriginal: boolean, levelsAbove: number): string {
   const { source, primary } = textOf(block, false)
   if (primary.trim().length === 0) return ''
@@ -62,6 +69,19 @@ function blockGroup(block: ExportBlock, includeOriginal: boolean, levelsAbove: n
     for (const line of applyLinks(source, block.links, linkMarkdown).split('\n')) {
       lines.push(`> ${line}`)
     }
+  }
+  if (block.kind === 'code') {
+    // The body is literal: no backslash escaping (a `\_` in a snippet must
+    // stay `\_`), no anchor rewriting (a URL inside code is data, not a link)
+    // and no list marker (a leading `1.` is a statement, not a number). The
+    // fence has to out-length the longest backtick run inside it, or a snippet
+    // quoting a triple backtick closes the block early and everything after it
+    // leaks back out as prose.
+    const fence = '`'.repeat(Math.max(3, longestBacktickRun(primary) + 1))
+    lines.push(`${fence}\n${primary}\n${fence}`)
+    // Guard the "exactly one blank line between blocks" invariant against text
+    // that ends (or starts) with a newline.
+    return lines.join('\n').replace(/^\n+|\n+$/g, '')
   }
   const body = applyLinks(primary, block.links, linkMarkdown)
   const level = headingOffset(block, levelsAbove)

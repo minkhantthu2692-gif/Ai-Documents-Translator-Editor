@@ -426,3 +426,78 @@ describe('links', () => {
     expect(out).toContain('စျေးနှုန်းကို ကြည့်ပါ')
   })
 })
+
+describe('code blocks', () => {
+  const opts = { title: 'Sample', includeOriginal: false, includePageHeadings: false }
+
+  function codeDoc(overrides: Partial<ExportBlock>): ExportDocument {
+    return {
+      ...makeDoc(),
+      pages: [
+        {
+          index: 0,
+          width: 612,
+          height: 792,
+          rotation: 0,
+          contentClass: 'text',
+          blocks: [
+            block({
+              kind: 'code',
+              status: 'skipped',
+              skipRule: 'code',
+              fontFamily: 'Courier',
+              sourceText: 'const a = 1;\nif (a) {\n  b = 2;\n}',
+              ...overrides,
+            }),
+          ],
+        },
+      ],
+    }
+  }
+
+  it('fences the snippet instead of running it into the prose', () => {
+    const out = buildMarkdown(codeDoc({}), opts)
+    expect(out).toContain('```\nconst a = 1;\nif (a) {\n  b = 2;\n}\n```')
+  })
+
+  it('writes the body literally — no escaping, no marker, no heading', () => {
+    const out = buildMarkdown(
+      codeDoc({
+        sourceText: 'a_b = [1] * 2;\n# not a heading',
+        listMarker: '1.',
+        headingLevel: 2,
+      }),
+      opts,
+    )
+    expect(out).toContain('a_b = [1] * 2;\n# not a heading')
+    expect(out).not.toContain('\\_')
+    expect(out).not.toContain('1. a_b')
+    expect(out).not.toContain('## ')
+  })
+
+  it('widens the fence past the longest backtick run inside', () => {
+    const out = buildMarkdown(codeDoc({ sourceText: 'const fence = ```;' }), opts)
+    expect(out).toContain('````\nconst fence = ```;\n````')
+  })
+
+  it('leaves a URL inside a snippet as data, not as an anchor', () => {
+    const out = buildMarkdown(
+      codeDoc({
+        sourceText: 'fetch("https://example.com")',
+        links: [{ text: 'https://example.com', url: 'https://example.com' }],
+      }),
+      opts,
+    )
+    expect(out).toContain('fetch("https://example.com")')
+    expect(out).not.toContain('](https://example.com)')
+  })
+
+  it('still quotes the source above the snippet when includeOriginal is on', () => {
+    const out = buildMarkdown(codeDoc({ sourceText: 'const a = 1;', translatedText: 'မ' }), {
+      ...opts,
+      includeOriginal: true,
+    })
+    expect(out).toContain('> const a = 1;')
+    expect(out).toContain('```\nမ\n```')
+  })
+})

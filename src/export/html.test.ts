@@ -504,3 +504,59 @@ describe('absolute export height handling', () => {
     expect(clipped).toEqual([])
   })
 })
+
+describe('code blocks', () => {
+  function codeDoc(overrides: Partial<ExportBlock> = {}): ExportDocument {
+    return doc({
+      pages: [
+        {
+          index: 0,
+          width: 612,
+          height: 792,
+          rotation: 0,
+          contentClass: 'text',
+          blocks: [
+            block({
+              kind: 'code',
+              status: 'skipped',
+              skipRule: 'code',
+              fontFamily: 'Courier',
+              sourceText: 'if (a) {\n  b = 2;\n}',
+              ...overrides,
+            }),
+          ],
+        },
+      ],
+    })
+  }
+
+  it('pins the absolute layout to a monospace stack and marks the block', () => {
+    const html = buildHtmlDocument(codeDoc(), base)
+    expect(html).toContain('class="block code"')
+    expect(html).toMatch(/class="block code"[^>]*font-family:"Courier New"/)
+    expect(html).toContain('tab-size:4')
+  })
+
+  it('carries the code class and the stylesheet into the flow layout', () => {
+    const html = buildHtmlDocument(codeDoc(), {
+      ...base,
+      layout: 'flow',
+      includeOriginal: true,
+      bilingual: 'side-by-side',
+    })
+    expect(html).toContain('class="tgt code"')
+    expect(html).toContain('.code {')
+    expect(html).toContain('white-space: pre-wrap;')
+  })
+
+  it('never lets a snippet become a heading', () => {
+    const html = buildHtmlDocument(codeDoc({ headingLevel: 1 }), base)
+    expect(html).not.toMatch(/<h[1-6][^>]*data-block-id/)
+  })
+
+  it('leaves an ordinary block out of the code styling', () => {
+    const html = buildHtmlDocument(doc(), base)
+    expect(html).not.toContain('block code')
+    expect(html).not.toContain('tab-size:4')
+  })
+})

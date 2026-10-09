@@ -292,3 +292,47 @@ describe('buildDocx links', () => {
     expect(xml).not.toContain('<w:hyperlink')
   })
 })
+
+describe('buildDocx code blocks', () => {
+  async function codeXml(
+    overrides: Partial<ExportBlock> = {},
+    docxOpts: Partial<DocxOptions> = {},
+  ) {
+    const doc: ExportDocument = {
+      ...fixtureDoc(),
+      pages: [
+        page(0, [
+          block({
+            id: 'snippet',
+            kind: 'code',
+            status: 'skipped',
+            skipRule: 'code',
+            fontFamily: 'Courier',
+            sourceText: 'if (a) {\n  b = 2;\n}',
+            ...overrides,
+          }),
+        ]),
+      ],
+    }
+    return zipText(await buildDocx(doc, options(docxOpts)), 'word/document.xml')
+  }
+
+  it('sets the snippet in a monospace face rather than the document one', async () => {
+    const xml = await codeXml()
+    expect(xml).toContain('w:ascii="Courier New"')
+  })
+
+  it('turns each newline into a real line break Word will keep', async () => {
+    const xml = await codeXml()
+    // A bare `\n` inside a run is discarded on the way to `<w:t>`.
+    expect(xml.match(/<w:br\/>/g) ?? []).toHaveLength(2)
+    expect(xml).not.toContain('if (a) {\n')
+  })
+
+  it('gives the snippet no outline level and no bullet', async () => {
+    const xml = await codeXml({ headingLevel: 1, listMarker: '1.' }, { titleHeading: false })
+    expect(xml).not.toContain('Heading1')
+    expect(xml).not.toContain('<w:outlineLvl')
+    expect(xml).not.toContain('1. if (a)')
+  })
+})

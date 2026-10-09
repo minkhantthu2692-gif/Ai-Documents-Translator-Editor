@@ -9,6 +9,7 @@ import { logEvent } from '@/core/eventLogger'
 import { toast } from '@/stores/toastStore'
 import { useUiStore } from '@/stores/uiStore'
 import { SyncCard } from './SyncCard'
+import { AppsScriptSetupCard } from './AppsScriptSetupCard'
 
 /**
  * Data tab: cloud sync (delegated to `SyncCard`), local backup export/import
@@ -103,6 +104,8 @@ export function DataTab() {
   return (
     <div className="flex flex-col gap-4">
       <SyncCard />
+
+      <AppsScriptSetupCard />
 
       <Card title={t('settings.data.backup')}>
         <div className="flex flex-col gap-4">

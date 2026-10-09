@@ -40,11 +40,11 @@ Copy the whole key in one go. It is shown only once by most providers.
 | Property | Behaviour |
 | --- | --- |
 | Encryption | WebCrypto **AES-GCM** (256-bit), derived with **PBKDF2-SHA256**, 150,000 iterations, a fresh random salt and 96-bit IV per seal (`src/core/crypto.ts`) |
-| Storage | Sealed ciphertext inside **IndexedDB** on this device (`apiKeys` table, Dexie) — never in `localStorage` as plaintext, never on a server |
+| Storage | Sealed ciphertext inside **IndexedDB** on this device (`apiKeys` table, Dexie) — never in `localStorage` as plaintext, and not on a server unless the separate sync switch below is turned on |
 | Optional vault passphrase | In **Settings → AI Providers → Vault passphrase** you can add a passphrase. With it, keys are sealed with your passphrase and kept in memory **for this session only**; leave it empty and the keys are device-bound instead |
 | Display | The UI only ever renders the masked form `••••1234` (last four characters) |
 | Logs | The plaintext never reaches a log line; provider adapters redact the key out of every error message before it is shown |
-| Cloud sync | **Never synced.** The key table is not a syncable entity, secret-looking setting ids are filtered client-side, and the sync backend rejects them with `SECRET_NOT_ALLOWED` |
+| Cloud sync | **Off by default, and its own switch.** Until you turn on **Settings → Data → Cloud sync → API keys**, nothing leaves the device: secret-looking setting ids are filtered client-side, and the sync backend rejects those with `SECRET_NOT_ALLOWED`. Switch it on and the *readable value* of each key is written to the `ApiKeys` tab of your Sheet — that is a deliberate, personal choice (the Sheet is your own database), and the panel states it plainly before you do. See [SECURITY.md](SECURITY.md#plaintext-key-sync-opt-in-and-reversible) |
 | `.env` / bundle | Never present. Only non-sensitive `VITE_` values are compiled into the browser bundle (see [below](#warning-vite_-env-vars-are-public)) |
 
 The main thread never holds a secret: translation runs open the sealed records inside the

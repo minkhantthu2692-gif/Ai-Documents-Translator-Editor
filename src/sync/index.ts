@@ -1,5 +1,11 @@
 /** Cloud sync — public surface (see protocol.ts for the wire contract). */
 
+export {
+  appsScriptSource,
+  downloadAppsScript,
+  downloadAppsScriptManifest,
+  saveTextFile,
+} from './appsScript'
 export { SyncClient, type SyncClientConfig } from './client'
 export {
   clearConflicts,

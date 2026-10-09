@@ -42,11 +42,11 @@ key အပြည့်အစုံကို တစ်ခါတည်း copy လ
 | ဂုဏ်သတ္တိ | အပြုအမူ |
 | --- | --- |
 | Encryption | WebCrypto **AES-GCM** (256-bit)၊ **PBKDF2-SHA256** ဖြင့် ဆင့်ကဲဆွဲယူခြင်း၊ 150,000 iterations၊ seal တိုင်းအတွက် fresh random salt နှင့် 96-bit IV (`src/core/crypto.ts`) |
-| Storage | ဤစက်ပေါ်ရှိ **IndexedDB** အတွင်းရှိ sealed ciphertext (`apiKeys` table, Dexie) — plaintext အဖြစ် `localStorage` တွင် ဘယ်တော့မှ မသိမ်း၊ server ပေါ်တွင် ဘယ်တော့မှ မသိမ်း |
+| Storage | ဤစက်ပေါ်ရှိ **IndexedDB** အတွင်းရှိ sealed ciphertext (`apiKeys` table, Dexie) — plaintext အဖြစ် `localStorage` တွင် ဘယ်တော့မှ မသိမ်း၊ အောက်က sync ခလုတ် မဖွင့်မက server ပေါ်တွင် မရောက်ပါ |
 | Optional vault passphrase | **Settings → AI Providers → Vault passphrase** တွင် passphrase ထည့်နိုင်သည်။ ၎င်းဖြင့် key များကို passphrase ဖြင့် seal လုပ်ပြီး ဤ session အတွက်သာ memory တွင် ထားရှိသည်; ကွက်လပ်ထားပါက key များသည် device နှင့်သာ ချိတ်ဆက်သည် |
 | Display | UI သည် masked form `••••1234` (နောက်ဆုံး စာလုံးလေးလုံး) ကိုသာ ပြသသည် |
 | Logs | plaintext သည် log line တစ်ခုအထိ ဘယ်တော့မှ မရောက်; provider adapters များက error message တိုင်းမှ key ကို ပြသမီ redact လုပ်သည် |
-| Cloud sync | **ဘယ်တော့မှ sync မလုပ်ပါ။** key table သည် sync လုပ်နိုင်သော entity မဟုတ်၊ secret ကဲ့သို့သော setting id များကို client-side တွင် filter လုပ်ပြီး၊ sync backend က `SECRET_NOT_ALLOWED` ဖြင့် ငြင်းပယ်သည် |
+| Cloud sync | **မူလ ပိတ်ထားပြီး ခလုတ်သီးသန့်။** **Settings → Data → Cloud sync → API key များ** ကို မဖွင့်မက စက်မှ ဘာမှ မထွက်ပါ — secret နှင့်တူသော setting id များကို client-side တွင် filter လုပ်ပြီး၊ sync backend က ၎င်းတို့ကို `SECRET_NOT_ALLOWED` ဖြင့် ငြင်းပယ်သည်။ ခလုတ်ဖွင့်ပါက key တစ်ခုချင်းစီ၏ **ဖတ်နိုင်သော တန်ဖိုး** ကို သင့် Sheet ၏ `ApiKeys` tab ထဲ ရေးသည် — ၎င်းသည် တမင်သက်သက် ကိုယ်ရေးကိုယ်တာ ရွေးချယ်မှု (Sheet က သင့်ပိုင်) ဖြစ်ပြီး၊ မလုပ်မီ ပန်နယ်တွင် ရှင်းလင်းစွာ ဖော်ပြထားသည်။ [SECURITY.md](SECURITY.md#plaintext-key-sync-opt-in-and-reversible) ကို ကြည့်ပါ |
 | `.env` / bundle | ဘယ်တော့မှ မပါဝင်ပါ။ non-sensitive `VITE_` values များသာ browser bundle အတွင်း compile လုပ်သည် (အောက်ရှိ [Warning](#warning-vite_-env-vars-ကို-public-ဖြစ်သည်) ကို ကြည့်ပါ) |
 
 main thread တွင် secret တစ်ခုမှ မရှိပါ — ဘာသာပြန်မှု run များသည် translation Web Worker အတွင်း၌သာ sealed

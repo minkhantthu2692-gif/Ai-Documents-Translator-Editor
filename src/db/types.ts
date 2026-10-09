@@ -308,17 +308,24 @@ export type OutboxEntity =
   | 'settings'
   /** Phase 5 — usageStats rows travel under this singular queue name. */
   | 'usage'
+  /** Phase 3 — key rows, pushed only when the user opts in. */
+  | 'apiKey'
 
 /**
  * Phase 5 — entities that travel to the Google Sheet (wire names, identical to
- * `SHEET_DEFS_[].entity` in apps-script/Code.gs). Everything else — apiKeys,
- * translations, events, revisions, cache, jobs, sourceFiles — stays local by
- * design; `apiKey` is not even in this union so it cannot be synced by
- * accident. `settings` sync also drops secret-looking ids client-side before
- * the server's own SECRET_NOT_ALLOWED check.
+ * `SHEET_DEFS_[].entity` in apps-script/Code.gs). Everything else —
+ * translations, events, revisions, cache, jobs, sourceFiles — stays local.
+ * `settings` sync also drops secret-looking ids client-side before the
+ * server's own SECRET_NOT_ALLOWED check.
+ *
+ * Phase 3 added `apiKeys`, and it deliberately does *not* ride that secret-id
+ * filter: it is a separate, off-by-default opt-in that writes the secret in
+ * the clear, because the sheet is the user's own database and re-entering
+ * every key per device was the pain this was built to remove. The UI says
+ * what will happen before the toggle is switched on.
  */
 export type SyncableEntity =
-  'projects' | 'pages' | 'blocks' | 'glossary' | 'settings' | 'usageStats'
+  'projects' | 'pages' | 'blocks' | 'glossary' | 'settings' | 'usageStats' | 'apiKeys'
 
 export const SYNCABLE_ENTITIES: readonly SyncableEntity[] = [
   'projects',
@@ -327,7 +334,19 @@ export const SYNCABLE_ENTITIES: readonly SyncableEntity[] = [
   'glossary',
   'settings',
   'usageStats',
+  'apiKeys',
 ]
+
+/**
+ * A selective-sync switch as the UI exposes it. Not all of them are wire
+ * entities: `providerSettings` filters the shared `settings` sheet down to
+ * the `ai.` id prefix so provider config travels without the rest of the
+ * preferences.
+ *
+ * Lives here rather than in `sync/` because `SyncMetaRecord.syncedEntities`
+ * persists it, and `db/` must not import upward.
+ */
+export type SyncToggle = SyncableEntity | 'providerSettings'
 
 export interface OutboxRecord extends BaseRecord {
   entity: OutboxEntity
@@ -390,7 +409,7 @@ export interface SyncMetaRecord {
   /** deviceId → max updatedAt observed from that device. */
   vector: Record<string, number>
   /** Wire entities included in the previous run (detects toggle-on rescans). */
-  syncedEntities?: SyncableEntity[]
+  syncedEntities?: SyncToggle[]
   lastPushAt: number | null
   lastPullAt: number | null
   lastSyncAt: number | null

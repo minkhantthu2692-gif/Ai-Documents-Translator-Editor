@@ -14,7 +14,8 @@ Phase 5 — cloud sync and the troubleshooting assistant.
 
 - **Google Apps Script cloud sync** (`apps-script/Code.gs`, `apps-script/appsscript.json`):
   a stateless web-app backend over a Google Sheet with tabs **Projects**, **Pages**,
-  **Blocks**, **Glossary**, **Settings**, **UsageStats** and **SyncLog**; shared-secret token
+  **Blocks**, **Glossary**, **Settings**, **UsageStats**, **ApiKeys** and **SyncLog**;
+  shared-secret token
   (`UNAUTHORIZED` on mismatch), `LockService` to serialise writers, chunked writes, tombstoned
   deletes and the actions `ping`, `pushChanges`, `pullChanges`, `listProjects`, `getProject`,
   `upsertBlocks`, `deleteProject`, `backup`, `wipe`.
@@ -23,6 +24,14 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   per-entity selective sync, conflict policy (`newest` / `local` / `remote`), auto-sync on an
   interval, offline fail-fast with retry on reconnect, **Sync Now**, test connection, wipe
   cloud and delete local — all in Settings → Data.
+- **Settings-side sync controls**: a dedicated **Provider settings** switch (on by default) so
+  `ai.*` provider configuration travels independently of theme/language/cache prefs; a separate,
+  off-by-default **API keys** switch; a **Download Code.gs** / manifest pair and an in-Settings
+  setup guide (Settings → Data), so the backend can be stood up without finding the repository.
+- `ping` now reports the entities a deployment can store. Because `Code.gs` validates a whole
+  batch before writing anything, an unknown entity would fail *every* push — key rows are held
+  in the outbox (with backoff) until the server says it accepts them, so a deployment that
+  predates the `ApiKeys` tab cannot take the rest of the sync down with it.
 - **Troubleshooting Assistant** (`src/assistant/`): proxy mode through `proxy/` (Node/Express
   `server.js` and `cloudflare-worker.js`) plus an offline rule-based fallback, automatic secret
   redaction (`src/assistant/redact.ts`) and one-click safe actions (`rotate-key`,
@@ -42,7 +51,17 @@ Phase 5 — cloud sync and the troubleshooting assistant.
 
 - Settings rows whose id or field looks like a credential (`key`, `token`, `secret`,
   `password`, `authorization`) are filtered out client-side and rejected server-side with
-  `SECRET_NOT_ALLOWED`; `apiKeys` has no sync toggle at all and can never leave the device.
+  `SECRET_NOT_ALLOWED`, on whatever toggles are set — `sync.tokens` and friends can never
+  travel. The guard covers the `Settings` tab; a *boolean* value is never treated as a
+  credential, so the `apiKeys: true` switch inside `sync.entities` is not caught by it.
+- **Provider keys sync only if you ask for it.** A separate, off-by-default **API keys** switch
+  writes each key's readable value to the `ApiKeys` tab of your own Sheet; the UI states that
+  plainly before it is switched on. Only identifying fields travel (provider, label, models,
+  enabled, last four, secret, createdAt) — counters, cooldowns and probe results stay local so
+  one device cannot clobber another's. The sealed payload is opened while the request is built,
+  so no readable secret reaches IndexedDB, the outbox or a log line; a delete tombstone carries
+  no payload; and an incoming key is re-sealed locally before storage, with a remote `cipher`
+  never trusted.
 - The sync token is stored sealed, shown only as its last four characters, and is never
   written to logs.
 

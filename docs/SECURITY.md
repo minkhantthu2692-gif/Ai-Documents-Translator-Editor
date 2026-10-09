@@ -8,7 +8,7 @@ optional cloud sync — what is protected, how, and what is deliberately *not* c
 | Asset | Where it lives | Main risk | Protection |
 | --- | --- | --- | --- |
 | Documents, glossary, logs | IndexedDB in your browser | Someone else using the same browser profile / device | Nothing leaves the device unless you enable sync; full-device encryption is the OS's job |
-| Provider API keys (Gemini, OpenRouter, Groq, …) | IndexedDB `apiKeys`, sealed | Read out of a backup, an exported DB, a log line, or a sync payload | WebCrypto AES-GCM + PBKDF2 sealing, never synced, never in backups in plaintext, redacted everywhere else |
+| Provider API keys (Gemini, OpenRouter, Groq, …) | IndexedDB `apiKeys`, sealed | Read out of a backup, an exported DB, a log line, or a sync payload | WebCrypto AES-GCM + PBKDF2 sealing; never in backups or logs in plaintext; **not synced** unless you switch on the separate, off-by-default plaintext key sync (below) |
 | Sync access token | Settings (sealed), or a `VITE_` build variable | Read by anyone with the bundle, or replayed against your Sheet | Treat a deployed build as containing it; rotate it in the Apps Script `TOKEN` Script Property and rebuild |
 | Cloud Sheet contents | Google Sheet (relay) | Unauthorized read/write of the relay | Shared-secret token, `UNAUTHORIZED` on mismatch, LockService against concurrent runs; disable sync to remove this surface entirely |
 | Assistant OpenRouter key | Your `proxy/` server only | Leak through the frontend bundle or a response body | Never `VITE_`-prefixed, never bundled, never logged; responses scrub it defensively |
@@ -37,19 +37,58 @@ Keys are sealed **before** they touch storage:
 - JSON backups carry keys **still sealed**; they only open on the device that created them.
 - The UI shows only a masked summary (last four characters) and usage/cooldown counters.
 
-## What is never synced
+## What syncs, and what never does
 
 | Data | Syncable? | Why |
 | --- | --- | --- |
-| `apiKeys` (all provider keys) | **Never** — no toggle exists | There is no `apiKeys` entry in the sync entity map at all |
-| Settings rows whose id or field looks secret | **Never** | Client filter `isSecretSettingId()` in `src/sync/protocol.ts` — case-insensitive over `key`, `token`, `secret`, `password`, `authorization` — drops them before a request is built; `sync.appsScriptToken` is the important one |
-| Anything matching the same pattern on the server | **Rejected** | `apps-script/Code.gs` re-checks and fails the **whole** request with `SECRET_NOT_ALLOWED` — one bad record aborts the batch on purpose |
 | `projects` / `pages` / `blocks` / `glossary` | On by default | Content only |
-| `settings`, `usageStats` | **Off by default** | Opt-in per-entity toggles in Settings → Data |
+| `settings` — **provider settings** (`ai.*` ids) | On by default | The configuration that decides how this app talks to AI services. It names providers and models, but never a credential |
+| `settings` — everything else (theme, language, cache, sync policy) | **Off by default** | A separate toggle, so unrelated preferences never surprise-sync |
+| `apiKeys` (all provider keys) | **Off by default, separate opt-in** | See [Plaintext key sync](#plaintext-key-sync-opt-in-and-reversible). Nothing travels until you switch it on |
+| Settings rows whose id or field looks secret | **Never** | Client filter `isSecretSettingId()` in `src/sync/protocol.ts` — case-insensitive over `key`, `token`, `secret`, `password`, `authorization` — drops them before a request is built; `sync.appsScriptToken` is the important one. A *boolean* value is never treated as a credential, so the `apiKeys: true` switch inside `sync.entities` is not caught by it |
+| Anything matching the same pattern on the server | **Rejected** | `apps-script/Code.gs` re-checks and fails the **whole** request with `SECRET_NOT_ALLOWED` — one bad record aborts the batch on purpose. The guard covers the `Settings` sheet only; the `ApiKeys` sheet is the one deliberate exception |
 | `syncConflicts`, `syncMeta`, `sourceFiles` | **Never** | Device-local cursors/vectors, and raw PDF bytes |
 
 Defence in depth: even if the client-side filter were removed, the server guard still refuses
 the batch, and even if the server guard were removed, the client never builds the payload.
+
+## Plaintext key sync (opt-in, and reversible)
+
+Your Sheet is your own database — you created it, you hold its `TOKEN`, and you control who it
+is shared with. Typing every provider key again on every device is the problem the option
+removes, so **Settings → Data → Cloud sync → API keys** can copy them there. It is a distinct
+switch, it is **off by default**, and turning it on is the only way keys ever move.
+
+If you switch it on, these are the facts:
+
+- **The value is written in readable text.** Anyone who can open that spreadsheet — or any
+  service connected to it — can copy your keys. A shared link is enough. The app says this in
+  the panel before you switch it on, and again while it is on.
+- It does **not** travel through a `VITE_` build variable, a log line, a JSON backup, or a
+  notification. Only the `ApiKeys` sheet.
+- Only identifying fields go: provider, label, model list, enabled flag, last four, the secret
+  and a creation timestamp. This device's runtime bookkeeping — lifetime request counters,
+  cooldowns, key-pool bucket positions, probe results — deliberately stays behind, because
+  last-writer-wins would let one device's counters clobber the other's.
+- The sealed payload is opened **at the moment the request is built**, so no readable secret is
+  ever written back into IndexedDB or into the sync outbox, and a delete tombstone carries no
+  payload at all.
+- Pulling a key **re-seals it locally** before it can touch storage — with your vault passphrase
+  if one is unlocked, with the per-device secret otherwise. A `cipher` arriving from another
+  device is never trusted: it belongs to a device whose key does not exist here.
+- Switching the toggle off stops new writes. It does not erase rows already in the sheet —
+  delete the `ApiKeys` tab, or use **Delete cloud data**, for that.
+
+**Turn it off** if you share the spreadsheet, if it lives in a work account you do not control,
+or if you do not actively need the same keys on a second device.
+
+### An older backend cannot break your sync
+
+`Code.gs` rejects an unknown entity while validating the *whole* batch, before any row is
+written. One key change pushed at a deployment that predates the `ApiKeys` sheet would therefore
+have failed **every** push, for every entity. So the client asks `ping` which entities the
+backend can store, and holds key rows — queued, with backoff — until it says yes. Other entities
+keep syncing throughout. Press **Test connection** after re-deploying to clear the notice.
 
 ## Sync token handling
 

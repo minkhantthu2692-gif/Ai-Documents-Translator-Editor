@@ -5,12 +5,19 @@ import { Badge, Button, Card, ConfirmDialog, Input, Select, Switch } from '@/com
 import { IconRefresh } from '@/components/layout/icons'
 import { SETTING_KEYS } from '@/db/repo-settings'
 import { outboxRepo } from '@/db/repo-outbox'
-import type { SyncableEntity } from '@/db/types'
+import type { SyncToggle } from '@/db/types'
 import { sealText, type SealedPayload } from '@/core/crypto'
 import { logEvent } from '@/core/eventLogger'
+import { cn } from '@/lib/cn'
 import { errorMemory } from '@/assistant'
 import { toast } from '@/stores/toastStore'
-import { defaultEntityToggles, toSyncErrorCode, useSyncStore, type SyncUiStatus } from '@/sync'
+import {
+  defaultEntityToggles,
+  toSyncErrorCode,
+  useSyncStore,
+  type EntityToggles,
+  type SyncUiStatus,
+} from '@/sync'
 import { useSetting } from './useSetting'
 
 interface TokenSetting {
@@ -23,11 +30,22 @@ const EMPTY_TOKEN: TokenSetting = { sealed: null, lastFour: '' }
 /** Stable fallback — `useSetting` puts this in useLiveQuery deps. */
 const ENTITY_FALLBACK = defaultEntityToggles()
 
-const ENTITY_ROWS: { entity: SyncableEntity; testId: string; labelKey: string }[] = [
+/**
+ * The switches that map one-to-one onto wire entities. Provider settings and
+ * API keys sit outside this list: the first is a *filter* over the settings
+ * sheet rather than an entity, and the second is kept apart because turning it
+ * on writes secrets in the clear.
+ */
+const ENTITY_ROWS: { entity: SyncToggle; testId: string; labelKey: string }[] = [
   { entity: 'projects', testId: 'sync-toggle-projects', labelKey: 'settings.data.entityProjects' },
   { entity: 'pages', testId: 'sync-toggle-pages', labelKey: 'settings.data.entityPages' },
   { entity: 'blocks', testId: 'sync-toggle-blocks', labelKey: 'settings.data.entityBlocks' },
   { entity: 'glossary', testId: 'sync-toggle-glossary', labelKey: 'settings.data.entityGlossary' },
+  {
+    entity: 'providerSettings',
+    testId: 'sync-toggle-providerSettings',
+    labelKey: 'settings.data.entityProviderSettings',
+  },
   { entity: 'settings', testId: 'sync-toggle-settings', labelKey: 'settings.data.entitySettings' },
   {
     entity: 'usageStats',
@@ -68,7 +86,7 @@ export function SyncCard() {
     SETTING_KEYS.conflictPolicy,
     'newest',
   )
-  const [entities, setEntities] = useSetting<Record<SyncableEntity, boolean>>(
+  const [entities, setEntities] = useSetting<EntityToggles>(
     SETTING_KEYS.syncEntities,
     ENTITY_FALLBACK,
   )
@@ -87,6 +105,13 @@ export function SyncCard() {
   const [tokenDraft, setTokenDraft] = useState('')
   const [confirmWipe, setConfirmWipe] = useState(false)
   const [busy, setBusy] = useState<'test' | 'wipe' | null>(null)
+  /**
+   * Entities the backend declared support for after the last successful test —
+   * `null` when this device has never probed it. Drives the "your Code.gs is
+   * too old" notice: without it a key push would fail the *entire* batch on an
+   * older deployment.
+   */
+  const [serverEntities, setServerEntities] = useState<string[] | null>(null)
 
   // Pull the config (and env fallbacks) into the store on first render.
   useEffect(() => {
@@ -134,6 +159,7 @@ export function SyncCard() {
     setBusy('test')
     try {
       const result = await testConnection()
+      setServerEntities(result.entities)
       toast(
         'success',
         t('settings.data.testOk', {
@@ -173,9 +199,28 @@ export function SyncCard() {
     }
   }
 
-  function toggleEntity(entity: SyncableEntity, next: boolean) {
+  function toggleEntity(entity: SyncToggle, next: boolean) {
     void setEntities({ ...entities, [entity]: next })
   }
+
+  const keysOn = entities.apiKeys ?? ENTITY_FALLBACK.apiKeys
+
+  /**
+   * Key rows only travel once the backend declares an ApiKeys sheet. Until a
+   * probe says otherwise they stay queued — an older Code.gs would reject the
+   * whole batch during validation, before a single row is written.
+   */
+  const keysBackendNote = !keysOn
+    ? null
+    : serverEntities === null
+      ? { testId: 'keys-held', tone: 'text-muted', message: t('settings.data.keysHeld') }
+      : serverEntities.includes('apiKeys')
+        ? null
+        : {
+            testId: 'keys-old-backend',
+            tone: 'text-danger',
+            message: t('settings.data.oldBackend'),
+          }
 
   const statusLabel: Record<SyncUiStatus, string> = {
     disabled: t('settings.data.statusDisabled'),
@@ -292,11 +337,15 @@ export function SyncCard() {
           </div>
 
           {/* Selective per-entity toggles ------------------------------------ */}
-          <fieldset className="flex flex-col gap-2 rounded-md border border-border p-3">
+          <fieldset className="flex flex-col gap-3 rounded-md border border-border p-3">
             <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-fg-muted">
               {t('settings.data.entities')}
             </legend>
-            <p className="text-xs text-fg-muted">{t('settings.data.entitiesDesc')}</p>
+            <div className="flex flex-col gap-1">
+              <p className="text-xs text-fg-muted">{t('settings.data.entitiesDesc')}</p>
+              <p className="text-xs text-fg-muted">{t('settings.data.entityProviderDesc')}</p>
+              <p className="text-xs text-fg-muted">{t('settings.data.entitySettingsDesc')}</p>
+            </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {ENTITY_ROWS.map((row) => (
                 <Switch
@@ -307,6 +356,39 @@ export function SyncCard() {
                   label={t(row.labelKey)}
                 />
               ))}
+            </div>
+
+            {/* API keys — a separate, off-by-default opt-in, because turning it
+                on writes every key to the sheet in readable text. */}
+            <div
+              className={cn(
+                'rounded-md border p-3 transition-colors',
+                keysOn ? 'border-warning/60 bg-warning/10' : 'border-border',
+              )}
+            >
+              <Switch
+                testId="sync-toggle-apiKeys"
+                checked={keysOn}
+                onChange={(next) => toggleEntity('apiKeys', next)}
+                label={t('settings.data.entityKeys')}
+                description={t('settings.data.entityKeysDesc')}
+              />
+              {keysOn ? (
+                <div data-testid="keys-sync-warning" className="mt-2 flex flex-col gap-1">
+                  <p className="text-xs font-semibold text-warning">
+                    {t('settings.data.keysWarningTitle')}
+                  </p>
+                  <p className="text-xs text-fg-muted">{t('settings.data.keysWarning')}</p>
+                </div>
+              ) : null}
+              {keysBackendNote ? (
+                <p
+                  data-testid={keysBackendNote.testId}
+                  className={`mt-2 text-xs ${keysBackendNote.tone}`}
+                >
+                  {keysBackendNote.message}
+                </p>
+              ) : null}
             </div>
           </fieldset>
 

@@ -19,7 +19,9 @@
  * Codes added client-side: NOT_CONFIGURED, NETWORK, TIMEOUT, BAD_RESPONSE.
  */
 
-import type { OutboxEntity, SyncableEntity } from '@/db/types'
+import type { OutboxEntity, SyncableEntity, SyncToggle } from '@/db/types'
+
+export type { SyncToggle }
 
 /** Server + client error codes carried in `{ ok:false, code, message }`. */
 export type SyncErrorCode =
@@ -79,6 +81,16 @@ export interface PingResponse {
   pong: true
   serverTime: number
   sheetNames: string[]
+  /**
+   * Wire entities this deployment can store.
+   *
+   * Absent on Code.gs builds older than the apiKeys sheet — which matters,
+   * because `validateChanges_` rejects an unknown entity across the *whole*
+   * request before any row is written. One unsupported change would otherwise
+   * take down every push, so the client holds key rows until the server says
+   * it wants them.
+   */
+  entities?: string[]
 }
 
 export interface PushResponse {
@@ -148,6 +160,7 @@ export const TABLE_TO_WIRE: Record<string, SyncableEntity> = {
   glossary: 'glossary',
   settings: 'settings',
   usageStats: 'usageStats',
+  apiKeys: 'apiKeys',
 }
 
 /** Tables scanned by collect(), in child-after-parent order for readable logs. */
@@ -158,6 +171,7 @@ export const SYNC_SCAN_TABLES: readonly string[] = [
   'glossary',
   'settings',
   'usageStats',
+  'apiKeys',
 ]
 
 /** Outbox entity (singular, per OutboxEntity) → wire entity. */
@@ -168,6 +182,7 @@ export const OUTBOX_TO_WIRE: Record<string, SyncableEntity> = {
   glossary: 'glossary',
   settings: 'settings',
   usage: 'usageStats',
+  apiKey: 'apiKeys',
 }
 
 /** Dexie table name → outbox entity (collect side). */
@@ -178,6 +193,7 @@ export const TABLE_TO_OUTBOX: Record<string, OutboxEntity> = {
   glossary: 'glossary',
   settings: 'settings',
   usageStats: 'usage',
+  apiKeys: 'apiKey',
 }
 
 /** Wire entity → outbox entity (inverse of OUTBOX_TO_WIRE). */
@@ -188,6 +204,7 @@ export const WIRE_TO_OUTBOX: Record<SyncableEntity, OutboxEntity> = {
   glossary: 'glossary',
   settings: 'settings',
   usageStats: 'usage',
+  apiKeys: 'apiKey',
 }
 
 /** Wire entity → Dexie table name (identity except usageStats). */
@@ -198,6 +215,7 @@ export const WIRE_TO_TABLE: Record<SyncableEntity, string> = {
   glossary: 'glossary',
   settings: 'settings',
   usageStats: 'usageStats',
+  apiKeys: 'apiKeys',
 }
 
 /**
@@ -212,15 +230,46 @@ export function isSecretSettingId(id: string): boolean {
   return SECRET_RE.test(id)
 }
 
-/** Default selective-sync toggles (apiKeys has no toggle — never syncable). */
-export function defaultEntityToggles(): Record<SyncableEntity, boolean> {
+/**
+ * A toggle the UI exposes. Not every one of them is a wire entity:
+ *
+ *  - `providerSettings` has no sheet of its own — it filters the shared
+ *    `settings` sheet down to the `ai.` id prefix, so provider config (active
+ *    provider, model, base URL, imported models) travels without dragging the
+ *    theme/language/cache preferences along with it.
+ *  - `apiKeys` is a real entity and writes secrets in the clear, so it stays
+ *    off until the user turns it on.
+ */
+export type EntityToggles = Record<SyncToggle, boolean>
+/** Prefix shared by every provider-configuration setting row. */
+export const PROVIDER_SETTING_PREFIX = 'ai.'
+
+export function isProviderSettingId(id: string): boolean {
+  return id.startsWith(PROVIDER_SETTING_PREFIX)
+}
+
+/**
+ * Picks which of the two settings toggles governs a row.
+ *
+ * `settings` and `providerSettings` both write the same sheet, so a row is
+ * pushed when *its own* toggle is on — never because the other one happens to
+ * be.
+ */
+export function settingsToggleFor(id: string, toggles: EntityToggles): boolean {
+  return isProviderSettingId(id) ? toggles.providerSettings === true : toggles.settings === true
+}
+
+/** Default selective-sync toggles. */
+export function defaultEntityToggles(): EntityToggles {
   return {
     projects: true,
     pages: true,
     blocks: true,
     glossary: true,
     settings: false,
+    providerSettings: true,
     usageStats: false,
+    apiKeys: false,
   }
 }
 

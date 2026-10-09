@@ -10,7 +10,7 @@
  *   sheets themselves.
  *
  * SHEETS (auto-created with fixed header rows)
- *   Projects, Pages, Blocks, Glossary, Settings, UsageStats, SyncLog.
+ *   Projects, Pages, Blocks, Glossary, Settings, UsageStats, ApiKeys, SyncLog.
  *   Canonical header layout for every syncable sheet:
  *     ['id', 'updatedAt', 'deviceId', 'version', 'deleted', ...entity fields]
  *   Complex / nested entity fields (block geometry, lines, run styling, etc.)
@@ -45,10 +45,18 @@
  *     response timing does not leak the secret character by character.
  *   - The token is NEVER echoed back, never logged to SyncLog, never written
  *     to any sheet, and never included in an error message.
- *   - API keys are NEVER stored or synced. The `Settings` sheet refuses any
- *     record whose key name matches /key|token|secret|password|authorization/i
- *     and fails the whole request with `SECRET_NOT_ALLOWED`. Provider keys
- *     stay in the browser, encrypted with WebCrypto AES-GCM (see AGENT.md).
+ *   - Provider API keys are stored in the `ApiKeys` sheet ONLY when the user
+ *     turns on "API keys" in Settings → Cloud sync — it is off by default,
+ *     the client says what will happen before it is switched on, and the
+ *     values are written in the clear. The spreadsheet is the user's own
+ *     database (they created it, they hold the TOKEN, they control sharing)
+ *     and re-typing every key on every device is what the option removes.
+ *     Turning it off stops new writes; it does not erase rows already
+ *     written — delete the sheet or run `wipe` for that.
+ *   - The `Settings` sheet still refuses any record whose key name matches
+ *     /key|token|secret|password|authorization/i and fails the whole request
+ *     with `SECRET_NOT_ALLOWED`, so the shared TOKEN cannot reach the
+ *     spreadsheet from that path. The token itself is never in this file.
  *   - Apps Script web apps always answer HTTP 200, so failures are reported
  *     inside the JSON envelope as `{ ok:false, code, message }`.
  *   - All error paths return generic messages: no stack traces, no request
@@ -133,7 +141,9 @@ var SS_ID_PROP_ = 'SPREADSHEET_ID'
 
 /**
  * Any Settings record whose KEY NAME matches this pattern is rejected with
- * SECRET_NOT_ALLOWED. API keys are never synced to the cloud.
+ * SECRET_NOT_ALLOWED. It guards the `Settings` sheet only (see
+ * `assertNotSecretSetting_`), so the shared TOKEN can never be stored — even
+ * though API keys themselves now have an opt-in sheet of their own.
  */
 var SECRET_RE_ = /key|token|secret|password|authorization/i
 
@@ -239,6 +249,31 @@ var SHEET_DEFS_ = [
       'metric',
       'value',
       'projectId',
+      'data',
+    ],
+  },
+  {
+    // Phase 3 — opt-in. The client only writes here after the user switches on
+    // "API keys" in Settings → Cloud sync, and this sheet stores the secret in
+    // the clear: the spreadsheet is the user's own database, and re-typing
+    // every key per device is the problem this exists to solve. The `secret`
+    // column is the key; `lastFour` is only there so a human scanning the sheet
+    // can tell the rows apart without reading a whole key.
+    name: 'ApiKeys',
+    entity: 'apiKeys',
+    aliases: ['apikey', 'key', 'keys'],
+    headers: [
+      'id',
+      'updatedAt',
+      'deviceId',
+      'version',
+      'deleted',
+      'provider',
+      'label',
+      'lastFour',
+      'secret',
+      'enabled',
+      'createdAt',
       'data',
     ],
   },
@@ -508,7 +543,24 @@ function actionPing_(req, ctx) {
     pong: true,
     serverTime: Date.now(),
     sheetNames: allSheetNames_(),
+    // Declared capabilities. A client running against an older build of this
+    // file sees this field missing and knows not to offer entities this
+    // deployment cannot store — one unknown entity used to fail the whole
+    // push before any row was written.
+    entities: syncableEntities_(),
   }
+}
+
+/**
+ * Wire entity names this deployment can store.
+ *
+ * @return {Array<string>} Entity names from the sheet definitions.
+ * @private
+ */
+function syncableEntities_() {
+  var out = []
+  for (var i = 0; i < SHEET_DEFS_.length; i++) out.push(SHEET_DEFS_[i].entity)
+  return out
 }
 
 /**
@@ -1748,8 +1800,10 @@ function stageApply_(data, index, def, entry, stats) {
 
 /**
  * Refuses to persist a Settings record whose key name (or any field name)
- * looks like a credential. API keys are never synced to the cloud — they
- * live only in the browser, encrypted with WebCrypto AES-GCM.
+ * looks like a credential. This guards the `Settings` sheet — the shared TOKEN
+ * must never reach the spreadsheet, and a setting is the wrong place for a
+ * secret. It deliberately does not apply to the `ApiKeys` sheet, which is the
+ * one opt-in place a key is meant to live (see SECURITY NOTES at the top).
  *
  * @param {Object} def  Sheet definition.
  * @param {Object} rec  Record about to be written.
@@ -1768,7 +1822,7 @@ function assertNotSecretSetting_(def, rec) {
     if (SECRET_RE_.test(name)) {
       throwCoded_(
         'SECRET_NOT_ALLOWED',
-        'Refusing to sync "' + name + '": API keys and secrets are never stored in the cloud.',
+        'Refusing to sync "' + name + '": the Settings sheet never stores credentials.',
       )
     }
   }

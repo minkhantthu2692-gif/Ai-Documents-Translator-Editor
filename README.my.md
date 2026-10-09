@@ -175,7 +175,10 @@ open-data, open-logs) သည် အားလုံး သင့်စက်ပ�
   တောင်းဆိုမှု မလုပ်ပါ — ဘာသာပြန်မှု စတင်ခြင်း၊ sync ဖွင်ခြင်း၊ OCR data download ခြင်း၊
   assistant မေးမြန်းခြင်း သင် လုပ်သမျှအတွက်သာ request ထွက်ပါသည်။
 - Provider API key များကို WebCrypto (AES-GCM + PBKDF2) ဖြင့် sealed အဖြစ် သိမ်းပြီးမှ
-  storage တွင်း ရောက်သည် — sync တွင်လည်း မပို့၊ backup တွင်လည်း plaintext အဖြစ် မပါပါ။
+  storage တွင်း ရောက်သည် — backup တွင် plaintext အဖြစ် မပါပါ။ sync တွင်လည်း မပို့ပါ —
+  သင် မဖွင့်မက **API key များ** sync (မူလ ပိတ်ထားသော ခလုတ်သီးသန့်) ကို ဖွင့်ပါကသာ ၎င်းတို့၏
+  ဖတ်နိုင်သော တန်ဖိုုများကို သင့်ကိုယ်ပိုင် Google Sheet ထဲသို့ တမင်ရေးသည်
+  (**[docs/SECURITY.md](docs/SECURITY.md)** ကို ကြည့်ပါ)။
 - `.env` စီမံခန့်ခွဲမှု၊ redaction rule များနှင့် အသိပေးနည်း လုပ်ထုံးကို
   **[docs/SECURITY.md](docs/SECURITY.md)** တွင် ဖော်ပြထားပါသည်။
 

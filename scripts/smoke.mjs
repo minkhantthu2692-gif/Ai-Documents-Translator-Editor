@@ -1321,9 +1321,45 @@ try {
   )
   check('sync controls present', syncControls === 9, `found=${syncControls}/9`)
   const syncToggles = await evalJs(
-    `['projects', 'pages', 'blocks', 'glossary', 'settings', 'usage'].filter(id => !!document.querySelector('[data-testid="sync-toggle-' + id + '"]')).length`,
+    `['projects', 'pages', 'blocks', 'glossary', 'settings', 'usage', 'providerSettings', 'apiKeys'].filter(id => !!document.querySelector('[data-testid="sync-toggle-' + id + '"]')).length`,
   )
-  check('per-entity sync toggles present', syncToggles === 6, `found=${syncToggles}/6`)
+  check('per-entity sync toggles present', syncToggles === 8, `found=${syncToggles}/8`)
+  const keySyncState = await evalJs(
+    `(async () => {
+       const sw = document.querySelector('[data-testid="sync-toggle-apiKeys"]');
+       if (!sw) return 'missing';
+       if (sw.getAttribute('aria-checked') !== 'false') return 'default-on';
+       if (document.querySelector('[data-testid="keys-sync-warning"]')) return 'warn-while-off';
+       sw.click();
+       await new Promise((r) => setTimeout(r, 300));
+       const on = document.querySelector('[data-testid="sync-toggle-apiKeys"]');
+       if (!on || on.getAttribute('aria-checked') !== 'true') return 'did-not-toggle';
+       if (!document.querySelector('[data-testid="keys-sync-warning"]')) return 'no-warning';
+       on.click();
+       await new Promise((r) => setTimeout(r, 300));
+       if (document.querySelector('[data-testid="keys-sync-warning"]')) return 'warning-stuck';
+       return 'ok';
+     })()`,
+    true,
+  )
+  check(
+    'API key sync is off by default and warns loudly when enabled',
+    keySyncState === 'ok',
+    `result=${keySyncState}`,
+  )
+  check(
+    'Apps Script setup card offers both downloads and the guide',
+    await evalJs(
+      `(() => {
+         const ids = ['apps-script-download-code', 'apps-script-download-manifest', 'apps-script-guide-toggle', 'apps-script-guide', 'apps-script-update-note'];
+         return ids.filter(id => !!document.querySelector('[data-testid="' + id + '"]')).length === ids.length;
+       })()`,
+    ),
+  )
+  const guideSteps = await evalJs(
+    `document.querySelectorAll('[data-testid="apps-script-guide"] > li').length`,
+  )
+  check('Apps Script guide renders six steps', guideSteps === 6, `steps=${guideSteps}`)
   const fileInputs = await evalJs(`document.querySelectorAll('input[type="file"]').length`)
   check('backup file input still unique on the Data tab', fileInputs === 1, `count=${fileInputs}`)
   check(

@@ -164,7 +164,9 @@ open-data, open-logs) run entirely on your device.
   own; requests happen only when *you* start a translation, enable sync, download OCR data or
   ask the assistant.
 - Provider API keys are sealed with WebCrypto (AES-GCM + PBKDF2) before they touch storage and
-  are never synced or included in backups in plaintext.
+  are never included in backups in plaintext. They are not synced either — unless you switch on
+  the separate, off-by-default **API keys** sync, which writes their readable values to your own
+  Google Sheet on purpose (see **[docs/SECURITY.md](docs/SECURITY.md)**).
 - `.env`, `.env.*` and `.env.example` handling, redaction rules and the disclosure policy are
   described in **[docs/SECURITY.md](docs/SECURITY.md)**.
 

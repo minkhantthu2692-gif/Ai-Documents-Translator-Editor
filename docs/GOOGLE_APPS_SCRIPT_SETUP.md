@@ -10,8 +10,10 @@ every click is described below.
   browser). That local copy is always the **source of truth**: the app reads and writes it first.
 - A single **Google Sheet** acts as the shared relay between your devices. On **Sync now** the
   app pushes local changes up to the Sheet and pulls changes that other devices left there.
-- Nothing else is stored in the cloud. PDFs, rendered pages, caches, logs and — above all —
-  **API keys never leave the device** (see [Selective sync](#selective-sync-and-api-keys)).
+- Nothing else is stored in the cloud. PDFs, rendered pages, caches and logs stay local.
+  **API keys stay on the device too**, unless you deliberately switch on the separate, off-by-default
+  key sync (see [Selective sync](#selective-sync-and-api-keys)) — and note that when it is on,
+  they are written to the Sheet in readable text.
 - The backend is a stateless JSON web app written in Google Apps Script
   (`apps-script/Code.gs`). The Sheet holds all the data; the script never keeps state between
   requests.
@@ -50,10 +52,10 @@ every click is described below.
 3. Paste it into the editor, replacing the placeholder contents.
 4. Save with **Ctrl+S** (or the 💾 toolbar button).
 
-> The code creates seven tabs the first time it runs: **Projects**, **Pages**, **Blocks**,
-> **Glossary**, **Settings**, **UsageStats** and **SyncLog**. Every data tab starts with the
-> fixed header row `id, updatedAt, deviceId, version, deleted, …`; deletions are written as
-> tombstones (`deleted = TRUE`) so they propagate to your other devices.
+> The code creates eight tabs the first time it runs: **Projects**, **Pages**, **Blocks**,
+> **Glossary**, **Settings**, **UsageStats**, **ApiKeys** and **SyncLog**. Every data tab starts
+> with the fixed header row `id, updatedAt, deviceId, version, deleted, …`; deletions are written
+> as tombstones (`deleted = TRUE`) so they propagate to your other devices.
 
 ## Step 4 — Set the manifest (`appsscript.json`)
 
@@ -159,7 +161,7 @@ Press **Test connection**. Expected outcomes:
 
 | Result | What it means | What to do |
 | --- | --- | --- |
-| Success toast listing the sheet names (`Projects, Pages, Blocks, Glossary, Settings, UsageStats, SyncLog`) | URL reachable, token accepted, all tabs created | Continue to **Sync now** |
+| Success toast listing the sheet names (`Projects, Pages, Blocks, Glossary, Settings, UsageStats, ApiKeys, SyncLog`) | URL reachable, token accepted, all tabs created | Continue to **Sync now** |
 | `UNAUTHORIZED` | The token in the app does not match the `TOKEN` Script Property | Re-copy the exact token into **Access token**, save, test again |
 | `LOCK_TIMEOUT` | Another sync session currently holds the script lock | Wait a few seconds and test again |
 | `BAD_REQUEST` / network or CORS error | Wrong URL (not `/exec`), deployment access is not *Anyone*, or the deployment was not authorised | See [CORS notes](#cors-and-textplain-posts) below |
@@ -181,7 +183,7 @@ returns a `nextCursor`; the app simply continues from that cursor, so nothing is
 
 ## Selective sync (and API keys)
 
-Six entity groups can travel to the Sheet. Toggle each one in **Settings → Data → Cloud sync**:
+Eight switches control what travels, each in **Settings → Data → Cloud sync**:
 
 | Toggle | What syncs | What stays local |
 | --- | --- | --- |
@@ -189,18 +191,53 @@ Six entity groups can travel to the Sheet. Toggle each one in **Settings → Dat
 | **pages** | Page geometry and per-page metadata | Rendered page images / render cache |
 | **blocks** | Text blocks, layout, per-line styling (JSON in the `data` column) | Revisions history |
 | **glossary** | Glossary terms and notes | — |
-| **settings** | App preferences (theme, language, cache limits, sync policy …) | Secret-looking setting ids (filtered out before sending) |
+| **Provider settings** *(on by default)* | `ai.*` setting ids: active provider, model, base URL, imported models | Anything not prefixed `ai.` |
+| **App settings** *(off by default)* | Theme, language, cache limits, sync policy, … | Secret-looking ids (filtered before sending), and every `ai.*` id while Provider settings is off |
 | **usage** | Usage statistics counters | Job queue, outbox, events |
+| **API keys** *(off by default)* | See below | Everything, while it is off |
 
-**API keys are NEVER synced.** Two independent guards enforce this:
+Provider settings and App settings share one `Settings` tab but follow **their own** switches,
+so turning one on never drags the other's rows with it.
 
-1. **Client side** — the key table is not a syncable entity at all, and every settings id that
-   looks like a credential (`key`, `token`, `secret`, `password`, `authorization`) is dropped
-   before a single byte is sent.
-2. **Server side** — `apps-script/Code.gs` rejects the whole request with
-   `SECRET_NOT_ALLOWED` if any settings record or field name matches
-   `/key|token|secret|password|authorization/i`. The keys stay in your browser, sealed with
-   WebCrypto AES-GCM.
+### API keys — opt-in, and in plain text
+
+Keys are **not synced by default**. If you turn the **API keys** switch on, the sheet's
+`ApiKeys` tab receives the *readable value* of each key.
+
+This is deliberate: the Sheet is your own personal database — you created it, you hold its
+`TOKEN`, and you control its sharing — and re-typing every key on every device is the problem
+the option exists to remove. It is also the only part of the app that moves a secret, so the
+rules are strict:
+
+- **Off by default, and its own switch.** Nothing travels until you say so; the panel states in
+  plain words that the values will be readable to anyone with access to the spreadsheet.
+- **Only identifying fields.** provider, label, model list, enabled flag, last four characters,
+  the secret and a creation timestamp. Device-local counters, cooldowns and probe results stay
+  behind so one device cannot clobber another's.
+- **Opened at the last moment.** The sealed payload is decrypted while the request is being
+  built; no readable secret is written to IndexedDB, the outbox, or a log line. A delete
+  tombstone carries no payload at all.
+- **Re-sealed on arrival.** Device B opens the incoming plaintext and seals it again with its
+  own key before storing it. A `cipher` from another device is ignored — it would be
+  undecryptable here anyway.
+- **Reversible.** Switching it off stops new writes. To remove what is already there, delete the
+  `ApiKeys` tab or use **Delete cloud data**.
+
+Two guards still protect the *rest* of the system:
+
+1. **Client side** — every settings id that looks like a credential (`key`, `token`, `secret`,
+   `password`, `authorization`) is dropped before a single byte is sent, whatever the toggles say.
+2. **Server side** — `apps-script/Code.gs` rejects the whole request with `SECRET_NOT_ALLOWED`
+   if any record on the `Settings` sheet matches that pattern. The guard applies to that sheet
+   only; `ApiKeys` is the single, intentional exception.
+
+### Older `Code.gs` deployments
+
+`Code.gs` validates an entire push before writing anything, so an unknown entity would fail the
+whole batch. The app therefore asks `ping` which entities the deployment can store and **holds
+key rows** (queued, with backoff) until it gets an answer — other entities keep syncing the whole
+time. Press **Test connection** after re-deploying to clear the notice that appears under the
+API keys switch.
 
 ## Delete cloud data vs. delete local data
 
@@ -208,7 +245,7 @@ Both actions destroy data. Read the difference before pressing either button:
 
 | | **Delete cloud data** (Settings → Data → Cloud sync) | **Delete all local data** (Settings → Data → Danger zone) |
 | --- | --- | --- |
-| What it removes | Every data row in the Sheet’s Projects / Pages / Blocks / Glossary / Settings / UsageStats tabs | Everything in this browser: projects, caches, settings, keys, logs |
+| What it removes | Every data row in the Sheet’s Projects / Pages / Blocks / Glossary / Settings / UsageStats / ApiKeys tabs | Everything in this browser: projects, caches, settings, keys, logs |
 | What survives | Header rows, tab structure and the **SyncLog** audit trail | The Sheet in the cloud is untouched |
 | How it is confirmed | You must type `WIPE` to confirm | Confirm with **Delete everything** |
 | Reversible? | No — export a backup first | No — export a backup first |
@@ -278,7 +315,7 @@ Apps Script web apps always answer HTTP 200; failures arrive inside the JSON env
 | `BAD_REQUEST` | Malformed request: missing `action`, body larger than 5 MB, invalid JSON, or a `wipe` call without `confirm: "WIPE"` | Normally an app/version mismatch — update the app; if it persists, redeploy the latest `Code.gs`; retry the action |
 | `UNKNOWN_ACTION` | The deployed script is older than the app (or vice versa) — the action name is not in the script’s registry | Deploy `apps-script/Code.gs` again as a **New version**, then retry |
 | `LOCK_TIMEOUT` | Another device/session is syncing right now (script lock held longer than 30 s), or a previous run is still finishing | Wait a few seconds and retry; avoid pressing **Sync now** on several devices at the same moment; reduce auto-sync frequency |
-| `SECRET_NOT_ALLOWED` | A settings record whose id or field name looks like a credential was included in the push | This is the safety guard working — API keys are never allowed in the cloud. Remove/rename the offending setting locally; do not store secrets in settings ids |
+| `SECRET_NOT_ALLOWED` | A record on the **Settings** tab whose id or field name looks like a credential was included in the push | This is the safety guard working — the Settings tab never stores credentials, not even for your sync token. Remove/rename the offending setting locally; do not store secrets in settings ids. (API keys are not affected: they belong to the `ApiKeys` tab, which has its own opt-in switch) |
 | `NOT_FOUND` | The app referenced a project id that does not exist on the Sheet (it was wiped or deleted elsewhere) | Run **Sync now** on the device that owns the project so it re-uploads; if the cloud data was wiped intentionally, ignore or delete the local project |
 | `INTERNAL` | A tab is missing, its header row was edited by hand, the script is not bound to a sheet (standalone deployment without `SPREADSHEET_ID`), a Google Sheets read/write failure (tab deleted mid-sync, header changed, spreadsheet moved or access revoked), Google throttling the script (per-user execution quota or concurrent-execution limit exhausted), or an unexpected script error | Delete the damaged tab so the script recreates it, or restore the exact header row; if you deploy standalone, set the `SPREADSHEET_ID` Script Property; after throttling, wait for the quota to reset, lengthen the auto-sync interval and sync fewer devices at once; check **SyncLog** for the failing action |
 

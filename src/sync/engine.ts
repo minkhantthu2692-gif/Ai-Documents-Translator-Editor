@@ -21,9 +21,10 @@
  */
 
 import type { Table } from 'dexie'
-import { openText, type SealedPayload } from '@/core/crypto'
+import { decodeSealed, encodeSealed, openText, sealText, type SealedPayload } from '@/core/crypto'
 import { logEvent } from '@/core/eventLogger'
 import { getDeviceId } from '@/core/id'
+import { vaultPassphrase } from '@/core/vault'
 import { getDb } from '@/db/db'
 import { outboxRepo } from '@/db/repo-outbox'
 import { stampNew, stampUpdate } from '@/db/repo-common'
@@ -56,9 +57,12 @@ import {
   defaultEntityToggles,
   isSecretSettingId,
   normalizeConflictPolicy,
+  settingsToggleFor,
   toSyncErrorCode,
   type ConflictPolicy,
+  type EntityToggles,
   type SyncErrorCode,
+  type SyncToggle,
   type WireChange,
 } from './protocol'
 
@@ -75,7 +79,7 @@ export interface SyncConfig {
   autoSync: boolean
   intervalMinutes: number
   conflictPolicy: ConflictPolicy
-  entities: Record<SyncableEntity, boolean>
+  entities: EntityToggles
   /** URL + token present — i.e. a run would get past NOT_CONFIGURED. */
   configured: boolean
 }
@@ -102,6 +106,8 @@ export interface TestConnectionResult {
   latencyMs: number
   sheetNames: string[]
   serverTime: number
+  /** Entities the deployed backend declared support for (old builds omit it). */
+  entities: string[]
 }
 
 const DEFAULT_INTERVAL_MINUTES = 5
@@ -124,7 +130,7 @@ export async function readSyncConfig(): Promise<SyncConfig> {
     settingsRepo.get<boolean>(SETTING_KEYS.autoSync, true),
     settingsRepo.get<number>(SETTING_KEYS.autoSyncInterval, DEFAULT_INTERVAL_MINUTES),
     settingsRepo.get<string>(SETTING_KEYS.conflictPolicy, 'newest'),
-    settingsRepo.get<Partial<Record<SyncableEntity, boolean>>>(SETTING_KEYS.syncEntities, {}),
+    settingsRepo.get<Partial<EntityToggles>>(SETTING_KEYS.syncEntities, {}),
   ])
 
   let token = ''
@@ -144,7 +150,7 @@ export async function readSyncConfig(): Promise<SyncConfig> {
       : DEFAULT_INTERVAL_MINUTES
 
   const entityToggles = defaultEntityToggles()
-  for (const key of Object.keys(entityToggles) as SyncableEntity[]) {
+  for (const key of Object.keys(entityToggles) as SyncToggle[]) {
     if (typeof entities[key] === 'boolean') entityToggles[key] = entities[key] as boolean
   }
 
@@ -209,6 +215,17 @@ function makeClient(config: SyncConfig): SyncClient {
 /* Public probes                                                              */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Asks the backend which entities it can store.
+ *
+ * An empty set is the answer given by a Code.gs that predates the apiKeys
+ * sheet: that build omits the field instead of naming what it supports.
+ */
+async function probeEntities(client: SyncClient): Promise<Set<string>> {
+  const res = await client.ping()
+  return new Set(res.entities ?? [])
+}
+
 /** Settings → Data "Test connection": ping only, no data moves. */
 export async function testConnection(): Promise<TestConnectionResult> {
   const config = await readSyncConfig()
@@ -219,6 +236,7 @@ export async function testConnection(): Promise<TestConnectionResult> {
     latencyMs: Date.now() - started,
     sheetNames: res.sheetNames ?? [],
     serverTime: res.serverTime,
+    entities: res.entities ?? [],
   }
 }
 
@@ -271,20 +289,36 @@ export async function resetOutboxBackoff(): Promise<void> {
  * scan are guaranteed to be caught by the next run even if they land in the
  * same millisecond.
  */
-async function collectDeltas(
-  meta: SyncMetaRecord,
-  entities: Record<SyncableEntity, boolean>,
-): Promise<number> {
+async function collectDeltas(meta: SyncMetaRecord, entities: EntityToggles): Promise<number> {
   const db = getDb()
   const scanStart = Date.now()
   let collected = 0
 
   // Turning an entity ON must rescan history: rows synced (or skipped) under
   // the old cursor belong to a period when the entity was excluded.
-  const enabledTables = SYNC_SCAN_TABLES.filter((table) => entities[TABLE_TO_WIRE[table]])
-  const enabledWires = enabledTables.map((table) => TABLE_TO_WIRE[table])
+  //
+  // `settings` and `providerSettings` share one sheet, so the table is scanned
+  // when *either* is on and each row is gated individually below. The trigger
+  // therefore compares toggle keys rather than wire names — comparing wires
+  // would make turning on `settings` look like no change while
+  // `providerSettings` already enabled the table.
+  const enabledTables = SYNC_SCAN_TABLES.filter((table) => {
+    const wire = TABLE_TO_WIRE[table]
+    if (wire === 'settings') return entities.settings || entities.providerSettings
+    return entities[wire] === true
+  })
+  const enabledToggles: SyncToggle[] = []
+  for (const table of enabledTables) {
+    const wire = TABLE_TO_WIRE[table]
+    if (wire === 'settings') {
+      if (entities.settings) enabledToggles.push('settings')
+      if (entities.providerSettings) enabledToggles.push('providerSettings')
+    } else {
+      enabledToggles.push(wire)
+    }
+  }
   const previous = meta.syncedEntities
-  if (previous && enabledWires.some((wire) => !previous.includes(wire))) {
+  if (previous && enabledToggles.some((toggle) => !previous.includes(toggle))) {
     meta.pushCursor = 0
   }
 
@@ -300,13 +334,22 @@ async function collectDeltas(
       // this device's clock); future dates are remote data from a clock that
       // runs ahead — echoing them back would be pointless.
       if (Number.isFinite(updatedAt) && updatedAt > scanStart) continue
+      if (wire === 'settings' && !settingsToggleFor(String(row.id), entities)) continue
       if (wire === 'settings' && isSecretSettingId(String(row.id))) continue
       if (
         wire === 'settings' &&
         row.value &&
         typeof row.value === 'object' &&
         !Array.isArray(row.value) &&
-        Object.keys(row.value as object).some(isSecretSettingId)
+        // Only a string or a nested object/array can *hold* a credential, so
+        // only those are worth inspecting. Booleans and numbers are not —
+        // without this the `apiKeys: true` toggle inside `sync.entities` would
+        // read as a secret and freeze the entire setting locally.
+        Object.entries(row.value as Record<string, unknown>).some(
+          ([key, value]) =>
+            (typeof value === 'string' || (value !== null && typeof value === 'object')) &&
+            isSecretSettingId(key),
+        )
       ) {
         continue
       }
@@ -321,7 +364,7 @@ async function collectDeltas(
   }
 
   meta.pushCursor = scanStart - 1
-  meta.syncedEntities = enabledWires
+  meta.syncedEntities = enabledToggles
   await persistMeta(meta)
   return collected
 }
@@ -369,6 +412,78 @@ function toWireChange(row: OutboxRecord): WireChange | null {
   }
 }
 
+/**
+ * Turns outbox rows into wire changes.
+ *
+ * `apiKeys` is the one entity whose payload has to be *opened* on the way out:
+ * the row sits in IndexedDB sealed with AES-GCM while the sheet stores the
+ * plaintext the user opted into sharing. Decryption happens here — the last
+ * moment before the request is built — so no readable secret is ever written
+ * back into the outbox, and the sealed field is stripped so a cipher cannot
+ * travel by mistake.
+ *
+ * A row that cannot be opened (a vault this session has not unlocked) returns
+ * `null`, which retires the outbox row instead of failing the whole run: the
+ * key simply does not travel until the user unlocks and edits it again.
+ */
+async function toWireChanges(rows: OutboxRecord[]): Promise<(WireChange | null)[]> {
+  const out: (WireChange | null)[] = []
+  for (const row of rows) {
+    const change = toWireChange(row)
+    if (!change) {
+      out.push(null)
+      continue
+    }
+    out.push(change.entity === 'apiKeys' ? await toPlainKeyChange(change) : change)
+  }
+  return out
+}
+
+/** Shortest plaintext we will accept as a key (matches the add-key form). */
+const KEY_MIN_LENGTH = 8
+
+/**
+ * Rebuilds a key change as the opt-in plaintext payload.
+ *
+ * An explicit allow-list travels, because last-writer-wins would otherwise let
+ * one device's runtime bookkeeping (cooldowns, lifetime request counters, probe
+ * status) clobber the other's. Deletes carry no payload at all — a tombstone
+ * needs only the id and the stamp, and this is where a stale cipher would
+ * otherwise leak into the sheet.
+ */
+async function toPlainKeyChange(change: WireChange): Promise<WireChange | null> {
+  if (change.op === 'delete') return { ...change, record: {} }
+
+  const source = { ...((change.record ?? {}) as Record<string, unknown>) }
+  const cipher = typeof source.cipher === 'string' ? source.cipher : ''
+  if (!cipher) return null
+
+  let opened: string
+  try {
+    opened = await openText(decodeSealed(cipher), vaultPassphrase() ?? undefined)
+  } catch {
+    // Vault locked, or a cipher sealed by another device — nothing to send.
+    return null
+  }
+  const secret = opened.trim()
+  if (secret.length < KEY_MIN_LENGTH) return null
+
+  return {
+    ...change,
+    record: {
+      provider: typeof source.provider === 'string' ? source.provider : '',
+      label: typeof source.label === 'string' ? source.label : '',
+      models: Array.isArray(source.models) ? source.models : [],
+      enabled: source.enabled !== false,
+      lastFour: secret.slice(-4),
+      secret,
+      createdAt: Number.isFinite(Number(source.createdAt))
+        ? Number(source.createdAt)
+        : change.updatedAt,
+    },
+  }
+}
+
 /** Splits rows into ≤200-change chunks that also fit the 3MB body budget. */
 function chunkRows(rows: OutboxRecord[]): OutboxRecord[][] {
   const chunks: OutboxRecord[][] = []
@@ -395,7 +510,8 @@ async function pushPhase(
   client: SyncClient,
   meta: SyncMetaRecord,
   stats: SyncStats,
-  entities: Record<SyncableEntity, boolean>,
+  entities: EntityToggles,
+  supported: Set<string>,
 ): Promise<void> {
   let iterations = 0
   let deferredError: unknown = null
@@ -413,12 +529,36 @@ async function pushPhase(
     const pushable: OutboxRecord[] = []
     for (const row of due) {
       const wire = OUTBOX_TO_WIRE[row.entity]
-      if (!wire || (row.entity === 'settings' && isSecretSettingId(row.entityId))) {
+      if (!wire) {
         await outboxRepo.markSent(row.id)
         continue
       }
-      if (!entities[wire]) {
+      if (row.entity === 'settings') {
+        // Two toggles share this sheet: a row follows *its own* one — `ai.`-
+        // prefixed ids ride providerSettings, everything else rides settings —
+        // while credential-shaped ids are retired outright.
+        if (isSecretSettingId(row.entityId)) {
+          await outboxRepo.markSent(row.id)
+          continue
+        }
+        if (!settingsToggleFor(row.entityId, entities)) {
+          await getDb().outbox.delete(row.id)
+          continue
+        }
+      } else if (!entities[wire]) {
         await getDb().outbox.delete(row.id)
+        continue
+      }
+      if (wire === 'apiKeys' && !supported.has('apiKeys')) {
+        // Hold rather than drop. Dropping would strand the change — collect()
+        // only looks at rows newer than the push cursor — so the row keeps its
+        // backoff (capped at ten minutes) and goes out on the first run after
+        // the sheet is re-deployed with the newer Code.gs.
+        await outboxRepo.markFailed(
+          row.id,
+          'Backend predates the ApiKeys sheet — re-deploy apps-script/Code.gs, then sync again.',
+          retryDelayMs(row.attempts),
+        )
         continue
       }
       if (row.entity === 'project' && row.op === 'delete') projectDeletes.push(row)
@@ -443,7 +583,7 @@ async function pushPhase(
     }
 
     for (const chunk of chunkRows(pushable)) {
-      const changes = chunk.map(toWireChange).filter((c): c is WireChange => c !== null)
+      const changes = (await toWireChanges(chunk)).filter((c): c is WireChange => c !== null)
       if (changes.length === 0) {
         for (const row of chunk) await outboxRepo.markSent(row.id)
         continue
@@ -486,7 +626,20 @@ async function pushPhase(
 /* Pull + apply                                                               */
 /* -------------------------------------------------------------------------- */
 
-function sanitizeIncoming(change: WireChange): Record<string, unknown> | null {
+/**
+ * Normalises an incoming record for the local table, or drops it (`null`).
+ *
+ * Keys are the exception: the wire carries the **plaintext** the other device
+ * opted into sharing, and it is re-sealed here before it can touch IndexedDB —
+ * under this session's vault passphrase when one is unlocked, with the
+ * per-device secret otherwise, exactly as `keyBundle` import does. A remote
+ * `cipher` is never trusted: it was sealed on a device whose key does not
+ * exist here, so accepting it would write a row that can never be opened.
+ *
+ * Runtime bookkeeping arrives reset rather than copied: cooldowns and lifetime
+ * counters describe the *other* device's traffic.
+ */
+async function sanitizeIncoming(change: WireChange): Promise<Record<string, unknown> | null> {
   const record = { ...((change.record ?? {}) as Record<string, unknown>) }
   const table = WIRE_TO_TABLE[change.entity]
 
@@ -504,6 +657,24 @@ function sanitizeIncoming(change: WireChange): Record<string, unknown> | null {
   } else if (table === 'settings') {
     if (!('value' in record)) return null
     if (typeof record.group !== 'string') record.group = 'general'
+  } else if (table === 'apiKeys') {
+    if (typeof record.provider !== 'string' || !record.provider) return null
+    const secret = typeof record.secret === 'string' ? record.secret.trim() : ''
+    if (secret.length < KEY_MIN_LENGTH) return null
+    record.cipher = encodeSealed(await sealText(secret, vaultPassphrase() ?? undefined))
+    record.lastFour = secret.slice(-4)
+    delete record.secret
+    record.status = 'unknown'
+    record.statusDetail = ''
+    record.lastCheckedAt = null
+    record.enabled = record.enabled !== false
+    record.cooldownUntil = 0
+    record.cooldownReason = null
+    record.requests = 0
+    record.tokensIn = 0
+    record.tokensOut = 0
+    record.lastUsedAt = null
+    record.buckets = null
   }
 
   record.id = change.id
@@ -535,6 +706,29 @@ async function cascadeDelete(entity: SyncableEntity, id: string): Promise<void> 
   await table.delete(id)
 }
 
+/**
+ * Seals a key snapshot that is about to be written to the conflict log.
+ *
+ * A remote loser carries the plaintext its device pushed; a local one arrives
+ * already sealed. Either way the log must not hold a readable secret —
+ * `syncConflicts` is IndexedDB like everything else. Returns `false` only when
+ * a secret *was* carried but cannot be sealed, in which case the conflict is
+ * dropped rather than recorded in the clear.
+ */
+async function sealLoserSecret(loser: Record<string, unknown>): Promise<boolean> {
+  const carried = typeof loser.secret === 'string' ? loser.secret.trim() : ''
+  delete loser.secret
+  if (typeof loser.cipher === 'string' && loser.cipher) return true
+  // No secret at all — a delete tombstone, or a payload the sender already
+  // stripped. Nothing readable to protect, so the conflict is still worth
+  // logging.
+  if (!carried) return true
+  if (carried.length < KEY_MIN_LENGTH) return false
+  loser.cipher = encodeSealed(await sealText(carried, vaultPassphrase() ?? undefined))
+  loser.lastFour = carried.slice(-4)
+  return true
+}
+
 async function recordConflict(
   change: WireChange,
   conflict: NonNullable<ReturnType<typeof mergeRemote>['conflict']>,
@@ -545,6 +739,7 @@ async function recordConflict(
   const db = getDb()
   const loser = { ...conflict.loser }
   if (loser.id === undefined) loser.id = change.id
+  if (change.entity === 'apiKeys' && !(await sealLoserSecret(loser))) return
 
   const projectId =
     typeof (change.record ?? {}).projectId === 'string'
@@ -660,7 +855,7 @@ async function applyOne(
       await cascadeDelete(change.entity, change.id)
       stats.appliedRemote += 1
     } else {
-      const record = sanitizeIncoming(change)
+      const record = await sanitizeIncoming(change)
       if (record) {
         await table.put(record as never)
         stats.appliedRemote += 1
@@ -771,7 +966,13 @@ async function executeSync(trigger: SyncStats['trigger']): Promise<SyncStats> {
 
   try {
     stats.collected = await collectDeltas(meta, config.entities)
-    await pushPhase(client, meta, stats, config.entities)
+    // Capability handshake before the first network write. `validateChanges_`
+    // rejects an unknown entity across the *whole* request before a single row
+    // is written, so one change this deployment cannot store would fail every
+    // push in the run — key rows are held back until the server says it wants
+    // them. Inside the try so a failed probe is recorded like any other error.
+    const supported = await probeEntities(client)
+    await pushPhase(client, meta, stats, config.entities, supported)
     await outboxRepo.clearSent()
     await pullPhase(client, meta, stats, config.conflictPolicy)
 
@@ -820,6 +1021,7 @@ const RESTORE_PREFIX: Record<SyncableEntity, string> = {
   glossary: 'gl',
   settings: '',
   usageStats: 'us',
+  apiKeys: 'key',
 }
 
 /**

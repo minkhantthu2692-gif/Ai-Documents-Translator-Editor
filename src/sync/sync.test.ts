@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppDatabase, setDb } from '@/db/db'
 import { resetDeviceIdCache } from '@/core/id'
 import { outboxRepo } from '@/db/repo-outbox'
+import { apiKeyRepo } from '@/db/repo-apiKeys'
 import { glossaryRepo } from '@/db/repo-knowledge'
 import { projectRepo } from '@/db/repo-projects'
 import { SETTING_KEYS, settingsRepo } from '@/db/repo-settings'
@@ -33,8 +34,25 @@ import { defaultEntityToggles, isSyncError } from './protocol'
 /* Mock Apps Script server                                                    */
 /* -------------------------------------------------------------------------- */
 
-const SHEET_ORDER = ['projects', 'pages', 'blocks', 'glossary', 'settings', 'usageStats'] as const
-const SHEET_NAMES = ['Projects', 'Pages', 'Blocks', 'Glossary', 'Settings', 'UsageStats']
+const SHEET_ORDER = [
+  'projects',
+  'pages',
+  'blocks',
+  'glossary',
+  'settings',
+  'usageStats',
+  'apiKeys',
+] as const
+const SHEET_NAMES = [
+  'Projects',
+  'Pages',
+  'Blocks',
+  'Glossary',
+  'Settings',
+  'UsageStats',
+  'ApiKeys',
+  'SyncLog',
+]
 const EXEC_URL = 'https://script.google.example/exec'
 const TEST_TOKEN = 'test-token'
 
@@ -54,6 +72,11 @@ interface MockServer {
   pushCalls: number
   /** On the first pushChanges call, defer everything after N changes. */
   deferFirstPush: number
+  /**
+   * Wire entities `ping` advertises, or `null` to omit the field entirely —
+   * which is what a Code.gs predating the ApiKeys sheet answers with.
+   */
+  entities: string[] | null
   rows(entity: string): Row[]
   has(entity: string, id: string): boolean
 }
@@ -85,6 +108,7 @@ function createMockServer(): MockServer {
     errorCode: 'INTERNAL',
     pushCalls: 0,
     deferFirstPush: -1,
+    entities: [...SHEET_ORDER],
     rows: (entity) => [...sheets[entity].values()],
     has: (entity, id) => sheets[entity].has(id),
   }
@@ -110,8 +134,17 @@ function createMockServer(): MockServer {
     }
 
     switch (body.action) {
-      case 'ping':
-        return json({ ok: true, pong: true, serverTime: Date.now(), sheetNames: SHEET_NAMES })
+      case 'ping': {
+        const pong: Record<string, unknown> = {
+          ok: true,
+          pong: true,
+          serverTime: Date.now(),
+          sheetNames: SHEET_NAMES,
+        }
+        // Omitted (not null) when the deployment predates the ApiKeys sheet.
+        if (server.entities) pong.entities = server.entities
+        return json(pong)
+      }
 
       case 'pushChanges': {
         server.pushCalls += 1
@@ -321,9 +354,16 @@ describe('sync engine', () => {
 
   it('tests the connection with ping (no data moves)', async () => {
     const res = await testConnection()
-    expect(res.sheetNames).toHaveLength(6)
+    expect(res.sheetNames).toHaveLength(8)
+    expect(res.entities).toEqual([...SHEET_ORDER])
     expect(res.latencyMs).toBeGreaterThanOrEqual(0)
     expect(server.calls.map((call) => call.action)).toEqual(['ping'])
+  })
+
+  it('reports an older backend as supporting nothing beyond its sheets', async () => {
+    server.entities = null
+    const res = await testConnection()
+    expect(res.entities).toEqual([])
   })
 
   it('converges two browsers through one sheet', async () => {
@@ -516,6 +556,127 @@ describe('sync engine', () => {
     )
     await syncNow('manual')
     expect(server.rows('settings').some((row) => row.id === 'ui.language')).toBe(true)
+  })
+
+  it('splits provider settings from the rest of the settings', async () => {
+    await settingsRepo.set('ai.model.gemini', 'gemini-2.0-flash', 'ai')
+    await settingsRepo.set('ui.language', 'my', 'ui')
+
+    // Defaults: provider config travels, everything else waits for its toggle.
+    await syncNow('manual')
+    expect(server.rows('settings').map((row) => row.id)).toEqual(['ai.model.gemini'])
+
+    // Turning the general toggle on must not drag `ai.` rows along with it.
+    await settingsRepo.set(
+      SETTING_KEYS.syncEntities,
+      { ...defaultEntityToggles(), settings: true, providerSettings: false },
+      'sync',
+    )
+    await sleep(2)
+    await settingsRepo.set('ai.model.gemini', 'gemini-2.5-pro', 'ai')
+    await settingsRepo.set('ui.theme', 'dark', 'ui')
+    await syncNow('manual')
+
+    const ids = server.rows('settings').map((row) => row.id)
+    expect(ids).toContain('ui.language')
+    expect(ids).toContain('ui.theme')
+    expect(server.rows('settings').find((row) => row.id === 'ai.model.gemini')?.value).toBe(
+      'gemini-2.0-flash',
+    )
+  })
+
+  it('does not mistake the boolean apiKeys toggle inside a setting for a secret', async () => {
+    // `sync.entities` holds `{ ..., apiKeys: true }`. Its *name* is
+    // credential-shaped, but a boolean can never be a credential — and the
+    // value filter used to drop the whole setting, freezing every toggle.
+    await settingsRepo.set(
+      SETTING_KEYS.syncEntities,
+      { ...defaultEntityToggles(), settings: true },
+      'sync',
+    )
+    await syncNow('manual')
+
+    const row = server.rows('settings').find((entry) => entry.id === SETTING_KEYS.syncEntities)
+    expect(row).toBeDefined()
+    expect(JSON.stringify(row?.value)).toContain('apiKeys')
+  })
+
+  it('writes keys to the sheet in plain text only after the opt-in, and re-seals them on pull', async () => {
+    const SECRET = 'AIzaSyTestKeyForSyncRoundTrip'
+    const created = await apiKeyRepo.create({
+      provider: 'gemini',
+      label: 'Main',
+      secret: SECRET,
+      models: ['gemini-2.0-flash'],
+      passphrase: null,
+    })
+
+    // Off by default — no key leaves this device.
+    await syncNow('manual')
+    expect(server.rows('apiKeys')).toHaveLength(0)
+
+    await settingsRepo.set(
+      SETTING_KEYS.syncEntities,
+      { ...defaultEntityToggles(), apiKeys: true },
+      'sync',
+    )
+    await syncNow('manual')
+
+    const pushed = server.rows('apiKeys')
+    expect(pushed).toHaveLength(1)
+    expect(pushed[0].id).toBe(created.id)
+    expect(pushed[0].secret).toBe(SECRET)
+    expect(pushed[0].lastFour).toBe(SECRET.slice(-4))
+    // The sealed payload never travels, and this device's runtime counters
+    // (cooldowns, requests, buckets) stay behind — LWW would clobber them.
+    expect(pushed[0].cipher).toBeUndefined()
+    expect(pushed[0].requests).toBeUndefined()
+    expect(pushed[0].buckets).toBeUndefined()
+
+    // Device B pulls it back and re-seals it locally before it is stored.
+    activate(dbB, 'BBB01')
+    await configure()
+    await settingsRepo.set(
+      SETTING_KEYS.syncEntities,
+      { ...defaultEntityToggles(), apiKeys: true },
+      'sync',
+    )
+    await syncNow('manual')
+
+    const imported = (await apiKeyRepo.list())[0]
+    expect(imported?.provider).toBe('gemini')
+    expect(await apiKeyRepo.reveal(imported!.id)).toBe(SECRET)
+    const stored = await dbB.apiKeys.get(imported!.id)
+    expect(String(stored?.cipher)).not.toContain(SECRET)
+  })
+
+  it('holds key rows when the backend predates the ApiKeys sheet', async () => {
+    await apiKeyRepo.create({
+      provider: 'gemini',
+      label: 'Held',
+      secret: 'AIzaSyHeldUntilRedeployed0000',
+      passphrase: null,
+    })
+    await settingsRepo.set(
+      SETTING_KEYS.syncEntities,
+      { ...defaultEntityToggles(), apiKeys: true },
+      'sync',
+    )
+    await projectRepo.create({ name: 'Still syncs', sourceLang: 'en', targetLang: 'my' })
+    server.entities = null // an old Code.gs: ping has no `entities` field
+
+    const stats = await syncNow('manual')
+    // One unsupported entity must never fail the rest of the batch.
+    expect(server.rows('projects')).toHaveLength(1)
+    expect(server.rows('apiKeys')).toHaveLength(0)
+    expect(stats.pushed).toBeGreaterThanOrEqual(1)
+    // …and the key row is held rather than dropped, so it survives.
+    expect(await outboxRepo.pendingCount()).toBe(1)
+
+    server.entities = [...SHEET_ORDER] // sheet re-deployed with the new Code.gs
+    await syncNow('manual')
+    expect(server.rows('apiKeys')).toHaveLength(1)
+    expect(await outboxRepo.pendingCount()).toBe(0)
   })
 
   it('wipes the cloud, rewinds cursors and keeps local data', async () => {

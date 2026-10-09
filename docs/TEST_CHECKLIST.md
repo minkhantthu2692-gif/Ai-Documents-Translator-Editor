@@ -29,7 +29,10 @@ PowerShell 5.1 note: run the commands one at a time — `&&` does not work there
 - [ ] `.env.example documents the three VITE_ variables`
 - [ ] `.gitignore excludes .env (secrets stay local)`
 - [ ] `sync status line renders a valid state` (`data-state` ∈ disabled/idle/syncing/error/offline)
-- [ ] `sync controls present` (9/9) and `per-entity sync toggles present` (6/6)
+- [ ] `sync controls present` (9/9) and `per-entity sync toggles present` (8/8)
+- [ ] `API key sync is off by default and warns loudly when enabled` — toggle flips, the plaintext
+      warning appears only while it is on, and the switch is restored
+- [ ] `Apps Script setup card offers both downloads and the guide` + `Apps Script guide renders six steps`
 - [ ] backup file input still unique + export/import/delete-local buttons present
 - [ ] assistant dialog opens, mode badge = `offline`, ≥ 3 safe actions, rate-limit explained
 - [ ] `launcher.html renders from file:// with all controls` (6/6 ids) + copyable commands

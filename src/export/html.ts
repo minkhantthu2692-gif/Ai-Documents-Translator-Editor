@@ -18,7 +18,16 @@
  */
 
 import { directionOf } from '@/lib/text'
-import { escapeHtml, fontStackFor, langTag, listPrefix, pageBlocks, pt, round } from './shared'
+import {
+  escapeHtml,
+  fontStackFor,
+  headingOffset,
+  langTag,
+  listPrefix,
+  pageBlocks,
+  pt,
+  round,
+} from './shared'
 import type { ExportBlock, ExportDocument, ExportOptions } from './types'
 
 export type HtmlLayout = 'absolute' | 'flow'
@@ -109,9 +118,14 @@ function blockHtml(block: ExportBlock, options: HtmlOptions, classes: string[]):
         }text-align:${alignmentOf(block)}`
   const flagged = block.overflow ? ' overflow' : block.hasSuggestion ? ' suggested' : ''
 
+  // The screen export opens with an `<h1>` title; the printed one has no
+  // header at all, so its blocks start at level 1.
+  const level = headingOffset(block, options.mode === 'print' ? 0 : 1)
+  const tag = level === null ? 'div' : `h${level}`
+
   return (
-    `<div class="${classes.join(' ')}${flagged}" data-block-id="${escapeHtml(block.id)}"` +
-    `${dir} style="${style}">${content}</div>`
+    `<${tag} class="${classes.join(' ')}${flagged}" data-block-id="${escapeHtml(block.id)}"` +
+    `${dir} style="${style}">${content}</${tag}>`
   )
 }
 
@@ -136,10 +150,15 @@ function absolutePage(
 
 function flowPage(page: ExportDocument['pages'][number], options: HtmlOptions): string {
   const rows: string[] = []
+  // Same offset as the absolute layout: the screen export opens with an `<h1>`
+  // title, the printed one has no header at all.
+  const levelsAbove = options.mode === 'print' ? 0 : 1
   for (const block of pageBlocks(page)) {
     const source = block.sourceText
     const target = block.translatedText.length > 0 ? block.translatedText : block.sourceText
     const pair = options.bilingual === 'side-by-side' ? ' pair' : ''
+    const level = headingOffset(block, levelsAbove)
+    const tag = level === null ? 'p' : `h${level}`
 
     if (options.includeOriginal && source.trim().length > 0 && source !== target) {
       const sourceIsRtl = directionOf(source) === 'rtl'
@@ -150,9 +169,9 @@ function flowPage(page: ExportDocument['pages'][number], options: HtmlOptions): 
             sourceIsRtl ? ' dir="rtl"' : ''
           }">` +
           `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${escapeHtml(source)}</p>` +
-          `<p class="tgt" data-block-id="${escapeHtml(block.id)}" dir="${
+          `<${tag} class="tgt" data-block-id="${escapeHtml(block.id)}" dir="${
             block.direction === 'rtl' ? 'rtl' : 'ltr'
-          }">${escapeHtml(target)}</p>` +
+          }">${escapeHtml(target)}</${tag}>` +
           `</div>`,
       )
     } else {
@@ -160,9 +179,9 @@ function flowPage(page: ExportDocument['pages'][number], options: HtmlOptions): 
       if (text.trim().length === 0) continue
       const marker = listPrefix(block, text)
       rows.push(
-        `<p class="tgt" data-block-id="${escapeHtml(block.id)}"` +
+        `<${tag} class="tgt" data-block-id="${escapeHtml(block.id)}"` +
           ` dir="${block.direction === 'rtl' ? 'rtl' : 'ltr'}">` +
-          `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${escapeHtml(text)}</p>`,
+          `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${escapeHtml(text)}</${tag}>`,
       )
     }
   }
@@ -220,6 +239,11 @@ ${print ? '.page { border: none; }' : ''}
   white-space: pre-wrap;
   word-break: normal;
   overflow-wrap: break-word;
+  /* A heading emitted as h1-h6 must render exactly like the div it replaced:
+     no UA margin, and the UA's bold replaced by the block's own weight (the
+     inline font-weight still wins when the block is bold). */
+  margin: 0;
+  font-weight: inherit;
   ${print ? 'break-inside: avoid; page-break-inside: avoid;' : ''}
 }
 .block .marker { font-weight: 700; }
@@ -233,6 +257,9 @@ ${print ? '.page { border: none; }' : ''}
   overflow-wrap: break-word;
   font-size: 11pt;
   line-height: 1.7;
+  /* A heading rendered as h1-h6 keeps the paragraph's weight, so the tag
+     carries structure and nothing else. */
+  font-weight: inherit;
 }
 .page.flow .src { color: #6b7280; font-size: 10pt; }
 .page.flow .pair { display: grid; gap: 10pt; margin-bottom: 10pt; }

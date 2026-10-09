@@ -75,6 +75,14 @@ export interface ExportBlock {
   bold: boolean
   italic: boolean
   listMarker: string | null
+  /**
+   * 1..6 when `kind === 'heading'`, else null. The number is only meaningful
+   * relative to the other headings in the document, so a builder that already
+   * emits structural headings of its own (a title, a `## Page N`) must offset
+   * by them rather than print the raw level — see `headingOffset` in
+   * `shared.ts`.
+   */
+  headingLevel: number | null
   sourceText: string
   translatedText: string
   characterCount: number

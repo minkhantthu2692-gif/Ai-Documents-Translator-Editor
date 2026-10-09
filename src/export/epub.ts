@@ -26,6 +26,7 @@ import {
   cssFontName,
   escapeHtml,
   fontStackFor,
+  headingOffset,
   langTag,
   listPrefix,
   pageBlocks,
@@ -47,6 +48,13 @@ export interface EpubOptions {
 
 /** Source pages per chapter — keeps the navigation document small. */
 const PAGES_PER_CHAPTER = 20
+
+/**
+ * Level of the deepest structural heading a chapter prints above its blocks:
+ * each page opens with an `<h2>Page N</h2>`, so the document's own headings
+ * have to start at `h3`. Anything deeper than `h6` clamps (see `headingOffset`).
+ */
+const CHAPTER_LEVELS_ABOVE = 2
 
 /** EPUB requires this exact first entry, stored uncompressed. */
 const MIMETYPE = 'application/epub+zip'
@@ -102,19 +110,33 @@ function chapterLabel(pages: ExportPage[]): string {
   return first === last ? `Page ${first}` : `Page ${first}–${last}`
 }
 
-/** One `<p>`: classes (`source`/`block`/`rtl`), lang, direction and style. */
-function paragraph(text: string, classes: readonly string[], lang: string, style: string): string {
+/** One paragraph: classes (`source`/`block`/`rtl`), lang, direction and style. */
+function paragraph(
+  text: string,
+  classes: readonly string[],
+  lang: string,
+  style: string,
+  heading: number | null = null,
+): string {
   const rtl = directionOf(text) === 'rtl'
   const all = rtl ? [...classes, 'rtl'] : classes
   const dir = rtl ? ' dir="rtl"' : ''
   const safeLang = escapeHtml(lang)
-  return `<p class="${escapeHtml(all.join(' '))}" xml:lang="${safeLang}" lang="${safeLang}"${dir}${style}>${escapeHtml(text)}</p>`
+  // A heading keeps its classes and inline style and only changes tag, so the
+  // reader's own heading stylesheet is what makes it stand out — the same way
+  // it did in the source PDF, where it was simply set larger.
+  const tag = heading === null ? 'p' : `h${heading}`
+  return `<${tag} class="${escapeHtml(all.join(' '))}" xml:lang="${safeLang}" lang="${safeLang}"${dir}${style}>${escapeHtml(text)}</${tag}>`
 }
 
 /**
  * The paragraphs for one block: the primary text always first (carrying the
  * list marker), then — with `includeOriginal` — the translation on its own
  * paragraph. Blocks whose text is empty contribute nothing.
+ *
+ * Exactly one of them carries the heading level, and it is the one holding
+ * the translation (falling back to the source when there is no translation
+ * yet) — a bilingual book would otherwise list every heading twice.
  */
 function blockParagraphs(block: ExportBlock, doc: ExportDocument, options: EpubOptions): string[] {
   const { source, target, primary } = textOf(block, options.includeOriginal)
@@ -127,12 +149,22 @@ function blockParagraphs(block: ExportBlock, doc: ExportDocument, options: EpubO
   } else if (primary.trim().length > 0) {
     entries.push({ text: primary, source: false })
   }
+  const headingIndex = Math.max(
+    0,
+    entries.findIndex((entry) => !entry.source),
+  )
   const fontStack = escapeHtml(fontStackFor(block, { fontStack: options.fontStack }))
   const style = ` style="font-family: ${fontStack}"`
   return entries.map((entry, index) => {
     const lang = entry.source ? langTag(doc.sourceLang) : langTag(doc.targetLang)
     const text = index === 0 ? `${listPrefix(block, entry.text)}${entry.text}` : entry.text
-    return paragraph(text, entry.source ? ['source', 'block'] : ['block'], lang, style)
+    return paragraph(
+      text,
+      entry.source ? ['source', 'block'] : ['block'],
+      lang,
+      style,
+      index === headingIndex ? headingOffset(block, CHAPTER_LEVELS_ABOVE) : null,
+    )
   })
 }
 

@@ -6,6 +6,7 @@ import {
   cssFontName,
   fileNameFor,
   fontStackFor,
+  headingOffset,
   isDocumentEmpty,
   langTag,
   listPrefix,
@@ -36,6 +37,7 @@ function block(overrides: Partial<ExportBlock> = {}): ExportBlock {
     bold: false,
     italic: false,
     listMarker: null,
+    headingLevel: null,
     sourceText: 'Hello',
     translatedText: 'မင်္ဂလာပါ',
     characterCount: 10,
@@ -199,5 +201,31 @@ describe('file names and language tags', () => {
   it('rounds geometry helpers', () => {
     expect(round(1.23999, 2)).toBe(1.24)
     expect(round(1.5)).toBe(1.5)
+  })
+})
+
+describe('headingOffset', () => {
+  it('leaves anything that is not a heading alone', () => {
+    expect(headingOffset(block(), 1)).toBeNull()
+    expect(headingOffset(block({ headingLevel: null }), 0)).toBeNull()
+  })
+
+  it('pushes a heading below the structural headings printed above it', () => {
+    expect(headingOffset(block({ headingLevel: 1 }), 0)).toBe(1)
+    expect(headingOffset(block({ headingLevel: 1 }), 1)).toBe(2)
+    expect(headingOffset(block({ headingLevel: 2 }), 2)).toBe(4)
+  })
+
+  it('clamps at six, the deepest any format can render', () => {
+    expect(headingOffset(block({ headingLevel: 6 }), 1)).toBe(6)
+    expect(headingOffset(block({ headingLevel: 5 }), 1)).toBe(6)
+    // The clamp can merge the deepest levels once a builder has spent some
+    // above them — the trade for never colliding with those.
+    expect(headingOffset(block({ headingLevel: 4 }), 2)).toBe(6)
+  })
+
+  it('never returns a level below one, whatever the record says', () => {
+    expect(headingOffset(block({ headingLevel: 0 }), 0)).toBe(1)
+    expect(headingOffset(block({ headingLevel: -3 }), 0)).toBe(1)
   })
 })

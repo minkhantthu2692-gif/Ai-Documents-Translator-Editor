@@ -131,6 +131,12 @@ export interface BlockRecord extends BaseRecord {
   placeholders: Placeholder[]
   /** Bullet / numbering marker (`•`, `1.`) captured from the first line. */
   listMarker: string | null
+  /**
+   * 1..6 for `kind === 'heading'`, else null — the depth inside the document's
+   * own heading ladder. Written by extraction; a row from before heading
+   * levels existed simply has no value and every reader must default it.
+   */
+  headingLevel?: number | null
   /** 0..1 heuristic quality of the last successful translation (null = none). */
   translationConfidence: number | null
   /** Flag from the last translation pass (null = clean). */

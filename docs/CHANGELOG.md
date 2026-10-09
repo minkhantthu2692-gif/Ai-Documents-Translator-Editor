@@ -46,6 +46,13 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   per-device version vector); the token setting is stored sealed and never synced.
 - Documentation: `docs/ARCHITECTURE.md`, `docs/SECURITY.md`, `docs/DEPLOYMENT.md`,
   `docs/CONTRIBUTING.md`, `docs/CHANGELOG.md`, `docs/LICENSE`, `README.md`, `README.my.md`.
+- **Heading hierarchy** in PDF extraction (phase (c) of `docs/PDF_TYPES_SUPPORT.md`): the probe
+  builds one document-wide ladder of heading font sizes (`src/pdf/headings.ts`) and every page
+  levels its headings 1–6 against it, so a section keeps its depth even on pages where its
+  chapter title is absent. HTML emits `h1`–`h6`, DOCX `HeadingLevel.HEADING_1–6`, EPUB chapter
+  headings and Markdown ATX hashes — each offset past the structural headings that builder
+  already prints and clamped at six, with `.block` neutralising the browser's default heading
+  styles so the printed page is unchanged.
 
 ### Security
 

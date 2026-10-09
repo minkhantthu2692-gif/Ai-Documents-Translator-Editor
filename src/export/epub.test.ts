@@ -22,6 +22,7 @@ function block(partial: Partial<ExportBlock>): ExportBlock {
     bold: false,
     italic: false,
     listMarker: null,
+    headingLevel: null,
     sourceText: '',
     translatedText: '',
     characterCount: 0,
@@ -242,5 +243,35 @@ describe('buildEpub', () => {
     expectWellFormed(await zipText(zip, 'OEBPS/content.opf'), 'content.opf')
     expectWellFormed(await zipText(zip, 'OEBPS/nav.xhtml'), 'nav.xhtml')
     expectWellFormed(await zipText(zip, 'OEBPS/text/chap_1.xhtml'), 'chap_1.xhtml')
+  })
+
+  it('nests a document heading under the per-page heading', async () => {
+    const doc: ExportDocument = {
+      ...fixtureDoc(),
+      pages: [
+        page(0, [
+          block({
+            id: 'sec',
+            kind: 'heading',
+            headingLevel: 1,
+            sourceText: 'Chapter One',
+            translatedText: 'အချက်တစ်ခု',
+          }),
+          block({ id: 'body', order: 1, sourceText: 'Body copy', translatedText: 'ကိုယ်ထည်' }),
+        ]),
+      ],
+    }
+    const zip = await JSZip.loadAsync(await buildEpub(doc, epubOptions()))
+    const chapter = await zipText(zip, 'OEBPS/text/chap_1.xhtml')
+
+    // Each page opens at h2, so the document's own hierarchy starts at h3.
+    expect(chapter).toContain('<h2>Page 1</h2>')
+    expect(chapter).toContain('<h3 class="block" xml:lang="my" lang="my"')
+    expect(chapter).toContain('>အချက်တစ်ခု</h3>')
+    // A body block is still a paragraph, and only one outline entry is added
+    // per heading even though the source and the translation both exist.
+    expect(chapter).toContain('<p class="block"')
+    expect(chapter.match(/<h3 /g)).toHaveLength(1)
+    expectWellFormed(chapter, 'chap_1.xhtml')
   })
 })

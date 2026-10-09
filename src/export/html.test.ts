@@ -21,6 +21,7 @@ function block(overrides: Partial<ExportDocument['pages'][number]['blocks'][numb
     bold: false,
     italic: false,
     listMarker: null,
+    headingLevel: null,
     sourceText: 'Hello world',
     translatedText: 'မြန်မာစာ စာသား',
     characterCount: 11,
@@ -285,5 +286,59 @@ describe('multi-page documents', () => {
     expect(html.match(/<section class="page /g)?.length).toBe(2)
     expect(html).toContain('@page p595x842 { size: 595pt 842pt; margin: 0; }')
     expect(html).toContain('.page.p595x842 { page: p595x842; }')
+  })
+})
+
+describe('heading hierarchy', () => {
+  function headingDoc(headingLevel: number | null, kind: 'heading' | 'paragraph' = 'heading') {
+    return doc({
+      pages: [
+        {
+          index: 0,
+          width: 612,
+          height: 792,
+          rotation: 0,
+          contentClass: 'text',
+          blocks: [block({ kind, headingLevel })],
+        },
+      ],
+    })
+  }
+
+  it('emits a heading tag instead of a div, below the screen title', () => {
+    const html = buildHtmlDocument(headingDoc(1), base)
+    expect(html).toContain('<h2 class="block" data-block-id="blk_1"')
+    expect(html).toContain('</h2>')
+    expect(html).not.toContain('<div class="block"')
+  })
+
+  it('starts at level 1 in the printed document, which has no title header', () => {
+    const html = buildHtmlDocument(headingDoc(1), { ...base, mode: 'print' })
+    expect(html).toContain('<h1 class="block" data-block-id="blk_1"')
+  })
+
+  it('keeps a non-heading block a div', () => {
+    const html = buildHtmlDocument(headingDoc(null, 'paragraph'), base)
+    expect(html).toContain('<div class="block" data-block-id="blk_1"')
+  })
+
+  it('neutralises the browser heading styles, so the printed page is unchanged', () => {
+    const html = buildHtmlDocument(headingDoc(3), { ...base, mode: 'print' })
+    expect(html).toMatch(/\.block \{[^}]*margin: 0;/)
+    expect(html).toMatch(/\.block \{[^}]*font-weight: inherit;/)
+    // The geometry that decides how the page prints is still on the element.
+    expect(html).toContain('<h3 class="block" data-block-id="blk_1"')
+    expect(html).toContain('left:72pt')
+  })
+
+  it('tags the translation, not the source, in a bilingual flow', () => {
+    const html = buildHtmlDocument(headingDoc(1), {
+      ...base,
+      layout: 'flow',
+      includeOriginal: true,
+      bilingual: 'side-by-side',
+    })
+    expect(html).toContain('<p class="src"')
+    expect(html).toMatch(/<h\d class="tgt" data-block-id="blk_1"/)
   })
 })

@@ -22,6 +22,7 @@ function block(overrides: Partial<ExportBlock>): ExportBlock {
     bold: false,
     italic: false,
     listMarker: null,
+    headingLevel: null,
     sourceText: '',
     translatedText: '',
     characterCount: 0,
@@ -286,5 +287,68 @@ describe('buildMarkdown', () => {
     })
     expect(out).toContain('မြန်မာစာ')
     expect(out).toContain('مرحبا بالعالم')
+  })
+})
+
+describe('heading hierarchy', () => {
+  function headingDoc(levels: Array<number | null>): ExportDocument {
+    return {
+      ...makeDoc(),
+      pages: [
+        {
+          index: 0,
+          width: 612,
+          height: 792,
+          rotation: 0,
+          contentClass: 'text',
+          blocks: levels.map((headingLevel, index) =>
+            block({
+              id: `h${index}`,
+              order: index,
+              kind: 'heading',
+              headingLevel,
+              sourceText: `Section ${index}`,
+              translatedText: `အချက် ${index}`,
+              status: 'translated',
+            }),
+          ),
+        },
+      ],
+    }
+  }
+
+  const opts = (includePageHeadings: boolean) => ({
+    title: 'Sample',
+    includeOriginal: false,
+    includePageHeadings,
+  })
+
+  it('sits below the title, never on the title’s own level', () => {
+    const out = buildMarkdown(headingDoc([1, 2, 3]), opts(false))
+    expect(out).toContain('## အချက် 0')
+    expect(out).toContain('### အချက် 1')
+    expect(out).toContain('#### အချက် 2')
+    expect(out.startsWith('# Sample\n')).toBe(true)
+    expect(out.split('\n').some((line) => line.startsWith('# အချက်'))).toBe(false)
+  })
+
+  it('drops another level when the page headings take one', () => {
+    const withPages = buildMarkdown(headingDoc([1]), opts(true))
+    expect(withPages).toContain('## Page 1\n\n### အချက် 0')
+
+    const withoutPages = buildMarkdown(headingDoc([1]), opts(false))
+    expect(withoutPages).toContain('## အချက် 0')
+  })
+
+  it('clamps at six hashes, the deepest Markdown renders', () => {
+    const out = buildMarkdown(headingDoc([4, 5, 6]), opts(true))
+    expect(out).not.toContain('#######')
+    expect(out.match(/###### /g)).toHaveLength(3)
+  })
+
+  it('leaves a block with no level alone, whatever its kind says', () => {
+    const out = buildMarkdown(headingDoc([null]), opts(false))
+    expect(out).toContain('အချက် 0')
+    expect(out.split('\n').some((line) => line.startsWith('# အချက်'))).toBe(false)
   })
 })

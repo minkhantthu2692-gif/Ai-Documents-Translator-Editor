@@ -108,6 +108,13 @@ export interface ProjectAnalysis {
   fonts: FontStats
   headerTexts: string[]
   footerTexts: string[]
+  /**
+   * The document's heading ladder. Optional: a row written before heading
+   * levels existed has no ladder, and extraction then ranks each page's own
+   * headings instead (the level is right within the page, shallow across
+   * pages).
+   */
+  headingSizes?: number[]
   analyzedAt: number
 }
 
@@ -139,6 +146,7 @@ function toProjectAnalysis(probe: ProbeResult): ProjectAnalysis {
     fonts: info.fonts,
     headerTexts: summary.headerTexts,
     footerTexts: summary.footerTexts,
+    headingSizes: summary.headingSizes ?? [],
     analyzedAt: Date.now(),
   }
 }
@@ -228,6 +236,7 @@ function toBlockPatch(
     skipRule: block.skipRule,
     placeholders: block.placeholders,
     listMarker: block.listMarker,
+    headingLevel: block.headingLevel,
     // A re-parse re-reads the PDF: any auto-fit/manual size and any overflow
     // warning from the previous layout are stale the moment geometry changes.
     fontSizeMode: 'original',

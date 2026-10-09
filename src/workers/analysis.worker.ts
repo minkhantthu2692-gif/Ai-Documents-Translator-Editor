@@ -258,6 +258,7 @@ async function handleExtract(request: ExtractRequest): Promise<void> {
         ...(request.ctx ? { ctx: request.ctx } : {}),
         ...(request.headerTexts ? { headerTexts: request.headerTexts } : {}),
         ...(request.footerTexts ? { footerTexts: request.footerTexts } : {}),
+        ...(request.headingSizes ? { headingSizes: request.headingSizes } : {}),
         ...(request.convertZawgyi !== undefined ? { convertZawgyi: request.convertZawgyi } : {}),
       })
       pages.push(extracted)

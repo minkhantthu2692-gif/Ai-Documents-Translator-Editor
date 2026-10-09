@@ -53,7 +53,7 @@ beyond one cached probe. Configure with `VITE_PDF_SIDECAR_URL` (default
 | 4  | Multi-Column PDF (2/3-col, newspaper, reading order) | ✅     | `complex` classification for ≥3 columns ✅ (item-level gutter detection); reading order ✅ — rows fused across a gutter are cut back into one line per column, columns are read left-to-right (2–4), and a title spanning the fold opens its own zone ahead of both columns |
 | 5  | PDF With Images (captions, diagrams, charts) | 🔶 | Images kept in the page render/background ✅; image-anchored extraction + caption linkage in phase c |
 | 6  | PDF With Tables (simple/complex, merged cells, multi-page) | 🔶→⏳ | Row detection + table blocks ✅ (text representation); table rows are explicitly exempt from the column split so merging cells stay one row; pdfplumber cell extraction implemented in the sidecar server (frontend integration pending), merged cells/multi-page ❌ |
-| 7  | Academic / Research PDF (footnotes, refs, citations, equations) | 🔶→⏳ | 2-column papers classified `text` ✅ and read in column order ✅; footnote regions ✅ (see below); heading hierarchy in phase c; equations ❌ (see #23) |
+| 7  | Academic / Research PDF (footnotes, refs, citations, equations) | 🔶→⏳ | 2-column papers classified `text` ✅ and read in column order ✅; footnote regions ✅ (see below); heading hierarchy ✅ — every heading carries a 1–6 level from a document-wide ladder (see below); equations ❌ (see #23) |
 | 8  | Business / Report PDF (reports, invoices, financial) | 🔶 | Paragraph/table extraction ✅; invoice form layout understanding ❌ |
 | 9  | Forms / Structured PDF (fillable, checkboxes, signatures) | 🔶 | Field detection/counted in probe ✅, password-style unlock flow ✅; translating labels in phase c; form filling ❌ (out of scope) |
 | 10 | Presentation PDF (slides, big headings, text boxes) | 🔶→⏳ | Size-spread/complexity signal ✅; per-slide text-box reading order in phase c |
@@ -80,7 +80,7 @@ beyond one cached probe. Configure with `VITE_PDF_SIDECAR_URL` (default
 | (a) Classification | `complex` class, complexity scoring, item-level column detection, wizard metadata | 4, 12, 22 classification ✅ |
 | (b) Extraction methods | Browser Tesseract OCR auto-runs per window (status lifecycle, confidence, cached recognition), hybrid merge with geometric dedup, run-OCR setting persisted per project, Python sidecar server (protocol v1, 20 tests) | 2, 3 extraction ✅ |
 | (b2) Sidecar wiring | `src/sidecar/sidecarClient.ts`: cached `GET /health` probe, `POST /ocr` with page/language/password, per-line confidence added to the server response, lazy render so a sidecar page never rasterises in the browser, automatic fall-back to browser Tesseract on any failure (22 client + 5 pipeline + 1 Python test) | 2 extraction ✅ with a native-OCR fast path |
-| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. `fixtures/complex.pdf` (3 columns + rotated watermark) now reads col 1 → col 2 → col 3 → watermark end-to-end. **Footnote regions ✅** — `src/pdf/footnotes.ts` marks them before any merging happens. Remaining in this phase: real table cells, links, code blocks, headings | 4 ✅, reading order for 3 / 7 / 12 ✅, footnotes for 7 / 11 / 14 ✅; then 5, 6, 9, 13, 19, 24, 25 |
+| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. `fixtures/complex.pdf` (3 columns + rotated watermark) now reads col 1 → col 2 → col 3 → watermark end-to-end. **Footnote regions ✅** — `src/pdf/footnotes.ts` marks them before any merging happens. **Heading hierarchy ✅** — `src/pdf/headings.ts` builds one document-wide ladder of heading font sizes during the probe and every page levels its headings against it; exporters render `h1`–`h6`, `HeadingLevel.HEADING_1–6` and ATX hashes. Remaining in this phase: real table cells, links, code blocks | 4 ✅, reading order for 3 / 7 / 12 ✅, footnotes for 7 / 11 / 14 ✅, heading hierarchy for 7 ✅; then 5, 6, 9, 13, 19, 24, 25 |
 | (d) Layout auto-adjust | Auto-fit/reflow when translated text grows (EN→MY), export height handling | 1, 8, 10, 12 (translation-time layout) |
 
 ### Why reading order needed two detectors
@@ -185,6 +185,45 @@ source and target lines differ, and only one of them may carry the bullet.
 `json` and `delimited` keep the raw pair (`sourceText` with `listMarker`) —
 they are data exports, and dropping either half would lose information.
 
+### Why a heading's level is decided by the whole document
+
+`structurePage` only has to answer *is this a heading?* — larger than the page's
+body median and short enough to be a title. *How deep* it is cannot be answered
+from the page in front of it, because the headings that give it meaning are on
+other pages: a chapter title appears once, and every page after it carries only
+the sections beneath it. Rank a single page and `3.2 Methods` becomes a level-1
+heading on the pages where its chapter is not present.
+
+The ladder is therefore built where all the pages are in hand — `headingTiers`
+runs over the probe's line list and returns the document's heading font sizes
+largest first — and travels down the same channel running heads and feet
+already use: `ProbeSummary.headingSizes` → `ProjectAnalysis.headingSizes` → the
+`extract` request → `StructureOptions.headingSizes`. Two sizes agreeing to
+within 5% are one level (a converter hands back 14.0 on one page and 14.2 on the
+next, and a level spent on the difference pushes every real level below it down
+one); at most six rungs are kept, because six is as deep as HTML, docx and
+Markdown go.
+
+A page with no ladder ranks its own headings instead. That is not only the
+fallback for a project probed before the field existed — it is what OCR pages
+always do, deliberately: tesseract reports the *line box* rather than the type
+size, so OCR sizes run larger than the text layer's and mapping them onto the
+document's absolute rungs would lift every scanned heading. The consequence is
+that a hybrid page's two halves can differ by one level; each half is
+consistent with itself.
+
+The exported level is never printed raw. `headingOffset(block, levelsAbove)`
+shifts it past whatever structural headings the builder already emits — the
+`#` title, an optional `## Page N`, an EPUB chapter's `<h2>` — so a document
+heading can never land on the same level as one of them, and clamps at six
+afterwards. The tag change is otherwise **invisible**: HTML gives `.block`
+`margin: 0; font-weight: inherit`, so `<h3>` renders like the `<div>` it
+replaces and the printed page does not move by a point. In a bilingual export
+exactly one paragraph per block takes the level, and it is the translation's —
+a navigation pane should name what the document became, not repeat the text the
+reader already had. Blocks parsed before this change carry `kind: 'heading'`
+with no level and export as ordinary paragraphs until the page is re-parsed.
+
 _Known limitations carried over: table cell truncation at 45k characters,
 style reset on re-parse, no equation rendering (type 23). Reading order is
 unit-tested against synthetic column geometries (2/3/4 columns, fused rows,
@@ -195,4 +234,6 @@ likewise tested on synthetic geometry: a
 note set at the *same* size as the body is not detected (nothing separates it
 but the horizontal rule above it, which is a graphics path pdf.js never hands
 over), and a page whose text is mostly note type reports the note size as its
-body median — so neither is recognised._
+body median — so neither is recognised. Heading levels have the same caveat:
+the ladder is exercised against generated fixtures, and no real academic paper
+has been through it end-to-end._

@@ -105,6 +105,23 @@ export function listPrefix(block: ExportBlock, text?: string): string {
   return `${marker} `
 }
 
+/**
+ * Heading level a builder should actually emit for `block`.
+ *
+ * The extracted level counts *inside the document's own headings* (1..6) but
+ * every structural heading a builder puts above them — the document title, an
+ * optional `## Page N` — occupies the levels before it. Offsetting keeps the
+ * block's own hierarchy intact while making sure no block heading lands on the
+ * same level as one of them; the result is clamped to six because that is as
+ * deep as HTML, docx and Markdown go, so only the deepest pair collide.
+ *
+ * Returns null for anything that is not a heading.
+ */
+export function headingOffset(block: ExportBlock, levelsAbove: number): number | null {
+  if (block.headingLevel === null) return null
+  return Math.min(6, Math.max(1, block.headingLevel) + Math.max(0, levelsAbove))
+}
+
 export interface DocumentStats {
   pages: number
   blocks: number

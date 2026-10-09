@@ -23,6 +23,7 @@ import { ensureUnicode, zawgyiProbability } from '@/core/zawgyi'
 import { estimateTokens } from '@/translate/tokenEstimate'
 import { classifyPage, coverageOf, emptyTally, type ContentTally } from './pageClassify'
 import { analyzeLayout, itemBoxesOf, type LayoutComplexity } from './layoutComplexity'
+import { headingTiers } from './headings'
 import {
   groupItemsIntoLines,
   type GroupedLine,
@@ -337,6 +338,12 @@ export interface ProbeSummary {
   /** Normalised running heads / feet seen on ≥2 pages. */
   headerTexts: string[]
   footerTexts: string[]
+  /**
+   * The document's heading font sizes, largest first — the ladder every page
+   * levels its headings against. Optional because rows written before heading
+   * levels existed do not carry it; extraction then ranks the page itself.
+   */
+  headingSizes?: number[]
 }
 
 export interface ProbeResult {
@@ -463,6 +470,11 @@ export async function probeDocument(
   const margins = detectRepeatingMargins(
     pageLines.map((lines, index) => ({ lines, pageHeight: probes[index].height })),
   )
+  // The heading ladder is built here, where every page's lines are already in
+  // hand, and travels down the same channel running heads do: a page can only
+  // know how deep its headings are if the probe told it what the document's
+  // other headings looked like.
+  const headingSizes = headingTiers(pageLines)
 
   const documentDetection = detectLanguage(sample)
   const zawgyi = sample ? zawgyiProbability(sample) : 0
@@ -489,6 +501,7 @@ export async function probeDocument(
       formFields,
       headerTexts: [...margins.headers],
       footerTexts: [...margins.footers],
+      headingSizes,
     },
   }
 }
@@ -522,6 +535,8 @@ export interface ExtractPageOptions {
   ctx?: SkipContext
   headerTexts?: Iterable<string>
   footerTexts?: Iterable<string>
+  /** Document-wide heading ladder from the probe (see `headings.ts`). */
+  headingSizes?: readonly number[]
   /** Convert Zawgyi-encoded Myanmar lines to Unicode first. */
   convertZawgyi?: boolean
 }
@@ -549,6 +564,7 @@ export async function extractPage(
     ctx: options.ctx,
     headerTexts: new Set(options.headerTexts ?? []),
     footerTexts: new Set(options.footerTexts ?? []),
+    headingSizes: options.headingSizes ?? [],
   }
 
   let lines = groupItemsIntoLines(prepared.items, {

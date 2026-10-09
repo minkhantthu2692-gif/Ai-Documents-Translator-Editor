@@ -92,6 +92,12 @@ describe('text-300p.pdf', () => {
     expect(summary.documentLanguage).toBe('en')
     expect(summary.convertZawgyi).toBe(false)
     expect(summary.annotations).toBe(0)
+    // The heading ladder rides along with the running heads: a level means
+    // nothing unless a page can see the document's *other* headings, and the
+    // probe is the only place that has them all in hand at once.
+    expect(summary.headingSizes?.length).toBeGreaterThan(0)
+    expect(summary.headingSizes![0]).toBeGreaterThan(0)
+    expect([...summary.headingSizes!].sort((a, b) => b - a)).toEqual(summary.headingSizes)
     // Helvetica and Helvetica-Bold, both referenced rather than embedded.
     expect(fonts.distinct).toBeGreaterThanOrEqual(2)
     expect(fonts.standard).toBeGreaterThanOrEqual(1)
@@ -158,6 +164,12 @@ describe('text-300p.pdf', () => {
     // Every block keeps the font style it was found with.
     const body = first.blocks.find((block) => block.region === 'body' && block.kind === 'heading')
     expect(body?.text).toBe('Introduction')
+    // A heading knows its depth in the document ladder; nothing else does.
+    expect(typeof body?.headingLevel).toBe('number')
+    expect(body!.headingLevel!).toBeGreaterThanOrEqual(1)
+    expect(first.blocks.filter((block) => block.kind !== 'heading')).toHaveLength(
+      first.blocks.filter((block) => block.headingLevel === null).length,
+    )
   })
 
   it('treats a re-opened document as producing identical block ids', async () => {

@@ -42,6 +42,8 @@ export interface ExtractRequest extends RequestBase {
   ctx?: SkipContext
   headerTexts?: string[]
   footerTexts?: string[]
+  /** Document-wide heading ladder from the probe (see `pdf/headings.ts`). */
+  headingSizes?: number[]
   convertZawgyi?: boolean
 }
 

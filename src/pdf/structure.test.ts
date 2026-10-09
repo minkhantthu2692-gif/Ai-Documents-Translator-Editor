@@ -73,6 +73,51 @@ describe('structurePage', () => {
     expect(heading!.bold).toBe(true)
   })
 
+  it('ranks a page’s own headings when the document ladder is missing', () => {
+    const body = Array.from({ length: 6 }, (_, index) =>
+      line(`Body copy line number ${index} follows the heading.`, {
+        x: 72,
+        y: 660 + index * 18,
+        w: 320,
+        h: 14,
+      }),
+    )
+    const blocks = structurePage(
+      [
+        line('Chapter Four', { x: 72, y: 600, w: 240, h: 30 }, { fontSize: 30, bold: true }),
+        line('4.1 Background', { x: 72, y: 640, w: 200, h: 20 }, { fontSize: 20, bold: true }),
+        ...body,
+      ],
+      options(),
+    )
+    const levels = blocks
+      .filter((block) => block.kind === 'heading')
+      .map((block) => block.headingLevel)
+    expect(levels).toEqual([1, 2])
+    // Nothing that is not a heading claims a level.
+    const paragraphs = blocks.filter((block) => block.kind === 'paragraph')
+    expect(paragraphs.length).toBeGreaterThan(0)
+    expect(paragraphs.every((block) => block.headingLevel === null)).toBe(true)
+  })
+
+  it('levels a heading against the whole document, not just this page', () => {
+    // The classic failure: a chapter title appears once, so page after page
+    // holds only the sections beneath it — and without a document ladder each
+    // of those sections would be promoted to level 1.
+    const ladder = [30, 20]
+    const onlySubsection = structurePage(
+      [
+        line('4.2 Method', { x: 72, y: 640, w: 180, h: 20 }, { fontSize: 20, bold: true }),
+        line('Body copy follows the heading on the page.', { x: 72, y: 620, w: 320, h: 14 }),
+        line('More body copy below it.', { x: 72, y: 600, w: 240, h: 14 }),
+      ],
+      options({ headingSizes: ladder }),
+    )
+    const heading = onlySubsection.find((block) => block.kind === 'heading')
+    expect(heading?.text).toBe('4.2 Method')
+    expect(heading?.headingLevel).toBe(2)
+  })
+
   it('marks bullet lines as list blocks with their marker', () => {
     const blocks = structurePage(
       [

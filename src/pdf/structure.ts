@@ -16,6 +16,7 @@
 
 import { classifyLine, type SkipContext, type SkipRule } from './skipRules'
 import { tokenizePlaceholders, type Placeholder } from './placeholders'
+import { headingLevelFor, sizeLadder } from './headings'
 import { medianFontSize, type GroupedLine, type LineStyle } from './lineGrouping'
 import { kmeansMidpoint, orderBodyLines, splitMergedLines } from './readingOrder'
 import { footnoteMarker, markFootnoteRegions } from './footnotes'
@@ -49,6 +50,13 @@ export interface PageBlock {
   placeholders: Placeholder[]
   /** Bullet / numbering marker captured from the first line (`•`, `1.`, …). */
   listMarker: string | null
+  /**
+   * 1..6 when `kind === 'heading'`, else null — the depth of the heading
+   * inside the document's own ladder (`headings.ts`). A level means nothing on
+   * its own, so exporters should render it relative to the other headings they
+   * are already emitting, never as an absolute size.
+   */
+  headingLevel: number | null
   /** Estimated line spacing as a multiple of the font size (≥ 1). */
   lineSpacing: number
   fontFamily: string
@@ -67,6 +75,13 @@ export interface StructureOptions {
   headerTexts?: Set<string>
   /** Normalised texts seen as a footer on ≥2 pages. */
   footerTexts?: Set<string>
+  /**
+   * The document's heading font sizes, largest first — the ladder every page
+   * levels its headings against. Supplied by the probe; absent means "rank
+   * this page's own headings", which is what a caller without document
+   * context (OCR, a unit test) does.
+   */
+  headingSizes?: readonly number[]
 }
 
 /** Fraction of the page height used for the header / footer bands. */
@@ -436,6 +451,7 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
       skipRule: decision.skip ? decision.rule : null,
       placeholders: placeholderResult.placeholders,
       listMarker: marker,
+      headingLevel: null,
       lineSpacing: Number.isFinite(spacing) ? spacing : 1.4,
       fontFamily: first.style.fontFamily,
       fontSize: first.style.fontSize,
@@ -449,5 +465,24 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
   result.forEach((block, index) => {
     block.order = index
   })
+  assignHeadingLevels(result, options.headingSizes ?? [])
   return result
+}
+
+/**
+ * Depth for every heading on the page.
+ *
+ * `kind === 'heading'` is a yes/no verdict about one line against one page's
+ * body size; the level is a *comparison*, and comparing only within a page is
+ * what turns `3.2 Methods` into a level-1 heading on the pages where its
+ * chapter title is not present. The document ladder wins whenever the probe
+ * supplied one and this page's own headings only fill the gap.
+ */
+function assignHeadingLevels(blocks: PageBlock[], tiers: readonly number[]): void {
+  const headings = blocks.filter((block) => block.kind === 'heading')
+  if (headings.length === 0) return
+  const ladder = tiers.length > 0 ? tiers : sizeLadder(headings.map((block) => block.fontSize))
+  for (const block of headings) {
+    block.headingLevel = headingLevelFor(block.fontSize, ladder)
+  }
 }

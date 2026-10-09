@@ -73,6 +73,9 @@ async function runJob(job: ParseJob, signal: AbortSignal): Promise<void> {
     ctx,
     headerTexts: margins.headers,
     footerTexts: margins.footers,
+    // Optional: a project probed before heading levels existed has no ladder
+    // and each page ranks its own headings (see `pdf/headings.ts`).
+    headingSizes: analysis?.headingSizes ?? [],
     convertZawgyi: analysis?.convertZawgyi ?? false,
     signal,
   })

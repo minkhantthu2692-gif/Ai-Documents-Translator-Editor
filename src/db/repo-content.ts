@@ -140,6 +140,7 @@ function blockDefaults(): BlockLayoutFields {
     skipRule: null,
     placeholders: [],
     listMarker: null,
+    headingLevel: null,
     translationConfidence: null,
     translationFlag: null,
     translatedAt: null,

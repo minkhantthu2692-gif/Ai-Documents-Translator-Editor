@@ -38,6 +38,7 @@ function block(order: number, x: number, y: number, w: number, h: number, text =
     skipRule: null,
     placeholders: [],
     listMarker: null,
+    headingLevel: null,
     lineSpacing: 1.2,
     fontFamily: 'Helvetica',
     fontSize: 10,

@@ -22,6 +22,7 @@ function block(partial: Partial<ExportBlock>): ExportBlock {
     bold: false,
     italic: false,
     listMarker: null,
+    headingLevel: null,
     sourceText: '',
     translatedText: '',
     characterCount: 0,

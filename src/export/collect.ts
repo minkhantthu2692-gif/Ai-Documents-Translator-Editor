@@ -70,6 +70,7 @@ export async function collectExportDocument(options: CollectOptions): Promise<Ex
         bold: block.bold,
         italic: block.italic,
         listMarker: block.listMarker,
+        headingLevel: block.headingLevel ?? null,
         sourceText: block.sourceText,
         translatedText: block.translatedText,
         characterCount: block.characterCount,

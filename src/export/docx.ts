@@ -27,7 +27,7 @@ import {
   TextRun,
 } from 'docx'
 import { directionOf } from '@/lib/text'
-import { contentPages, langTag, listPrefix, pageBlocks, textOf } from './shared'
+import { contentPages, headingOffset, langTag, listPrefix, pageBlocks, textOf } from './shared'
 import type { ExportBlock, ExportDocument } from './types'
 
 /** Options the export worker fills from the export dialog. */
@@ -67,6 +67,16 @@ function lineUnits(lineHeight: number): number {
   return Math.round(Math.max(lineHeight, 1) * 240)
 }
 
+/** docx outline level → the `HeadingLevel` enum (1..6, clamped by `headingOffset`). */
+const DOCX_HEADING: Record<number, (typeof HeadingLevel)[keyof typeof HeadingLevel]> = {
+  1: HeadingLevel.HEADING_1,
+  2: HeadingLevel.HEADING_2,
+  3: HeadingLevel.HEADING_3,
+  4: HeadingLevel.HEADING_4,
+  5: HeadingLevel.HEADING_5,
+  6: HeadingLevel.HEADING_6,
+}
+
 /** The editor stores `#rrggbb`; docx wants bare `RRGGBB`. Bad input → undefined. */
 function docxColor(color: string): string | undefined {
   const hex = color.trim().replace(/^#/, '')
@@ -88,11 +98,17 @@ function blockRun(text: string, block: ExportBlock, font: string): TextRun {
 }
 
 /** One paragraph: alignment, RTL direction, line spacing, exactly one run. */
-function blockParagraph(text: string, block: ExportBlock, font: string): Paragraph {
+function blockParagraph(
+  text: string,
+  block: ExportBlock,
+  font: string,
+  heading: number | null = null,
+): Paragraph {
   const rtl = directionOf(text) === 'rtl'
   return new Paragraph({
     alignment: ALIGNMENT_BY_BLOCK[block.alignment],
     ...(rtl ? { bidirectional: true } : {}),
+    ...(heading !== null ? { heading: DOCX_HEADING[heading] } : {}),
     spacing: { line: lineUnits(block.lineHeight), lineRule: LineRuleType.AUTO },
     children: [blockRun(text, block, font)],
   })
@@ -102,20 +118,39 @@ function blockParagraph(text: string, block: ExportBlock, font: string): Paragra
  * The paragraphs for one block: the primary text always first (carrying the
  * list marker), then — with `includeOriginal` — the translation on its own
  * paragraph. Blocks whose text is empty contribute nothing.
+ *
+ * Exactly one paragraph per block can carry an outline level, and it is the
+ * one holding the translation: in a bilingual export the source sits beside
+ * it, and a reader navigating by heading wants to land on what the document
+ * was turned into, not on the text they already had.
  */
 function blockParagraphs(block: ExportBlock, options: DocxOptions): Paragraph[] {
   const { source, target, primary } = textOf(block, options.includeOriginal)
-  const texts: string[] = []
+  const entries: Array<{ text: string; source: boolean }> = []
   if (options.includeOriginal) {
-    if (source.trim().length > 0) texts.push(source)
-    if (target.trim().length > 0 && target.trim() !== source.trim()) texts.push(target)
+    if (source.trim().length > 0) entries.push({ text: source, source: true })
+    if (target.trim().length > 0 && target.trim() !== source.trim()) {
+      entries.push({ text: target, source: false })
+    }
   } else if (primary.trim().length > 0) {
-    texts.push(primary)
+    entries.push({ text: primary, source: false })
   }
-  const marker = listPrefix(block, texts[0] ?? '')
-  return texts.map((text, index) =>
-    blockParagraph(index === 0 ? `${marker}${text}` : text, block, options.font),
+  if (entries.length === 0) return []
+
+  // The title occupies Heading 1 and an optional `Page N` Heading 2, so the
+  // document's own headings start below whichever of those is being emitted.
+  const levelsAbove = options.pageHeadings ? 2 : options.titleHeading ? 1 : 0
+  const heading = headingOffset(block, levelsAbove)
+  const headingIndex = Math.max(
+    0,
+    entries.findIndex((entry) => !entry.source),
   )
+  const marker = listPrefix(block, entries[0].text)
+
+  return entries.map((entry, index) => {
+    const text = index === 0 ? `${marker}${entry.text}` : entry.text
+    return blockParagraph(text, block, options.font, index === headingIndex ? heading : null)
+  })
 }
 
 /** First source page geometry (PDF points) → section page size in twips. */

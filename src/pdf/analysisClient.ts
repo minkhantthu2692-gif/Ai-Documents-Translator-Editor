@@ -201,6 +201,7 @@ class AnalysisClient {
       ctx?: SkipContext
       headerTexts?: string[]
       footerTexts?: string[]
+      headingSizes?: number[]
       convertZawgyi?: boolean
       signal?: AbortSignal
     } & ProgressHandler = {},
@@ -213,6 +214,7 @@ class AnalysisClient {
         ...(options.ctx ? { ctx: options.ctx } : {}),
         ...(options.headerTexts ? { headerTexts: options.headerTexts } : {}),
         ...(options.footerTexts ? { footerTexts: options.footerTexts } : {}),
+        ...(options.headingSizes ? { headingSizes: options.headingSizes } : {}),
         ...(options.convertZawgyi !== undefined ? { convertZawgyi: options.convertZawgyi } : {}),
       },
       options,

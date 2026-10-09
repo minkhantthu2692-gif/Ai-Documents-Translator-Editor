@@ -11,7 +11,7 @@
  * Pure string building: no DOM, no worker state, safe in Vitest.
  */
 
-import { contentPages, listPrefix, pageBlocks, textOf } from './shared'
+import { contentPages, headingOffset, listPrefix, pageBlocks, textOf } from './shared'
 import type { ExportBlock, ExportDocument } from './types'
 
 export interface MarkdownOptions {
@@ -37,11 +37,13 @@ function escapeMarkdown(text: string): string {
 
 /**
  * One block as a Markdown unit: an optional `> source` blockquote immediately
- * followed (no blank line) by the block line `{listPrefix}{primary}`, where
- * the primary text is the translation when non-empty, else the source.
+ * followed (no blank line) by the block line, which is `{listPrefix}{primary}`
+ * for everything but a heading — a heading gets ATX hashes instead, deep
+ * enough to sit below the `#` title and (when they are on) the `## Page N`
+ * separators, so nothing in the outline collides with anything else.
  * Returns `''` for a block whose text is empty so it is skipped entirely.
  */
-function blockGroup(block: ExportBlock, includeOriginal: boolean): string {
+function blockGroup(block: ExportBlock, includeOriginal: boolean, levelsAbove: number): string {
   const { source, primary } = textOf(block, false)
   if (primary.trim().length === 0) return ''
   const lines: string[] = []
@@ -49,7 +51,10 @@ function blockGroup(block: ExportBlock, includeOriginal: boolean): string {
   if (includeOriginal && source.trim().length > 0 && source !== primary) {
     for (const line of source.split('\n')) lines.push(`> ${line}`)
   }
-  lines.push(`${listPrefix(block, primary)}${primary}`)
+  const level = headingOffset(block, levelsAbove)
+  lines.push(
+    level === null ? `${listPrefix(block, primary)}${primary}` : `${'#'.repeat(level)} ${primary}`,
+  )
   // Guard the "exactly one blank line between blocks" invariant against text
   // that ends (or starts) with a newline.
   return lines.join('\n').replace(/^\n+|\n+$/g, '')
@@ -58,10 +63,13 @@ function blockGroup(block: ExportBlock, includeOriginal: boolean): string {
 /** Builds the Markdown file for `doc`. Always ends with exactly one `\n`. */
 export function buildMarkdown(doc: ExportDocument, options: MarkdownOptions): string {
   const parts: string[] = [`# ${escapeMarkdown(options.title)}`]
+  // The `#` title, plus `## Page N` when it is emitted — the levels the
+  // document's own headings have to start below.
+  const levelsAbove = options.includePageHeadings ? 2 : 1
   for (const page of contentPages(doc)) {
     if (options.includePageHeadings) parts.push(`## Page ${page.index + 1}`)
     for (const block of pageBlocks(page)) {
-      const group = blockGroup(block, options.includeOriginal)
+      const group = blockGroup(block, options.includeOriginal, levelsAbove)
       if (group.length > 0) parts.push(group)
     }
   }

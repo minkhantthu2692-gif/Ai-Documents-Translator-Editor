@@ -34,6 +34,15 @@ function item(str: string, options: ItemOptions = {}): TextItemLike {
   }
 }
 
+/** Rebuilds a line's text from its runs — the invariant cutting must preserve. */
+function joinRuns(runs: Array<{ text: string }>): string {
+  return runs
+    .map((run) => run.text)
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 describe('groupItemsIntoLines', () => {
   it('merges runs that share a baseline and keeps word gaps', () => {
     const lines = groupItemsIntoLines(
@@ -51,6 +60,27 @@ describe('groupItemsIntoLines', () => {
       { pageIndex: 0, pageHeight: 800 },
     )
     expect(lines[0].text).toBe('Helloworld')
+  })
+
+  it('records per-run geometry and text so the line can be cut apart again', () => {
+    // Two columns that share a baseline arrive as ONE line spanning both. The
+    // bounding box alone then hides the gutter completely, which is why the
+    // runs are kept: they are the only place the empty strip survives.
+    const lines = groupItemsIntoLines(
+      [item('Left', { x: 72, width: 220 }), item('Right', { x: 320, width: 220 })],
+      { pageIndex: 0, pageHeight: 792 },
+    )
+
+    expect(lines).toHaveLength(1)
+    const runs = lines[0].runs ?? []
+    expect(runs).toHaveLength(2)
+    expect(runs[0]).toMatchObject({ x: 72, w: 220 })
+    expect(runs[1]).toMatchObject({ x: 320, w: 220 })
+    // The empty strip the structure pass will cut along.
+    expect(runs[1].x - (runs[0].x + runs[0].w)).toBe(28)
+    // Joining the runs reproduces the line's text — what lets a cut part keep
+    // exactly the characters it should.
+    expect(joinRuns(runs)).toBe(lines[0].text)
   })
 
   it('splits runs on different baselines into separate lines', () => {

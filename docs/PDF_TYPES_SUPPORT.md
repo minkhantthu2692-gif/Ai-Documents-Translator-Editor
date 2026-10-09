@@ -49,16 +49,16 @@ beyond one cached probe. Configure with `VITE_PDF_SIDECAR_URL` (default
 | -- | --------------------------------------- | ------ | ----- |
 | 1  | Text-Based PDF                          | ✅     | Text layer → lines → blocks with headings, lists, styles, fonts, special characters; classified `text` |
 | 2  | Scanned PDF (image-only, rotated, low-res, OCR) | ✅ | Classification `scanned` + auto-OCR inside the parse window (browser Tesseract: `queued→running→done`, confidence + text blocks persisted, E2E-verified); local sidecar OCR ✅ preferred automatically when running; pre-flight warns and offers OCR; rotated scans still need OSD ❌ |
-| 3  | Mixed PDF (text + scanned pages/images) | 🔶 | Per-page classes + method selection ✅ (text / OCR / hybrid): hybrid keeps the text layer authoritative, OCRs the rest and drops blocks that overlap existing text (unit-tested); reading-order restructure of merged column lines in phase c |
-| 4  | Multi-Column PDF (2/3-col, newspaper, reading order) | 🔶→⏳ | `complex` classification for ≥3 columns ✅ (item-level gutter detection); reading-order restructure of merged column lines in phase c |
+| 3  | Mixed PDF (text + scanned pages/images) | 🔶 | Per-page classes + method selection ✅ (text / OCR / hybrid): hybrid keeps the text layer authoritative, OCRs the rest and drops blocks that overlap existing text (unit-tested); reading order across merged column lines ✅ |
+| 4  | Multi-Column PDF (2/3-col, newspaper, reading order) | ✅     | `complex` classification for ≥3 columns ✅ (item-level gutter detection); reading order ✅ — rows fused across a gutter are cut back into one line per column, columns are read left-to-right (2–4), and a title spanning the fold opens its own zone ahead of both columns |
 | 5  | PDF With Images (captions, diagrams, charts) | 🔶 | Images kept in the page render/background ✅; image-anchored extraction + caption linkage in phase c |
-| 6  | PDF With Tables (simple/complex, merged cells, multi-page) | 🔶→⏳ | Row detection + table blocks ✅ (text representation); pdfplumber cell extraction implemented in the sidecar server (frontend integration pending), merged cells/multi-page ❌ |
-| 7  | Academic / Research PDF (footnotes, refs, citations, equations) | 🔶→⏳ | 2-column papers classified `text` ✅; footnote region + heading hierarchy in phase c; equations ❌ (see #23) |
+| 6  | PDF With Tables (simple/complex, merged cells, multi-page) | 🔶→⏳ | Row detection + table blocks ✅ (text representation); table rows are explicitly exempt from the column split so merging cells stay one row; pdfplumber cell extraction implemented in the sidecar server (frontend integration pending), merged cells/multi-page ❌ |
+| 7  | Academic / Research PDF (footnotes, refs, citations, equations) | 🔶→⏳ | 2-column papers classified `text` ✅ and read in column order ✅; footnote region + heading hierarchy in phase c; equations ❌ (see #23) |
 | 8  | Business / Report PDF (reports, invoices, financial) | 🔶 | Paragraph/table extraction ✅; invoice form layout understanding ❌ |
 | 9  | Forms / Structured PDF (fillable, checkboxes, signatures) | 🔶 | Field detection/counted in probe ✅, password-style unlock flow ✅; translating labels in phase c; form filling ❌ (out of scope) |
 | 10 | Presentation PDF (slides, big headings, text boxes) | 🔶→⏳ | Size-spread/complexity signal ✅; per-slide text-box reading order in phase c |
 | 11 | Book / Document PDF (chapters, TOC, headers/footers, page numbers, long docs) | 🔶→⏳ | Header/footer bands, page labels, running heads ✅; long-document chunked translation ✅; footnote region phase c |
-| 12 | Magazine / Brochure (complex layouts, multi-column, text around images) | 🔶→⏳ | `complex` classification ✅ (columns, overlap, size spread); structure repair in phase c |
+| 12 | Magazine / Brochure (complex layouts, multi-column, text around images) | 🔶→⏳ | `complex` classification ✅ (columns, overlap, size spread); multi-column reading order ✅; text-around-image structure repair in phase c |
 | 13 | Technical PDF (manuals, code snippets, diagrams) | 🔶 | Extracts as text ✅; code formatting preservation ❌ (phase c) |
 | 14 | Legal PDF (contracts, numbered sections, footnotes) | 🔶→⏳ | Numbered-section/list handling ✅; footnote region phase c |
 | 15 | Password-Protected / Encrypted PDF | ✅     | Wizard password prompt, wrong-password explanation, unlocked pre-flight; graceful unsupported-encryption errors; fixture-tested (RC4) |
@@ -68,7 +68,7 @@ beyond one cached probe. Configure with `VITE_PDF_SIDECAR_URL` (default
 | 19 | PDF With Annotations (comments, highlights, stamps, links) | 🔶→⏳ | Annotation/link counting in probe ✅; links preserved as clickable text in exports phase c |
 | 20 | Damaged / Invalid PDF | 🔶     | Load/probe failures surface as actionable errors ✅; partial repair ❌ |
 | 21 | PDF With Embedded Fonts (subset/custom/fallback) | ✅     | Font inventory (embedded/standard/other) in metadata ✅, subset-prefix cleaning ✅, Myanmar fallback stack in export ✅ |
-| 22 | PDF With Complex Layout (text boxes, overlap, sidebars, watermarks) | ⏳→✅   | `complex` class + scoring ✅ (this phase); extraction-side structure repair phase c |
+| 22 | PDF With Complex Layout (text boxes, overlap, sidebars, watermarks) | ⏳→✅   | `complex` class + scoring ✅ (this phase); column/sidebar reading order ✅; text-box + overlap repair in phase c |
 | 23 | PDF With Equations / Math content | ❌     | Formulas extract as plain text (lossy); LaTeX/OCR-of-equations not implemented |
 | 24 | PDF With Code (syntax, monospace, formatting) | 🔶→⏳ | Monospace font extracted as style ✅; block-level code formatting phase c |
 | 25 | PDF With Hyperlinks (external, internal, TOC, cross-references) | 🔶→⏳ | Link annotations counted ✅; URL text preserved as text ✅; clickable links phase c |
@@ -80,8 +80,28 @@ beyond one cached probe. Configure with `VITE_PDF_SIDECAR_URL` (default
 | (a) Classification | `complex` class, complexity scoring, item-level column detection, wizard metadata | 4, 12, 22 classification ✅ |
 | (b) Extraction methods | Browser Tesseract OCR auto-runs per window (status lifecycle, confidence, cached recognition), hybrid merge with geometric dedup, run-OCR setting persisted per project, Python sidecar server (protocol v1, 20 tests) | 2, 3 extraction ✅ |
 | (b2) Sidecar wiring | `src/sidecar/sidecarClient.ts`: cached `GET /health` probe, `POST /ocr` with page/language/password, per-line confidence added to the server response, lazy render so a sidecar page never rasterises in the browser, automatic fall-back to browser Tesseract on any failure (22 client + 5 pipeline + 1 Python test) | 2 extraction ✅ with a native-OCR fast path |
-| (c) Structure preservation | Reading-order repair across merged columns, footnote regions, real table cells, links, code blocks, headings | 4, 5, 6, 7, 9, 11, 13, 14, 19, 24, 25 |
+| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. Remaining in this phase: footnote regions, real table cells, links, code blocks, headings | 4 ✅, reading order for 3 / 7 / 12 ✅; then 5, 6, 9, 11, 13, 14, 19, 24, 25 |
 | (d) Layout auto-adjust | Auto-fit/reflow when translated text grows (EN→MY), export height handling | 1, 8, 10, 12 (translation-time layout) |
 
+### Why reading order needed two detectors
+
+Line clustering is baseline-driven with no horizontal limit, so two columns
+laid out on a shared grid reach the structure pass as **one line per row** —
+`Left half … Right half` — whose bounding box spans the fold. At that point the
+gutter is not merely undetected, it is *absent from the geometry*, so no
+ordering strategy can recover it. Reading order therefore works at two
+granularities: `splitMergedLines` finds the empty band inside the **runs**
+(before ordering, so columns exist at all), and `orderBodyLines` then places the
+resulting lines by **line** (columns left to right, zones cut by lines that
+genuinely span the gutter). Table rows are exempt throughout — their cells are
+cells *because* they ride one baseline, so cutting there would turn one table
+block into a stack of single-cell paragraphs. `detectColumns` (complexity
+scoring) deliberately keeps refusing pages whose title bridges the gutter; that
+refusal is correct for scoring and wrong for order, which is why
+`structurePage` does not use it.
+
 _Known limitations carried over: table cell truncation at 45k characters,
-style reset on re-parse, no equation rendering (type 23)._
+style reset on re-parse, no equation rendering (type 23). Reading order is
+unit-tested against synthetic column geometries (2/3/4 columns, fused rows,
+spanning titles, tables); no real multi-column PDF has been run through it
+end-to-end yet._

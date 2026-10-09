@@ -15,6 +15,8 @@
 import { classifyLine, type SkipContext, type SkipRule } from './skipRules'
 import { tokenizePlaceholders, type Placeholder } from './placeholders'
 import { medianFontSize, type GroupedLine, type LineStyle } from './lineGrouping'
+import { kmeansMidpoint, orderBodyLines, splitMergedLines } from './readingOrder'
+import { splitRow } from './rowSplit'
 import { blockId, type BBox } from './stableId'
 
 export type BlockKind = 'heading' | 'paragraph' | 'list' | 'table' | 'caption' | 'shape'
@@ -119,6 +121,12 @@ interface ColumnSplit {
 /**
  * Splits lines into at most two columns when there is a clear vertical gutter
  * and both sides carry a meaningful number of lines.
+ *
+ * This is the *conservative* two-way split: it refuses whenever any line
+ * bridges the gutter, which keeps complexity scoring honest. Reading order
+ * needs the opposite instinct — a bridging line is a title, not a reason to
+ * give up — so `structurePage` orders via `readingOrder.orderBodyLines`
+ * instead. Both share `kmeansMidpoint`, so there is one gutter locator.
  */
 export function detectColumns(lines: GroupedLine[], pageWidth: number): ColumnSplit {
   const byReadingOrder = (a: GroupedLine, b: GroupedLine): number =>
@@ -128,28 +136,9 @@ export function detectColumns(lines: GroupedLine[], pageWidth: number): ColumnSp
     return { columns: [[...lines].sort(byReadingOrder)] }
   }
 
-  const centers = lines.map((line) => line.bbox.x + line.bbox.w / 2).sort((a, b) => a - b)
-  let leftMean = centers[0]
-  let rightMean = centers[centers.length - 1]
+  const midpoint = kmeansMidpoint(lines, pageWidth)
+  if (midpoint === null) return { columns: [lines] }
 
-  for (let iteration = 0; iteration < 8; iteration += 1) {
-    const left = centers.filter((value) => value <= (leftMean + rightMean) / 2)
-    const right = centers.filter((value) => value > (leftMean + rightMean) / 2)
-    if (left.length === 0 || right.length === 0) break
-    const nextLeft = left.reduce((sum, value) => sum + value, 0) / left.length
-    const nextRight = right.reduce((sum, value) => sum + value, 0) / right.length
-    if (Math.abs(nextLeft - leftMean) < 0.5 && Math.abs(nextRight - rightMean) < 0.5) {
-      leftMean = nextLeft
-      rightMean = nextRight
-      break
-    }
-    leftMean = nextLeft
-    rightMean = nextRight
-  }
-
-  if (rightMean - leftMean < pageWidth * 0.2) return { columns: [lines] }
-
-  const midpoint = (leftMean + rightMean) / 2
   const left = lines.filter((line) => line.bbox.x + line.bbox.w / 2 <= midpoint)
   const right = lines.filter((line) => line.bbox.x + line.bbox.w / 2 > midpoint)
   if (left.length < 3 || right.length < 3) return { columns: [lines] }
@@ -224,27 +213,6 @@ function regionOf(line: GroupedLine, options: StructureOptions): BlockRegion {
     return 'footer'
   }
   return 'body'
-}
-
-interface CellSplit {
-  isTable: boolean
-  cells: string[]
-}
-
-/** Detects short cells separated by wide, aligned gaps (table rows). */
-function splitRow(line: GroupedLine): CellSplit {
-  const raw = line.text
-  const parts = raw.split(/\s{2,}|\t/)
-  if (parts.length < 2) return { isTable: false, cells: [raw] }
-  const cells = parts.map((part) => part.trim()).filter(Boolean)
-  const allShort = cells.every((cell) => cell.length <= 60)
-  const wideGap = /\s{3,}|\t/.test(raw) || raw.includes('  ')
-  return { isTable: allShort && wideGap && cells.length >= 2, cells }
-}
-
-/** Exposed for layout-complexity scoring (probe-time table presence). */
-export function looksLikeTableRow(line: GroupedLine): boolean {
-  return splitRow(line).isTable
 }
 
 function alignmentOf(lines: BlockLine[], pageWidth: number): BlockAlignment {
@@ -324,11 +292,19 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
   const bodyGap = medianLineGap(bodyCandidates)
 
   // --- reading order -------------------------------------------------------
-  const { columns } = detectColumns(
-    lines.filter((line) => regionOf(line, options) === 'body'),
+  // Two steps, in this order. First undo any line that merged across a column
+  // gutter — columns sharing a baseline arrive as one line *per row*, and no
+  // amount of ordering can recover columns fused into a single line. Then
+  // order what is left: columns left to right, cut into zones by any line that
+  // spans the gutter, so a title above two columns precedes both rather than
+  // sitting inside one.
+  const orderedBody: GroupedLine[] = orderBodyLines(
+    splitMergedLines(bodyCandidates, options),
     options.pageWidth,
   )
-  const orderedBody: GroupedLine[] = columns.flat()
+  // Ids of the lines that reached the body. A line split into column parts is
+  // deliberately absent — its parts are here instead, and the original cannot
+  // resurface as a margin line because it was already filtered to the body.
   const bodyIds = new Set(orderedBody.map((line) => line.id))
   const marginLines = lines
     .filter((line) => !bodyIds.has(line.id))

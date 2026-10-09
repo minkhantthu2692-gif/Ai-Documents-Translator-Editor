@@ -12,8 +12,12 @@
  */
 
 import { medianFontSize, type GroupedLine, type TextItemLike } from './lineGrouping'
-import { countColumns, looksLikeTableRow } from './structure'
+import { countColumns } from './structure'
+import { looksLikeTableRow } from './rowSplit'
+import { MIN_COLUMN_ITEMS, bestItemGutter } from './readingOrder'
 import type { BBox } from './stableId'
+
+export { MIN_COLUMN_ITEMS }
 
 export type ComplexityReason =
   /** Three or more text columns (newspaper, magazine). */
@@ -169,9 +173,6 @@ export interface ItemBox {
   w: number
 }
 
-/** Runs needed on a page before a column split is believable. */
-export const MIN_COLUMN_ITEMS = 8
-
 /** Axis-aligned x-extent of each pdf.js text run (rotated runs included). */
 export function itemBoxesOf(items: TextItemLike[]): ItemBox[] {
   const boxes: ItemBox[] = []
@@ -196,69 +197,6 @@ export function itemBoxesOf(items: TextItemLike[]): ItemBox[] {
     if (maxX - minX > 0) boxes.push({ x: minX, w: maxX - minX })
   }
   return boxes
-}
-
-interface Gutter {
-  /** Centre of the empty band. */
-  position: number
-  width: number
-  /** Runs spanning the band (headers, watermarks) — kept small by design. */
-  crossings: number
-}
-
-/**
- * Widest low-crossing empty band: sweeps run endpoints and keeps the band
- * with the fewest crossing runs (ties → widest), requiring text on both
- * sides and a gutter at least `max(6pt, 2% of page width)` wide.
- */
-function bestItemGutter(boxes: ItemBox[], pageWidth: number): Gutter | null {
-  if (boxes.length < MIN_COLUMN_ITEMS) return null
-  const minGap = Math.max(6, pageWidth * 0.02)
-  type Event = { x: number; open: boolean }
-  const events: Event[] = []
-  for (const box of boxes) {
-    events.push({ x: box.x, open: true })
-    events.push({ x: box.x + box.w, open: false })
-  }
-  // At equal coordinates a closing run must be processed first so touching
-  // runs do not count as crossing the band between them.
-  events.sort((p, q) => p.x - q.x || Number(p.open) - Number(q.open))
-
-  let active = 0
-  let opened = 0
-  let closed = 0
-  let best: Gutter | null = null
-  const maxCrossings = Math.max(2, Math.floor(boxes.length / 10))
-
-  let index = 0
-  while (index < events.length) {
-    const start = events[index].x
-    while (index < events.length && events[index].x === start) {
-      if (events[index].open) {
-        active += 1
-        opened += 1
-      } else {
-        active -= 1
-        closed += 1
-      }
-      index += 1
-    }
-    if (index >= events.length) break
-    const end = events[index].x
-    const width = end - start
-    const onLeft = closed
-    const onRight = boxes.length - opened
-    if (
-      width >= minGap &&
-      onLeft >= 3 &&
-      onRight >= 3 &&
-      active <= maxCrossings &&
-      (!best || active < best.crossings || (active === best.crossings && width > best.width))
-    ) {
-      best = { position: start + width / 2, width, crossings: active }
-    }
-  }
-  return best
 }
 
 /**

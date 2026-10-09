@@ -32,6 +32,20 @@ export interface LineStyle {
   rotation: number
 }
 
+/** One text run inside a line: its horizontal extent and the text it carries. */
+export interface LineRun {
+  /** Axis-aligned extent in page points, corners transformed. */
+  x: number
+  w: number
+  /**
+   * Text contributed by this run, *including* the word space inserted before it
+   * (except for the first run). Joining every run's `text` reproduces the
+   * line's text exactly, and any contiguous slice reproduces that slice's —
+   * which is what lets a merged line be cut back into its columns.
+   */
+  text: string
+}
+
 export interface GroupedLine {
   id: string
   text: string
@@ -39,6 +53,18 @@ export interface GroupedLine {
   style: LineStyle
   /** Indices into the input item array, in visual order. */
   itemIndexes: number[]
+  /**
+   * Per-run geometry, left to right. Absent on lines built by hand (tests,
+   * OCR) and on lines the caller never needs to cut apart.
+   *
+   * This exists because clustering is baseline-driven with no horizontal limit:
+   * two columns laid out on a common grid arrive as a *single* line spanning
+   * both, and the bounding box then hides the gutter completely. Without the
+   * sub-line geometry there is no way for the structure pass to see where the
+   * columns are — which is exactly the "merged column lines" reading-order
+   * problem.
+   */
+  runs?: LineRun[]
 }
 
 export interface GroupOptions {
@@ -216,25 +242,29 @@ export function groupItemsIntoLines(items: TextItemLike[], options: GroupOptions
       rtl ? b.x - a.x : a.x - b.x || a.index - b.index,
     )
 
+    // Text and per-run geometry in one pass: the runs are what let a line that
+    // merged across a column gutter be cut back apart later.
     let text = ''
-    for (let i = 0; i < members.length; i += 1) {
-      const member = members[i]
-      if (i > 0 && needsSpace(members[i - 1], member)) text += ' '
-      text += member.item.str
-    }
-
-    // Bounding box from the four transformed corners of every run.
+    const runs: LineRun[] = []
     let minX = Infinity
     let maxX = -Infinity
     let minY = Infinity
     let maxY = -Infinity
-    for (const member of members) {
+
+    for (let i = 0; i < members.length; i += 1) {
+      const member = members[i]
+      const spaced = i > 0 && needsSpace(members[i - 1], member)
+      if (spaced) text += ' '
+      text += member.item.str
+
       const corners: Array<[number, number]> = [
         [0, 0],
         [member.width, 0],
         [0, member.height],
         [member.width, member.height],
       ]
+      let runMinX = Infinity
+      let runMaxX = -Infinity
       for (const [cx, cy] of corners) {
         const px = member.u[0] * cx + member.v[0] * cy + member.x
         const py = member.baselineY + member.u[1] * cx + member.v[1] * cy
@@ -242,7 +272,14 @@ export function groupItemsIntoLines(items: TextItemLike[], options: GroupOptions
         maxX = Math.max(maxX, px)
         minY = Math.min(minY, py)
         maxY = Math.max(maxY, py)
+        runMinX = Math.min(runMinX, px)
+        runMaxX = Math.max(runMaxX, px)
       }
+      runs.push({
+        x: runMinX,
+        w: runMaxX - runMinX,
+        text: (spaced ? ' ' : '') + member.item.str,
+      })
     }
 
     const bbox: BBox = {
@@ -259,6 +296,7 @@ export function groupItemsIntoLines(items: TextItemLike[], options: GroupOptions
       bbox,
       style,
       itemIndexes: members.map((member) => member.index),
+      runs,
     })
   }
 

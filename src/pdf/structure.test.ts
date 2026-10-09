@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import {
   countColumns,
+  detectColumns,
   detectRepeatingMargins,
   normalizeMarginText,
   structurePage,
   type StructureOptions,
 } from './structure'
-import type { GroupedLine, LineStyle } from './lineGrouping'
+import { orderBodyLines } from './readingOrder'
+import {
+  groupItemsIntoLines,
+  type GroupedLine,
+  type LineStyle,
+  type TextItemLike,
+} from './lineGrouping'
 import { lineId, type BBox } from './stableId'
 
 const PAGE = { pageWidth: 612, pageHeight: 792 }
@@ -203,6 +210,144 @@ describe('structurePage', () => {
 
   it('returns no blocks for an empty page', () => {
     expect(structurePage([], options())).toEqual([])
+  })
+
+  it('reads a two-column page with a full-width title in column order', () => {
+    // One line bridging the gutter used to disable column detection for the
+    // entire page, leaving the two columns interleaved line by line — and each
+    // interleaved pair then refused to merge, so the page fell apart too.
+    const title = line(
+      'Chapter Four',
+      { x: 72, y: 60, w: 468, h: 28 },
+      { fontSize: 24, bold: true },
+    )
+    const left = Array.from({ length: 6 }, (_u, index) =>
+      line(`Left column line ${index}`, { x: 72, y: 120 + index * 20, w: 220, h: 14 }),
+    )
+    const right = Array.from({ length: 6 }, (_u, index) =>
+      line(`Right column line ${index}`, { x: 320, y: 120 + index * 20, w: 220, h: 14 }),
+    )
+
+    const blocks = structurePage([...left, ...right, title], options())
+
+    expect(blocks.map((block) => block.kind)).toEqual(['heading', 'paragraph', 'paragraph'])
+    expect(blocks[0].text).toBe('Chapter Four')
+    // The whole left column must precede the whole right column.
+    expect(blocks[1].lines).toHaveLength(6)
+    expect(blocks[1].text).toMatch(/^Left column line 0/)
+    expect(blocks[2].lines).toHaveLength(6)
+    expect(blocks[2].text).toMatch(/^Right column line 0/)
+    expect(blocks[1].bbox.x).toBe(72)
+    expect(blocks[2].bbox.x).toBe(320)
+  })
+
+  it('reads a three-column page left to right rather than alternating', () => {
+    const columns = [40, 226, 412].map((x, column) =>
+      Array.from({ length: 6 }, (_u, row) =>
+        line(`Column${column} line${row}`, { x, y: 100 + row * 20, w: 160, h: 14 }),
+      ),
+    )
+
+    const blocks = structurePage(columns.flat(), options())
+
+    expect(blocks).toHaveLength(3)
+    expect(blocks.map((block) => Math.round(block.bbox.x))).toEqual([40, 226, 412])
+    blocks.forEach((block, index) => {
+      expect(block.lines).toHaveLength(6)
+      expect(block.text).toMatch(new RegExp(`^Column${index} line0`))
+    })
+  })
+})
+
+describe('detectColumns vs orderBodyLines', () => {
+  it('the conservative split still refuses a page whose title bridges the gutter', () => {
+    // This is deliberate and must stay that way: `detectColumns` feeds layout
+    // complexity scoring, where "I cannot see a clean gutter" is the honest
+    // answer. Reading order needs the opposite instinct — the bridging line is
+    // a title, not a reason to give up — which is why `structurePage` orders
+    // through `orderBodyLines` and must not be "simplified" back onto this.
+    const bridging = [
+      line('Chapter Four', { x: 72, y: 60, w: 468, h: 28 }, { fontSize: 24, bold: true }),
+      ...Array.from({ length: 6 }, (_u, index) =>
+        line(`Left ${index}`, { x: 72, y: 120 + index * 20, w: 220, h: 14 }),
+      ),
+      ...Array.from({ length: 6 }, (_u, index) =>
+        line(`Right ${index}`, { x: 320, y: 120 + index * 20, w: 220, h: 14 }),
+      ),
+    ]
+
+    expect(detectColumns(bridging, 612).columns).toHaveLength(1)
+    expect(orderBodyLines(bridging, 612)[0].text).toBe('Chapter Four')
+    expect(orderBodyLines(bridging, 612)[1].text).toMatch(/^Left/)
+  })
+})
+
+/**
+ * The case the previous two tests only gesture at: on a real page the
+ * two columns are usually laid out on a shared grid, so clustering is free to
+ * fuse each row into ONE line spanning the fold. At that point the gutter is
+ * not merely undetected — it is absent from the bounding box, so no ordering
+ * strategy can recover it. Only the sub-line runs still know where it is.
+ */
+describe('structurePage on grid-aligned columns', () => {
+  function item(
+    str: string,
+    options: { x: number; y: number; width?: number; size?: number },
+  ): TextItemLike {
+    const size = options.size ?? 12
+    return {
+      str,
+      transform: [size, 0, 0, size, options.x, options.y],
+      width: options.width ?? str.length * size * 0.5,
+      height: size,
+      fontName: 'ABCDEF+Helvetica',
+      dir: 'ltr',
+    }
+  }
+
+  function gridPage(): TextItemLike[] {
+    const items: TextItemLike[] = []
+    for (let row = 0; row < 6; row += 1) {
+      items.push(item(`Left ${row}`, { x: 72, y: 690 - row * 20, width: 220 }))
+      items.push(item(`Right ${row}`, { x: 320, y: 690 - row * 20, width: 220 }))
+    }
+    return items
+  }
+
+  it('cuts the fused rows apart and reads each column as a single block', () => {
+    const lines = groupItemsIntoLines(gridPage(), { pageIndex: 0, pageHeight: 792 })
+
+    // The premise, asserted: six rows, each one line spanning 72 → 540.
+    expect(lines).toHaveLength(6)
+    expect(lines[0].bbox.w).toBeCloseTo(468, 6)
+    expect(lines[0].text).toBe('Left 0 Right 0')
+
+    const blocks = structurePage(lines, options())
+
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0].text).toMatch(/^Left 0/)
+    expect(blocks[0].text).toMatch(/Left 5$/)
+    expect(blocks[0].text).not.toContain('Right')
+    expect(blocks[1].text).toMatch(/^Right 0/)
+    expect(blocks[1].text).not.toContain('Left')
+    expect(Math.round(blocks[0].bbox.x)).toBe(72)
+    expect(Math.round(blocks[1].bbox.x)).toBe(320)
+    expect(blocks[0].order).toBe(0)
+    expect(blocks[1].order).toBe(1)
+  })
+
+  it('does not invent blocks when the page really is one column', () => {
+    const items: TextItemLike[] = []
+    for (let row = 0; row < 6; row += 1) {
+      items.push(item(`Paragraph ${row}`, { x: 72, y: 690 - row * 20, width: 468 }))
+    }
+    const lines = groupItemsIntoLines(items, { pageIndex: 0, pageHeight: 792 })
+
+    const blocks = structurePage(lines, options())
+
+    expect(lines).toHaveLength(6)
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].lines).toHaveLength(6)
   })
 })
 

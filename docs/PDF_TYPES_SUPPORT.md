@@ -124,6 +124,27 @@ marker deliberately stays **inside the block text** rather than becoming a
 `listMarker`, because exports re-attach `listMarker` in front of the text and
 the callout would print twice.
 
+### Why list markers are re-attached idempotently
+
+Lists are the converse case: a parsed bullet line keeps its marker **both**
+inside the text — the bullet glyph really is part of the line pdf.js hands us —
+and in `listMarker`, which every export builder puts back in front. Prompt rule
+3 asks the model to leave the marker out of the translation, so the target
+normally arrives without one and the two copies never meet. But every block
+that has not been translated yet falls back to the *source*, which still has
+it, and a model may ignore the rule and keep it; either way each format
+printed `• • item`.
+
+`listPrefix(block, text?)` therefore takes the text it is about to prefix and
+returns `''` when that text already begins with the marker at a word boundary
+— `1.` must not be read as a prefix of `1.5`, nor `-` of `-5`. The six
+builders that emit a marker (Markdown, plain text, HTML absolute + flow, DOCX,
+EPUB and the composited PDF/PNG) each pass the string they are actually
+prefixing, which is why HTML's flow layout needs one call per paragraph: its
+source and target lines differ, and only one of them may carry the bullet.
+`json` and `delimited` keep the raw pair (`sourceText` with `listMarker`) —
+they are data exports, and dropping either half would lose information.
+
 _Known limitations carried over: table cell truncation at 45k characters,
 style reset on re-parse, no equation rendering (type 23). Reading order is
 unit-tested against synthetic column geometries (2/3/4 columns, fused rows,

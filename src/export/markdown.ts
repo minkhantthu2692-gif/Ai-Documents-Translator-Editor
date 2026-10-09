@@ -49,7 +49,7 @@ function blockGroup(block: ExportBlock, includeOriginal: boolean): string {
   if (includeOriginal && source.trim().length > 0 && source !== primary) {
     for (const line of source.split('\n')) lines.push(`> ${line}`)
   }
-  lines.push(`${listPrefix(block)}${primary}`)
+  lines.push(`${listPrefix(block, primary)}${primary}`)
   // Guard the "exactly one blank line between blocks" invariant against text
   // that ends (or starts) with a newline.
   return lines.join('\n').replace(/^\n+|\n+$/g, '')

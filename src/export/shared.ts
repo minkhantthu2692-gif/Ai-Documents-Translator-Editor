@@ -77,11 +77,32 @@ export function textOf(
   return { source, target, primary: includeOriginal ? source : target }
 }
 
-/** Bullet prefix for plain-text formats (`•  `, `1.  `), empty when none. */
-export function listPrefix(block: ExportBlock): string {
+/**
+ * Bullet prefix for plain-text formats (`•  `, `1.  `), empty when there is no
+ * marker or when `text` already carries it.
+ *
+ * A parsed list line holds its bullet **twice**: inside the text pdf.js handed
+ * us (the glyph really is part of the line) and in `listMarker`, which every
+ * builder puts back in front. Translation keeps the copy out of the target —
+ * prompt rule 3 — but the source fallback is shown verbatim, so a prefix that
+ * blindly prepended printed `• • item` for every not-yet-translated block (and
+ * for any model that ignored the rule). Pass the text you are about to prefix
+ * and the call becomes idempotent: the marker appears exactly once, whichever
+ * of the two copies it came from.
+ *
+ * The test needs the marker to be a genuine *prefix* — `1.` must not swallow
+ * `1.5` — so the rest of the text has to start at a word boundary.
+ */
+export function listPrefix(block: ExportBlock, text?: string): string {
   if (!block.listMarker) return ''
   const marker = block.listMarker.trim()
-  return marker.length > 0 ? `${marker} ` : ''
+  if (marker.length === 0) return ''
+  if (text !== undefined) {
+    const body = text.trimStart()
+    const rest = body.slice(marker.length)
+    if (body.startsWith(marker) && (body === marker || /^\s/.test(rest))) return ''
+  }
+  return `${marker} `
 }
 
 export interface DocumentStats {

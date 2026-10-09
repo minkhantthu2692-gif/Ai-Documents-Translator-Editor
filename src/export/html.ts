@@ -96,7 +96,7 @@ function blockHtml(block: ExportBlock, options: HtmlOptions, classes: string[]):
       : block.sourceText
   if (text.trim().length === 0) return ''
 
-  const marker = listPrefix(block)
+  const marker = listPrefix(block, text)
   const content = `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${escapeHtml(text)}`
   const dir = block.direction === 'rtl' ? ' dir="rtl"' : ''
   const style =
@@ -139,11 +139,11 @@ function flowPage(page: ExportDocument['pages'][number], options: HtmlOptions): 
   for (const block of pageBlocks(page)) {
     const source = block.sourceText
     const target = block.translatedText.length > 0 ? block.translatedText : block.sourceText
-    const marker = listPrefix(block)
     const pair = options.bilingual === 'side-by-side' ? ' pair' : ''
 
     if (options.includeOriginal && source.trim().length > 0 && source !== target) {
       const sourceIsRtl = directionOf(source) === 'rtl'
+      const marker = listPrefix(block, source)
       rows.push(
         `<div class="pair${pair}">` +
           `<p class="src" data-block-id="${escapeHtml(block.id)}"${
@@ -158,6 +158,7 @@ function flowPage(page: ExportDocument['pages'][number], options: HtmlOptions): 
     } else {
       const text = target
       if (text.trim().length === 0) continue
+      const marker = listPrefix(block, text)
       rows.push(
         `<p class="tgt" data-block-id="${escapeHtml(block.id)}"` +
           ` dir="${block.direction === 'rtl' ? 'rtl' : 'ltr'}">` +

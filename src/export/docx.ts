@@ -112,7 +112,7 @@ function blockParagraphs(block: ExportBlock, options: DocxOptions): Paragraph[] 
   } else if (primary.trim().length > 0) {
     texts.push(primary)
   }
-  const marker = listPrefix(block)
+  const marker = listPrefix(block, texts[0] ?? '')
   return texts.map((text, index) =>
     blockParagraph(index === 0 ? `${marker}${text}` : text, block, options.font),
   )

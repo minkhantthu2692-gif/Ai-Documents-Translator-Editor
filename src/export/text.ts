@@ -167,7 +167,7 @@ export function buildPlainText(doc: ExportDocument, options: TextOptions): strin
       if (options.includeOriginal && source.trim().length > 0 && source !== primary) {
         lines.push(wrapText(source, options.wrapWidth))
       }
-      lines.push(wrapText(`${listPrefix(block)}${primary}`, options.wrapWidth))
+      lines.push(wrapText(`${listPrefix(block, primary)}${primary}`, options.wrapWidth))
     }
     sections.push(lines.join('\n'))
   }

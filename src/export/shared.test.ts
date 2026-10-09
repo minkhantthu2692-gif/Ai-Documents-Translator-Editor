@@ -127,6 +127,25 @@ describe('pageBlocks / listPrefix', () => {
     expect(listPrefix(block({ listMarker: '   ' }))).toBe('')
     expect(listPrefix(block())).toBe('')
   })
+
+  it('never prefixes a marker the text already carries', () => {
+    // A parsed list line keeps its bullet in the text pdf.js returned *and* in
+    // `listMarker`, so prefixing blindly printed it twice.
+    expect(listPrefix(block({ listMarker: '•' }), '• First point')).toBe('')
+    expect(listPrefix(block({ listMarker: '•' }), '  • First point')).toBe('')
+    expect(listPrefix(block({ listMarker: '•' }), '•')).toBe('')
+    // The translation dropped it (prompt rule 3) — it goes back on.
+    expect(listPrefix(block({ listMarker: '•' }), 'First point')).toBe('• ')
+    expect(listPrefix(block({ listMarker: '•' }), 'မြန်မာစာ')).toBe('• ')
+  })
+
+  it('only suppresses the prefix when the marker is a real prefix', () => {
+    expect(listPrefix(block({ listMarker: '1.' }), '1. First point')).toBe('')
+    // `1.` is not a prefix of `1.5`, and `-` is not one of `-5`.
+    expect(listPrefix(block({ listMarker: '1.' }), '1.5 tonnes')).toBe('1. ')
+    expect(listPrefix(block({ listMarker: '-' }), '-5 °C')).toBe('- ')
+    expect(listPrefix(block({ listMarker: '-' }), '- Lowered')).toBe('')
+  })
 })
 
 describe('documentStats / isDocumentEmpty', () => {

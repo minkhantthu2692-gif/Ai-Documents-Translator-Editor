@@ -104,6 +104,50 @@ describe('buildHtmlDocument (absolute)', () => {
     expect(flow).toContain('class="src"')
   })
 
+  it('renders a parsed list bullet exactly once in both layouts', () => {
+    const listDoc = (overrides: Partial<ReturnType<typeof block>>) =>
+      doc({
+        pages: [
+          {
+            index: 0,
+            width: 612,
+            height: 792,
+            rotation: 0,
+            contentClass: 'text',
+            blocks: [
+              block({
+                kind: 'list',
+                listMarker: '•',
+                sourceText: '• First point',
+                ...overrides,
+              }),
+            ],
+          },
+        ],
+      })
+    const bullets = (html: string): number => (html.match(/•/g) ?? []).length
+
+    // Still pending: the primary text falls back to the source, which already
+    // carries the bullet the PDF drew — the marker span must stand down.
+    const pending = listDoc({ translatedText: '', status: 'pending' })
+    expect(buildHtmlDocument(pending, base)).not.toContain('• •')
+    expect(bullets(buildHtmlDocument(pending, base))).toBe(1)
+    const bilingualPending = buildHtmlDocument(pending, {
+      ...base,
+      layout: 'flow',
+      includeOriginal: true,
+    })
+    expect(bilingualPending).not.toContain('• •')
+    expect(bullets(bilingualPending)).toBe(1)
+
+    // Translated: the target left the bullet out (prompt rule 3), so the source
+    // paragraph shows the PDF's copy and the block keeps exactly one.
+    const translated = listDoc({ translatedText: 'ပထမ အချက်', status: 'translated' })
+    const flow = buildHtmlDocument(translated, { ...base, layout: 'flow', includeOriginal: true })
+    expect(flow).not.toContain('• •')
+    expect(bullets(flow)).toBe(1)
+  })
+
   it('escapes hostile text instead of executing it', () => {
     const hostile = doc({
       pages: [

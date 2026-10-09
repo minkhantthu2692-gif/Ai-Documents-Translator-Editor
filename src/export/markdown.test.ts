@@ -198,6 +198,65 @@ describe('buildMarkdown', () => {
     expect(out).not.toContain('\nGood morning')
   })
 
+  it('prints a parsed list bullet exactly once, translated or not', () => {
+    // The PDF gives us `• First point` *and* `listMarker: '•'`; every builder
+    // re-attaches the marker, so the copy inside the text must not survive.
+    const doc: ExportDocument = {
+      ...makeDoc(),
+      pages: [
+        {
+          index: 0,
+          width: 612,
+          height: 792,
+          rotation: 0,
+          contentClass: 'text',
+          blocks: [
+            // Still pending: the primary text falls back to the source.
+            block({
+              id: 'pending',
+              order: 0,
+              kind: 'list',
+              listMarker: '•',
+              sourceText: '• First point',
+              translatedText: '',
+              status: 'pending',
+            }),
+            block({
+              id: 'translated',
+              order: 1,
+              kind: 'list',
+              listMarker: '•',
+              sourceText: '• Second point',
+              translatedText: 'ဒုတိယ အချက်',
+              status: 'translated',
+            }),
+            // A model that ignored prompt rule 3 and kept the bullet.
+            block({
+              id: 'kept',
+              order: 2,
+              kind: 'list',
+              listMarker: '•',
+              sourceText: '• Third point',
+              translatedText: '• တတိယ အချက်',
+              status: 'translated',
+            }),
+          ],
+        },
+      ],
+    }
+    const out = buildMarkdown(doc, {
+      title: 'T',
+      includeOriginal: false,
+      includePageHeadings: false,
+    })
+    expect(out).not.toContain('• •')
+    expect(out).toContain('• First point')
+    expect(out).toContain('• ဒုတိယ အချက်')
+    expect(out).toContain('• တတိယ အချက်')
+    // One bullet per list block.
+    expect(out.match(/•/g)).toHaveLength(3)
+  })
+
   it('keeps skipped and locked blocks because their text matters', () => {
     const out = buildMarkdown(makeDoc(), {
       title: 'Sample',

@@ -127,12 +127,11 @@ function blockParagraphs(block: ExportBlock, doc: ExportDocument, options: EpubO
   } else if (primary.trim().length > 0) {
     entries.push({ text: primary, source: false })
   }
-  const marker = listPrefix(block)
   const fontStack = escapeHtml(fontStackFor(block, { fontStack: options.fontStack }))
   const style = ` style="font-family: ${fontStack}"`
   return entries.map((entry, index) => {
     const lang = entry.source ? langTag(doc.sourceLang) : langTag(doc.targetLang)
-    const text = index === 0 ? `${marker}${entry.text}` : entry.text
+    const text = index === 0 ? `${listPrefix(block, entry.text)}${entry.text}` : entry.text
     return paragraph(text, entry.source ? ['source', 'block'] : ['block'], lang, style)
   })
 }

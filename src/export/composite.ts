@@ -84,13 +84,12 @@ function drawBlock(
     return block.x * scale
   }
 
-  const marker = listPrefix(block)
   const lines = fitted.lines.length > 0 ? fitted.lines : [text]
   const step = size * block.lineHeight * scale
   const x = anchorX()
 
   lines.forEach((line, index) => {
-    const value = index === 0 && marker.length > 0 ? marker + line : line
+    const value = index === 0 ? `${listPrefix(block, line)}${line}` : line
     if (value.length === 0) return
     ctx.fillText(value, x, block.y * scale + index * step)
   })

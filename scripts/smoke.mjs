@@ -463,6 +463,84 @@ try {
     'plaintext check',
   )
 
+  // 6c) Key / provider transfer (Settings → AI Providers) -----------------
+  await goto('/settings?tab=providers')
+  await toEnglish()
+  await sleep(400)
+  const transferCard = await waitFor(
+    `!!document.querySelector('[data-testid="key-transfer"]')`,
+    15000,
+  )
+  check('key transfer card renders on the providers tab', transferCard)
+  check(
+    'key export warns that the file holds plain-text keys',
+    await evalJs(
+      `/plain text/i.test(document.querySelector('[data-testid="key-transfer-warning"]')?.innerText ?? '')`,
+    ),
+  )
+
+  rmSync(DL_DIR, { recursive: true, force: true })
+  try {
+    await send('Browser.setDownloadBehavior', {
+      behavior: 'allow',
+      downloadPath: DL_DIR,
+      eventsEnabled: true,
+    })
+  } catch {
+    await send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: DL_DIR })
+  }
+  const clickedKeysExport = await clickWhenReady('[data-testid="keys-export"]')
+  let keyFile = null
+  for (let i = 0; i < 60 && !keyFile; i += 1) {
+    await sleep(200)
+    try {
+      const files = readdirSync(DL_DIR).filter(
+        (f) => /^aidt-keys-.*\.json$/.test(f) && !f.endsWith('.crdownload'),
+      )
+      if (files.length) keyFile = join(DL_DIR, files[0])
+    } catch {
+      /* dir not created yet */
+    }
+  }
+  check('key export downloads a JSON file', clickedKeysExport && !!keyFile, keyFile ?? 'no file')
+
+  if (keyFile) {
+    const bundle = JSON.parse(readFileSync(keyFile, 'utf8'))
+    check(
+      'exported key file carries usable keys and provider settings',
+      bundle.format === 'aidt-keys' &&
+        bundle.secrets === true &&
+        Array.isArray(bundle.keys) &&
+        bundle.keys.length >= 1 &&
+        typeof bundle.keys[0].secret === 'string' &&
+        bundle.keys[0].secret.length >= 8 &&
+        !!bundle.providers,
+      `format=${bundle.format} keys=${bundle.keys?.length} providers=${Object.keys(bundle.providers || {}).length}`,
+    )
+    // The exported secret must never have been rendered into the page.
+    check(
+      'exported secret never appears in the DOM',
+      (await evalJs(
+        `document.body.innerText.includes(${JSON.stringify(bundle.keys[0].secret)})`,
+      )) === false,
+      'plaintext check',
+    )
+
+    // Import the same file back: the key already exists, so nothing is added.
+    const keyDoc = await send('DOM.getDocument', { depth: -1 })
+    const { nodeId: keysNodeId } = await send('DOM.querySelector', {
+      nodeId: keyDoc.root.nodeId,
+      selector: 'input[data-testid="keys-file"]',
+    })
+    if (keysNodeId) {
+      await send('DOM.setFileInputFiles', { files: [resolve(keyFile)], nodeId: keysNodeId })
+      const deduped = await waitFor(`/Imported 0 keys/i.test(document.body.innerText)`, 15000)
+      check('re-importing the same key file is deduplicated', Boolean(deduped))
+    } else {
+      check('re-importing the same key file is deduplicated', false, 'no keys-file input')
+    }
+  }
+
   // 6a) A scanned PDF is flagged and offered OCR.
   await goto('/projects/new')
   await toEnglish()

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
@@ -11,12 +11,21 @@ import {
   Switch,
   type BadgeTone,
 } from '@/components/ui'
-import { IconExternal, IconKey, IconPlus, IconRefresh, IconTrash } from '@/components/layout/icons'
+import {
+  IconAlert,
+  IconExternal,
+  IconKey,
+  IconPlus,
+  IconRefresh,
+  IconTrash,
+} from '@/components/layout/icons'
 import { PROVIDERS, defaultModelFor, type ProviderId } from '@/config/models.config'
 import { logEvent } from '@/core/eventLogger'
 import { isVaultUnlocked, unlockVault, vaultPassphrase } from '@/core/vault'
 import { apiKeyRepo, type ApiKeySummary } from '@/db/repo-apiKeys'
+import { downloadKeyBundle, importKeyBundleFromFile } from '@/db/keyBundle'
 import { SETTING_KEYS, settingsRepo } from '@/db/repo-settings'
+import { useImportedModelsStore } from '@/stores/importedModelsStore'
 import { getAdapter } from '@/providers'
 import {
   buildModelOptions,
@@ -586,6 +595,140 @@ function ProviderCard({ providerId, keys, isActive, onChanged }: ProviderCardPro
 }
 
 /* ------------------------------------------------------------------ */
+/* Key / provider transfer                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Moves a whole provider setup to another machine in one file.
+ *
+ * The full database backup deliberately cannot: its ciphers are sealed under a
+ * device-bound key, so a restored key is undecryptable anywhere else. This
+ * file travels in the clear and is re-sealed on arrival — which is why the
+ * card says so out loud rather than quietly handing over credentials.
+ */
+function KeyTransferCard({ onChanged }: { onChanged: () => void }) {
+  const { t } = useTranslation()
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
+
+  async function handleExport() {
+    setBusy(true)
+    try {
+      const { file, bundle, undecryptable } = await downloadKeyBundle()
+      // Counts and a filename only — the secrets live in the file, never here.
+      logEvent({
+        state: 'SETTINGS',
+        action: 'provider.exportKeys',
+        severity: 'success',
+        messageMy: `သော့ ${bundle.keys.length} ခု ထုတ်ယူပြီး`,
+        messageEn: `Exported ${bundle.keys.length} API keys`,
+        technicalDetail: `${file} · ${bundle.keys.length} keys · ${Object.keys(bundle.providers).length} providers`,
+      })
+      toast(
+        'success',
+        t('settings.providers.keysExported', { count: bundle.keys.length, file }),
+        undecryptable > 0
+          ? t('settings.providers.keysLocked', { count: undecryptable })
+          : undefined,
+      )
+    } catch (error) {
+      toast('danger', t('toast.failed'), error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleImport(file: File) {
+    setBusy(true)
+    try {
+      const report = await importKeyBundleFromFile(file)
+      // The imported-model list is cached in a store — make it re-read.
+      useImportedModelsStore.setState({ loaded: false })
+      await useImportedModelsStore.getState().ensureLoaded()
+      onChanged()
+      logEvent({
+        state: 'SETTINGS',
+        action: 'provider.importKeys',
+        severity: 'success',
+        messageMy: `သော့ ${report.keysAdded} ခု ထည့်ပြီး`,
+        messageEn: `Imported ${report.keysAdded} API keys`,
+        technicalDetail: JSON.stringify(report),
+      })
+      toast(
+        report.keysAdded === 0 ? 'info' : 'success',
+        t('settings.providers.keysImported', {
+          added: report.keysAdded,
+          skipped: report.keysSkipped,
+        }),
+        report.activeProvider ?? file.name,
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      logEvent({
+        state: 'SETTINGS',
+        action: 'provider.importKeys.failed',
+        reasonCode: 'BACKUP_INVALID',
+        severity: 'error',
+        technicalDetail: message,
+      })
+      toast('danger', t('settings.providers.keysImportFailed'), message)
+    } finally {
+      setBusy(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  return (
+    <Card
+      title={t('settings.providers.transferTitle')}
+      description={t('settings.providers.transferDesc')}
+    >
+      <div className="flex flex-col gap-3" data-testid="key-transfer">
+        <p
+          className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-xs leading-relaxed text-text"
+          data-testid="key-transfer-warning"
+        >
+          <IconAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+          <span>{t('settings.providers.transferWarn')}</span>
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            loading={busy}
+            onClick={() => void handleExport()}
+            data-testid="keys-export"
+          >
+            {t('settings.providers.keysExport')}
+          </Button>
+          <input
+            ref={fileRef}
+            data-testid="keys-file"
+            type="file"
+            accept="application/json,.json"
+            className="sr-only"
+            aria-label={t('settings.providers.keysImport')}
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              if (file) void handleImport(file)
+            }}
+          />
+          <Button
+            size="sm"
+            variant="secondary"
+            loading={busy}
+            onClick={() => fileRef.current?.click()}
+            data-testid="keys-import"
+          >
+            {t('settings.providers.keysImport')}
+          </Button>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+/* ------------------------------------------------------------------ */
 /* Tab                                                                 */
 /* ------------------------------------------------------------------ */
 
@@ -620,6 +763,7 @@ export function ProvidersTab() {
   return (
     <div className="flex flex-col gap-4" data-testid="providers-tab">
       <VaultCard />
+      <KeyTransferCard onChanged={onChanged} />
       <Card title={t('settings.providers.title')} description={t('settings.providers.subtitle')}>
         <div className="flex items-start gap-3 rounded-md border border-dashed border-border bg-raised/40 px-3 py-3">
           <span aria-hidden="true" className="mt-0.5 text-faint">

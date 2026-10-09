@@ -373,3 +373,62 @@ describe('encrypted.pdf', () => {
     await expect(open('encrypted.pdf', 'wrong-password')).rejects.toBeInstanceOf(PasswordException)
   })
 })
+
+describe('table.pdf', () => {
+  const extract = async (doc: PDFDocumentProxy, pageIndex: number) => {
+    const page = await doc.getPage(pageIndex + 1)
+    return extractPage(page, {
+      pageIndex,
+      ctx: { sourceLang: 'en', targetLang: 'my' },
+      headerTexts: [],
+      footerTexts: [],
+    })
+  }
+
+  it('reads a table drawn cell by cell as one block of real cells', async () => {
+    const doc = await open('table.pdf')
+    const { blocks } = await extract(doc, 0)
+
+    const table = blocks.find((block) => block.kind === 'table')
+    expect(table).toBeDefined()
+    expect(table?.tableCells).toEqual([
+      ['Region', 'Q1', 'Q2'],
+      ['North', '120', '150'],
+      ['South', '90', '110'],
+      ['East', '75', '80'],
+    ])
+    // The text form is unchanged — the model still sees ` \t ` between cells —
+    // but it is built from the grid now, so the two can never disagree.
+    expect(table?.text.split('\n')).toEqual([
+      'Region \t Q1 \t Q2',
+      'North \t 120 \t 150',
+      'South \t 90 \t 110',
+      'East \t 75 \t 80',
+    ])
+  })
+
+  it('keeps the prose either side of a table out of it', async () => {
+    const doc = await open('table.pdf')
+    const { blocks } = await extract(doc, 0)
+
+    const tables = blocks.filter((block) => block.kind === 'table')
+    expect(tables).toHaveLength(1)
+    const prose = blocks.filter((block) => block.kind !== 'table').map((block) => block.text)
+    expect(prose.join('\n')).toContain('Revenue was reviewed')
+    expect(prose.join('\n')).toContain('without amendment')
+    expect(prose.join('\n')).toContain('Quarterly revenue')
+  })
+
+  it('pads a row whose middle cell is empty back out to the full width', async () => {
+    const doc = await open('table.pdf')
+    const { blocks } = await extract(doc, 1)
+
+    const table = blocks.find((block) => block.kind === 'table')
+    expect(table?.tableCells).toEqual([
+      ['Product', 'Units', 'Notes'],
+      ['Widget', '120', 'restocked'],
+      ['Gadget', '', 'clearance'],
+      ['Gizmo', '80', 'backorder'],
+    ])
+  })
+})

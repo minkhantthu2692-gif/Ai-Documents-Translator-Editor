@@ -52,6 +52,7 @@ function projectBlock(block: ExportBlock): BlockWithoutGeometry {
     listMarker: block.listMarker,
     headingLevel: block.headingLevel,
     links: block.links,
+    tableCells: block.tableCells,
     sourceText: block.sourceText,
     translatedText: block.translatedText,
     characterCount: block.characterCount,

@@ -19,6 +19,7 @@ import {
   resolvedOptions,
   round,
   slugify,
+  tableGrid,
 } from './shared'
 import type { ExportBlock, ExportDocument, ExportPage } from './types'
 
@@ -43,6 +44,7 @@ function block(overrides: Partial<ExportBlock> = {}): ExportBlock {
     listMarker: null,
     headingLevel: null,
     links: [],
+    tableCells: null,
     sourceText: 'Hello',
     translatedText: 'မင်္ဂလာပါ',
     characterCount: 10,
@@ -354,5 +356,30 @@ describe('applyLinks', () => {
       wrap,
     )
     expect(out).toBe('See <pricing|https://a.com/p> or <docs|https://a.com/d>')
+  })
+})
+
+describe('tableGrid', () => {
+  it('splits rows on newlines and cells on tabs, then pads to a rectangle', () => {
+    expect(tableGrid('a \t b\nc')).toEqual([
+      ['a', 'b'],
+      ['c', ''],
+    ])
+  })
+
+  it('trims the spaces extraction leaves around a cell', () => {
+    expect(tableGrid(' Name \t Value ')).toEqual([['Name', 'Value']])
+  })
+
+  it('keeps a column the model left empty', () => {
+    expect(tableGrid('a \t \t c')).toEqual([['a', '', 'c']])
+  })
+
+  it('is null when the text carries no cell separator at all', () => {
+    expect(tableGrid('just a sentence that used to be a table')).toBeNull()
+  })
+
+  it('is null for a single column, which is not a table however it is split', () => {
+    expect(tableGrid('one\ntwo\nthree')).toBeNull()
   })
 })

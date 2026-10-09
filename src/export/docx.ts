@@ -18,6 +18,7 @@
 
 import {
   AlignmentType,
+  BorderStyle,
   Document,
   ExternalHyperlink,
   HeadingLevel,
@@ -25,7 +26,11 @@ import {
   Packer,
   PageBreak,
   Paragraph,
+  Table,
+  TableCell,
+  TableRow,
   TextRun,
+  WidthType,
 } from 'docx'
 import { directionOf } from '@/lib/text'
 import {
@@ -35,6 +40,7 @@ import {
   linkSegments,
   listPrefix,
   pageBlocks,
+  tableGrid,
   textOf,
 } from './shared'
 import type { ExportBlock, ExportDocument } from './types'
@@ -171,6 +177,49 @@ function blockChildren(
   return runs
 }
 
+/** A hairline rule: low-contrast grey, the way a table is ruled on paper. */
+const TABLE_BORDER = { style: BorderStyle.SINGLE, size: 2, color: 'BFBFBF' }
+
+/**
+ * One grid as a real Word table.
+ *
+ * Every cell is a `TableCell` — the first row included. Which row (if any) is
+ * the header is not something the extractor knows and Word does not require
+ * one, so nothing is promoted: Markdown is the only format that must, because
+ * its grammar will not parse a table without a header line.
+ *
+ * The columns are equal. `tableCells` carries cell *text*, not cell boxes, so
+ * the PDF's own column widths are not available here — and equal columns are
+ * the honest guess: right for the many tables that are evenly ruled, readable
+ * for the rest. HTML at least has the block's width to divide up.
+ */
+function blockTable(grid: string[][], block: ExportBlock, font: string): Table {
+  const spacing = { line: lineUnits(block.lineHeight), lineRule: LineRuleType.AUTO }
+  const rows = grid.map(
+    (cells) =>
+      new TableRow({
+        children: cells.map(
+          (cell) =>
+            new TableCell({
+              children: [new Paragraph({ spacing, children: blockChildren(cell, block, font) })],
+            }),
+        ),
+      }),
+  )
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: {
+      top: TABLE_BORDER,
+      bottom: TABLE_BORDER,
+      left: TABLE_BORDER,
+      right: TABLE_BORDER,
+      insideHorizontal: TABLE_BORDER,
+      insideVertical: TABLE_BORDER,
+    },
+    rows,
+  })
+}
+
 /** One paragraph: alignment, RTL direction, line spacing, one run per stretch. */
 function blockParagraph(
   text: string,
@@ -189,16 +238,19 @@ function blockParagraph(
 }
 
 /**
- * The paragraphs for one block: the primary text always first (carrying the
+ * The children one block contributes: the primary text first (carrying the
  * list marker), then — with `includeOriginal` — the translation on its own
  * paragraph. Blocks whose text is empty contribute nothing.
+ *
+ * A `kind === 'table'` block contributes `Table`s instead of paragraphs; see
+ * `blockTable`.
  *
  * Exactly one paragraph per block can carry an outline level, and it is the
  * one holding the translation: in a bilingual export the source sits beside
  * it, and a reader navigating by heading wants to land on what the document
  * was turned into, not on the text they already had.
  */
-function blockParagraphs(block: ExportBlock, options: DocxOptions): Paragraph[] {
+function blockParagraphs(block: ExportBlock, options: DocxOptions): Array<Paragraph | Table> {
   const { source, target, primary } = textOf(block, options.includeOriginal)
   const entries: Array<{ text: string; source: boolean }> = []
   if (options.includeOriginal) {
@@ -210,6 +262,22 @@ function blockParagraphs(block: ExportBlock, options: DocxOptions): Paragraph[] 
     entries.push({ text: primary, source: false })
   }
   if (entries.length === 0) return []
+
+  // A table is a table, in both columns of a bilingual export. An entry whose
+  // text has no cells left in it — a model that answered a table with one
+  // sentence — falls back to a paragraph rather than emitting an empty grid,
+  // and if no entry is tabular the whole block falls through.
+  if (block.kind === 'table') {
+    const grids = entries.map((entry) => tableGrid(entry.text))
+    if (grids.some((grid) => grid !== null)) {
+      return entries.map((entry, index) => {
+        const grid = grids[index]
+        return grid
+          ? blockTable(grid, block, options.font)
+          : blockParagraph(entry.text, block, options.font, null)
+      })
+    }
+  }
 
   // The title occupies Heading 1 and an optional `Page N` Heading 2, so the
   // document's own headings start below whichever of those is being emitted.
@@ -255,8 +323,8 @@ function pageSizeOf(
 }
 
 /** Title heading, page headings, page breaks and every block, in order. */
-function buildChildren(doc: ExportDocument, options: DocxOptions): Paragraph[] {
-  const children: Paragraph[] = []
+function buildChildren(doc: ExportDocument, options: DocxOptions): Array<Paragraph | Table> {
+  const children: Array<Paragraph | Table> = []
   if (options.titleHeading && options.title.trim().length > 0) {
     children.push(
       new Paragraph({

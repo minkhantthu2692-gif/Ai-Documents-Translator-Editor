@@ -11,7 +11,15 @@
  * Pure string building: no DOM, no worker state, safe in Vitest.
  */
 
-import { applyLinks, contentPages, headingOffset, listPrefix, pageBlocks, textOf } from './shared'
+import {
+  applyLinks,
+  contentPages,
+  headingOffset,
+  listPrefix,
+  pageBlocks,
+  tableGrid,
+  textOf,
+} from './shared'
 import type { ExportBlock, ExportDocument } from './types'
 
 export interface MarkdownOptions {
@@ -60,14 +68,60 @@ function longestBacktickRun(text: string): number {
   return longest
 }
 
+/**
+ * Escapes the one character that would end a table cell early.
+ *
+ * Only `|`. This builder leaves the other Markdown metacharacters alone
+ * everywhere else, and escaping them here would make the same sentence render
+ * differently inside a table than outside one — while an unescaped `|` does
+ * not just render wrong, it adds a column.
+ */
+function escapeTableCell(text: string): string {
+  return text.replace(/\|/g, '\\|').replace(/\n/g, ' ')
+}
+
+/** `linkMarkdown` with the pipe escaped too, for a link inside a cell. */
+function tableLinkMarkdown(url: string, anchor: string): string {
+  return `[${anchor.replace(/[\\[\]|]/g, '\\$&')}](${url})`
+}
+
+/**
+ * One grid as GitHub-flavoured Markdown table lines.
+ *
+ * Markdown has no table without a header row, so **row 0 becomes the header**
+ * whether or not the PDF had one — a format constraint, not a claim about the
+ * document. A one-row table still emits both the header and the separator, and
+ * a bodyless table is valid. `html.ts` and `epub.ts` make no such promotion:
+ * they can show every row the same way, and the extractor does not know which
+ * (if any) is a header.
+ */
+function tableMarkdown(grid: string[][], block: ExportBlock): string[] {
+  const cell = (text: string): string =>
+    applyLinks(text, block.links, tableLinkMarkdown, escapeTableCell)
+  const [header, ...body] = grid
+  return [
+    `| ${header.map(cell).join(' | ')} |`,
+    `| ${header.map(() => '---').join(' | ')} |`,
+    ...body.map((row) => `| ${row.map(cell).join(' | ')} |`),
+  ]
+}
+
 function blockGroup(block: ExportBlock, includeOriginal: boolean, levelsAbove: number): string {
   const { source, primary } = textOf(block, false)
   if (primary.trim().length === 0) return ''
   const lines: string[] = []
+  const sourceGrid =
+    block.kind === 'table' && includeOriginal && source !== primary ? tableGrid(source) : null
   // Never emit an empty blockquote, and skip it when it would repeat the line.
   if (includeOriginal && source.trim().length > 0 && source !== primary) {
-    for (const line of applyLinks(source, block.links, linkMarkdown).split('\n')) {
-      lines.push(`> ${line}`)
+    // A quoted table stays a table: `> | a | b |` is legal, and quoting the
+    // raw `a \t b` string instead would print the cell separators as tabs.
+    if (sourceGrid) {
+      for (const line of tableMarkdown(sourceGrid, block)) lines.push(`> ${line}`)
+    } else {
+      for (const line of applyLinks(source, block.links, linkMarkdown).split('\n')) {
+        lines.push(`> ${line}`)
+      }
     }
   }
   if (block.kind === 'code') {
@@ -81,6 +135,11 @@ function blockGroup(block: ExportBlock, includeOriginal: boolean, levelsAbove: n
     lines.push(`${fence}\n${primary}\n${fence}`)
     // Guard the "exactly one blank line between blocks" invariant against text
     // that ends (or starts) with a newline.
+    return lines.join('\n').replace(/^\n+|\n+$/g, '')
+  }
+  const grid = block.kind === 'table' ? tableGrid(primary) : null
+  if (grid) {
+    lines.push(...tableMarkdown(grid, block))
     return lines.join('\n').replace(/^\n+|\n+$/g, '')
   }
   const body = applyLinks(primary, block.links, linkMarkdown)

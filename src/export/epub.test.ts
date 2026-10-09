@@ -24,6 +24,7 @@ function block(partial: Partial<ExportBlock>): ExportBlock {
     listMarker: null,
     headingLevel: null,
     links: [],
+    tableCells: null,
     sourceText: '',
     translatedText: '',
     characterCount: 0,
@@ -371,5 +372,55 @@ describe('buildEpub code blocks', () => {
     const chapter = await codeChapter({ sourceText: 'const a = 1;', listMarker: '•' })
     expect(chapter).toContain('>const a = 1;</pre>')
     expect(chapter).not.toContain('•const')
+  })
+})
+
+describe('buildEpub tables', () => {
+  async function tableChapter(overrides: Partial<ExportBlock> = {}) {
+    const doc: ExportDocument = {
+      ...fixtureDoc(),
+      pages: [
+        page(0, [
+          block({
+            id: 'tbl',
+            kind: 'table',
+            sourceText: 'Name \t Value\nAlpha \t 12',
+            translatedText: 'Name \t Value\nAlpha \t 12',
+            tableCells: [
+              ['Name', 'Value'],
+              ['Alpha', '12'],
+            ],
+            ...overrides,
+          }),
+        ]),
+      ],
+    }
+    const zip = await JSZip.loadAsync(await buildEpub(doc, epubOptions()))
+    return zipText(zip, 'OEBPS/text/chap_1.xhtml')
+  }
+
+  it('emits a real table whose cells are td elements', async () => {
+    const chapter = await tableChapter()
+    expect(chapter).toContain('<table')
+    expect(chapter).toContain('<tr><td>Name</td><td>Value</td></tr>')
+    expect(chapter).toContain('<tr><td>Alpha</td><td>12</td></tr>')
+    expectWellFormed(chapter, 'chap_1.xhtml')
+  })
+
+  it('carries the block classes onto the table so a source table stays grey', async () => {
+    const chapter = await tableChapter()
+    expect(chapter).toContain('<table class="block"')
+    expect(chapter).not.toContain('<p class="block">Name')
+  })
+
+  it('rules the cells from the chapter stylesheet', async () => {
+    const zip = await JSZip.loadAsync(await buildEpub(fixtureDoc(), epubOptions()))
+    expect(await zipText(zip, 'OEBPS/css/main.css')).toContain('table.block td {')
+  })
+
+  it('falls back to a paragraph when the printed text has no cells left', async () => {
+    const chapter = await tableChapter({ translatedText: 'The figures were summarised.' })
+    expect(chapter).not.toContain('<table')
+    expect(chapter).toContain('The figures were summarised.')
   })
 })

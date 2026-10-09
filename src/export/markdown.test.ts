@@ -24,6 +24,7 @@ function block(overrides: Partial<ExportBlock>): ExportBlock {
     listMarker: null,
     headingLevel: null,
     links: [],
+    tableCells: null,
     sourceText: '',
     translatedText: '',
     characterCount: 0,
@@ -499,5 +500,64 @@ describe('code blocks', () => {
     })
     expect(out).toContain('> const a = 1;')
     expect(out).toContain('```\nမ\n```')
+  })
+})
+
+describe('tables', () => {
+  const opts = { title: 'Sample', includeOriginal: false, includePageHeadings: false }
+
+  function tableDoc(overrides: Partial<ExportBlock> = {}): ExportDocument {
+    return {
+      ...makeDoc(),
+      pages: [
+        {
+          index: 0,
+          width: 612,
+          height: 792,
+          rotation: 0,
+          contentClass: 'text',
+          blocks: [
+            block({
+              kind: 'table',
+              sourceText: 'Name \t Value\nAlpha \t 12',
+              translatedText: 'Name \t Value\nAlpha \t 12',
+              tableCells: [
+                ['Name', 'Value'],
+                ['Alpha', '12'],
+              ],
+              ...overrides,
+            }),
+          ],
+        },
+      ],
+    }
+  }
+
+  it('emits a pipe table, promoting row 0 to the header the syntax demands', () => {
+    const out = buildMarkdown(tableDoc(), opts)
+    expect(out).toContain('| Name | Value |\n| --- | --- |\n| Alpha | 12 |')
+  })
+
+  it('escapes a pipe inside a cell, which would otherwise add a column', () => {
+    const out = buildMarkdown(
+      tableDoc({ sourceText: 'a|b \t c', translatedText: 'a|b \t c' }),
+      opts,
+    )
+    expect(out).toContain('| a\\|b | c |')
+  })
+
+  it('quotes the source above the translation as a table too', () => {
+    const out = buildMarkdown(
+      tableDoc({ sourceText: 'Name \t Value', translatedText: 'Ner \t Taya' }),
+      { ...opts, includeOriginal: true },
+    )
+    expect(out).toContain('> | Name | Value |')
+    expect(out).toContain('| Ner | Taya |')
+  })
+
+  it('falls back to a paragraph when the printed text has no cells left', () => {
+    const out = buildMarkdown(tableDoc({ translatedText: 'The figures were summarised.' }), opts)
+    expect(out).not.toContain('| --- |')
+    expect(out).toContain('The figures were summarised.')
   })
 })

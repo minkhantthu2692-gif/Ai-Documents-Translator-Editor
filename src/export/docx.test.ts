@@ -24,6 +24,7 @@ function block(partial: Partial<ExportBlock>): ExportBlock {
     listMarker: null,
     headingLevel: null,
     links: [],
+    tableCells: null,
     sourceText: '',
     translatedText: '',
     characterCount: 0,
@@ -334,5 +335,53 @@ describe('buildDocx code blocks', () => {
     expect(xml).not.toContain('Heading1')
     expect(xml).not.toContain('<w:outlineLvl')
     expect(xml).not.toContain('1. if (a)')
+  })
+})
+
+describe('buildDocx tables', () => {
+  async function tableXml(
+    overrides: Partial<ExportBlock> = {},
+    docxOpts: Partial<DocxOptions> = {},
+  ) {
+    const doc: ExportDocument = {
+      ...fixtureDoc(),
+      pages: [
+        page(0, [
+          block({
+            id: 'tbl',
+            kind: 'table',
+            sourceText: 'Name \t Value\nAlpha \t 12',
+            translatedText: 'Name \t Value\nAlpha \t 12',
+            tableCells: [
+              ['Name', 'Value'],
+              ['Alpha', '12'],
+            ],
+            ...overrides,
+          }),
+        ]),
+      ],
+    }
+    return zipText(await buildDocx(doc, options(docxOpts)), 'word/document.xml')
+  }
+
+  it('writes a real w:tbl with one cell per column', async () => {
+    const xml = await tableXml()
+    expect(xml).toContain('<w:tbl>')
+    expect(xml.match(/<w:tc>/g) ?? []).toHaveLength(4)
+    expect(xml).toContain('<w:t xml:space="preserve">Name</w:t>')
+    expect(xml).toContain('<w:t xml:space="preserve">Alpha</w:t>')
+    expect(xml).not.toContain('Name \t Value')
+  })
+
+  it('gives the table no outline level and no bullet', async () => {
+    const xml = await tableXml({ headingLevel: 1, listMarker: '1.' }, { titleHeading: false })
+    expect(xml).not.toContain('Heading1')
+    expect(xml).not.toContain('1. Name')
+  })
+
+  it('falls back to a paragraph when the printed text has no cells left', async () => {
+    const xml = await tableXml({ translatedText: 'The figures were summarised.' })
+    expect(xml).not.toContain('<w:tbl>')
+    expect(xml).toContain('The figures were summarised.')
   })
 })

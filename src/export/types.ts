@@ -93,6 +93,18 @@ export interface ExportBlock {
    * URL itself.
    */
   links: LinkRef[]
+  /**
+   * The extracted grid of a `kind === 'table'` block — rows × columns, every
+   * row the same length, `null` otherwise. This is the **source** grid: the
+   * one `sourceText` was built from (` \t ` between cells, `\n` between rows).
+   *
+   * The renderers deliberately do *not* read it. They split `printedText`,
+   * because a translated table must show translated cells and the model is
+   * free to hand back a different number of columns than it was given. This is
+   * here for the formats that are data rather than a document — the JSON
+   * export emits it so a consumer can rebuild the table without re-parsing.
+   */
+  tableCells: string[][] | null
   sourceText: string
   translatedText: string
   characterCount: number

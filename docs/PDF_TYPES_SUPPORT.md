@@ -52,7 +52,7 @@ beyond one cached probe. Configure with `VITE_PDF_SIDECAR_URL` (default
 | 3  | Mixed PDF (text + scanned pages/images) | 🔶 | Per-page classes + method selection ✅ (text / OCR / hybrid): hybrid keeps the text layer authoritative, OCRs the rest and drops blocks that overlap existing text (unit-tested); reading order across merged column lines ✅ |
 | 4  | Multi-Column PDF (2/3-col, newspaper, reading order) | ✅     | `complex` classification for ≥3 columns ✅ (item-level gutter detection); reading order ✅ — rows fused across a gutter are cut back into one line per column, columns are read left-to-right (2–4), and a title spanning the fold opens its own zone ahead of both columns |
 | 5  | PDF With Images (captions, diagrams, charts) | 🔶 | Images kept in the page render/background ✅; image-anchored extraction + caption linkage in phase c |
-| 6  | PDF With Tables (simple/complex, merged cells, multi-page) | 🔶→⏳ | Row detection + table blocks ✅ (text representation); table rows are explicitly exempt from the column split so merging cells stay one row; pdfplumber cell extraction implemented in the sidecar server (frontend integration pending), merged cells/multi-page ❌ |
+| 6  | PDF With Tables (simple/complex, merged cells, multi-page) | 🔶→⏳ | **Real table cells ✅** — a run of rows whose columns align becomes one `kind: 'table'` block carrying `tableCells` (rows × columns) as data, and HTML/EPUB draw a real `<table>`, DOCX a real `w:tbl`, Markdown a pipe table, JSON the grid (see below); table rows are explicitly exempt from the column split so merging cells stay one row; **merged cells and multi-page tables ❌**, and a gutter narrower than one em is not read as a column |
 | 7  | Academic / Research PDF (footnotes, refs, citations, equations) | 🔶→⏳ | 2-column papers classified `text` ✅ and read in column order ✅; footnote regions ✅ (see below); heading hierarchy ✅ — every heading carries a 1–6 level from a document-wide ladder (see below); equations ❌ (see #23) |
 | 8  | Business / Report PDF (reports, invoices, financial) | 🔶 | Paragraph/table extraction ✅; invoice form layout understanding ❌ |
 | 9  | Forms / Structured PDF (fillable, checkboxes, signatures) | 🔶 | Field detection/counted in probe ✅, password-style unlock flow ✅; translating labels in phase c; form filling ❌ (out of scope) |
@@ -80,7 +80,7 @@ beyond one cached probe. Configure with `VITE_PDF_SIDECAR_URL` (default
 | (a) Classification | `complex` class, complexity scoring, item-level column detection, wizard metadata | 4, 12, 22 classification ✅ |
 | (b) Extraction methods | Browser Tesseract OCR auto-runs per window (status lifecycle, confidence, cached recognition), hybrid merge with geometric dedup, run-OCR setting persisted per project, Python sidecar server (protocol v1, 20 tests) | 2, 3 extraction ✅ |
 | (b2) Sidecar wiring | `src/sidecar/sidecarClient.ts`: cached `GET /health` probe, `POST /ocr` with page/language/password, per-line confidence added to the server response, lazy render so a sidecar page never rasterises in the browser, automatic fall-back to browser Tesseract on any failure (22 client + 5 pipeline + 1 Python test) | 2 extraction ✅ with a native-OCR fast path |
-| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. `fixtures/complex.pdf` (3 columns + rotated watermark) now reads col 1 → col 2 → col 3 → watermark end-to-end. **Footnote regions ✅** — `src/pdf/footnotes.ts` marks them before any merging happens. **Heading hierarchy ✅** — `src/pdf/headings.ts` builds one document-wide ladder of heading font sizes during the probe and every page levels its headings against it; exporters render `h1`–`h6`, `HeadingLevel.HEADING_1–6` and ATX hashes. **Links ✅** — `src/pdf/links.ts` turns every external `/Link` rectangle into the words it covers and every exporter renders them as a real anchor (see below). **Code blocks ✅** — `src/pdf/codeBlocks.ts` calls a run of lines code when two independent readings agree: a monospaced face *and* statement punctuation; a monospaced face *and* nesting (which is what catches YAML and JSON, whose lines carry no punctuation to score); or punctuation alone across several lines with a brace somewhere. `structure.ts` gives it `kind: 'code'`, stamps `skipRule: 'code'` so the model never rewrites a program, and hands the indentation back — see below. Remaining in this phase: real table cells, image-anchored extraction, form labels | 4 ✅, reading order for 3 / 7 / 12 ✅, footnotes for 7 / 11 / 14 ✅, heading hierarchy for 7 ✅, links for 19 / 25 ✅, code blocks for 13 / 24 ✅; then 5, 6, 9 |
+| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. `fixtures/complex.pdf` (3 columns + rotated watermark) now reads col 1 → col 2 → col 3 → watermark end-to-end. **Footnote regions ✅** — `src/pdf/footnotes.ts` marks them before any merging happens. **Heading hierarchy ✅** — `src/pdf/headings.ts` builds one document-wide ladder of heading font sizes during the probe and every page levels its headings against it; exporters render `h1`–`h6`, `HeadingLevel.HEADING_1–6` and ATX hashes. **Links ✅** — `src/pdf/links.ts` turns every external `/Link` rectangle into the words it covers and every exporter renders them as a real anchor (see below). **Code blocks ✅** — `src/pdf/codeBlocks.ts` calls a run of lines code when two independent readings agree: a monospaced face *and* statement punctuation; a monospaced face *and* nesting (which is what catches YAML and JSON, whose lines carry no punctuation to score); or punctuation alone across several lines with a brace somewhere. `structure.ts` gives it `kind: 'code'`, stamps `skipRule: 'code'` so the model never rewrites a program, and hands the indentation back — see below. **Table cells ✅** — `src/pdf/rowSplit.ts` reads a run of rows whose columns align as one `kind: 'table'` block with `tableCells` as data, and every format draws a real grid rather than tab-separated text — see below. Remaining in this phase: image-anchored extraction, form labels | 4 ✅, reading order for 3 / 7 / 12 ✅, footnotes for 7 / 11 / 14 ✅, heading hierarchy for 7 ✅, links for 19 / 25 ✅, code blocks for 13 / 24 ✅, table cells for 6 ✅; then 5, 9 |
 | (d) Layout auto-adjust | **Translation-time auto-fit ✅** — `src/editor/layout.ts` re-measures a block the moment a translation lands and takes the largest size in `[6pt, originalFontSize]` whose wrapped text still fits the original bbox; never a size the reader pinned, and never below the floor — an unfittable block keeps the document's own size and is flagged rather than shrunk into illegibility. Runs on the bulk queue, on inline re-apply and on accept-suggestion, never on a person typing; `layout.autoFit` in Settings → General turns it off. **Reflow ✅** — `src/export/reflow.ts` pushes the blocks under one that outgrew its box down by exactly the growth, within their own column, stopping at the page edge; HTML emits `min-height` where it emitted `height`, so a box is a floor the translation may grow into | 1, 8, 10, 12 ✅ (translation-time layout + the absolute HTML/print export) |
 
 ### Why reading order needed two detectors
@@ -99,6 +99,48 @@ block into a stack of single-cell paragraphs. `detectColumns` (complexity
 scoring) deliberately keeps refusing pages whose title bridges the gutter; that
 refusal is correct for scoring and wrong for order, which is why
 `structurePage` does not use it.
+
+### Why a table has to be read geometrically
+
+`groupItemsIntoLines` collapses every whitespace run to a single space and
+trims, because that is what prose needs. The cost is that the *layout* — which
+is the only thing separating a cell from a word — is gone by the time
+`structure.ts` sees a line. The original row detector split `line.text` on
+`/\s{2,}|\t/`, so it could not match a real PDF at all: it had been firing only
+on lines a test built by hand. `src/pdf/rowSplit.ts` now answers two different
+questions two different ways.
+
+**"Is this run of lines a table?"** (`tableForLines`) is asked once a block
+exists, and read off geometry. pdf.js emits one text item per show-text
+operator, so each cell arrives as its own run at its own x, and a gap of a
+full em between two runs on a shared baseline cannot be a word space — no face
+sets one that wide (0.2–0.5 em proportional, exactly 0.5 em monospaced).
+Cut positions are then clustered and a cut only becomes a column when most of
+the rows agree on it, because a table is *aligned* columns: one row's long
+word space is not a column. Rows that carry no geometry at all (hand-built
+fixtures, OCR) fall back to agreeing on a column count. A row has to come out
+at least half filled, which is what keeps a wide-gapped line of prose that
+happened to sit beside a table from being read as a row of it.
+
+**"Must reading order leave this line whole?"** (`looksLikeTableRow`) is asked
+of a single line, before any block exists, and is the harder of the two. A row
+fused across a column gutter and a genuine two-cell row have the same runs,
+the same gaps and the same baselines — the two fixtures that pin `cutAtBands`
+cannot be told apart by gap (28pt against 26pt) or by run count (two against
+three), because they were written to differ only in the whitespace of their
+text. What separates them in a real document is the *width* of the runs: a
+cell is a label or a figure, a column's run is a span of prose. So the guard
+accepts the whole-line whitespace form (what a fixture or an OCR line has) or,
+when there is none, geometry restricted to runs narrower than eight ems. Get
+that wrong in the generous direction and columns stop being cut apart, which
+costs types 3, 7 and 12; get it wrong in the strict direction and a real table
+flattens into one paragraph per column.
+
+`fixtures/table.pdf` is the end of this: two pages whose cells are each their
+own positioned show-text operator — the shape a document processor writes —
+one row leaving a middle cell empty, and a paragraph on either side that has
+to stay a paragraph. Neither page can be reached by a test that constructs a
+line by hand.
 
 ### Why a snippet's indentation has to be measured back
 
@@ -365,4 +407,14 @@ means two unrelated monospaced blocks that sit close together can fuse into
 one, since "both lines are monospaced" is the whole of that test. No export
 format renders syntax colouring: the PDF does not record which tokens were
 which colour per glyph, so a snippet is set in one colour like the prose
-around it._
+around it. Table detection has three gaps of its own. A gutter narrower than
+one em is not read as a column - that is the same threshold that keeps word
+spaces out, and plenty of tables are ruled tighter than a full em. A row whose
+runs offer no boundary at all (a last cell left blank, for instance) stops the
+whole block being a table, and a row that comes out less than half filled is
+read as prose that sat beside a table rather than a row of it - which is the
+trade that keeps prose out. And `tableCells` records cell *text*, not cell
+boxes, so DOCX columns are equal-width and HTML divides the block's own width;
+the PDF's real column widths are not available. Markdown is the one format
+that must promote row 0 to the header, because its grammar has no table
+without one; HTML, EPUB and DOCX make no such claim about the document._

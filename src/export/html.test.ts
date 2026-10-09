@@ -29,6 +29,7 @@ function block(overrides: Partial<ExportDocument['pages'][number]['blocks'][numb
     listMarker: null,
     headingLevel: null,
     links: [],
+    tableCells: null,
     sourceText: 'Hello world',
     translatedText: 'မြန်မာစာ စာသား',
     characterCount: 11,
@@ -558,5 +559,72 @@ describe('code blocks', () => {
     const html = buildHtmlDocument(doc(), base)
     expect(html).not.toContain('block code')
     expect(html).not.toContain('tab-size:4')
+  })
+})
+
+describe('tables', () => {
+  const TABLE = 'Region \t Q1 \t Q2\nNorth \t 120 \t 150'
+
+  function tableDoc(overrides: Partial<ExportBlock> = {}): ExportDocument {
+    return doc({
+      pages: [
+        {
+          index: 0,
+          width: 612,
+          height: 792,
+          rotation: 0,
+          contentClass: 'text',
+          blocks: [
+            block({
+              kind: 'table',
+              sourceText: TABLE,
+              translatedText: TABLE,
+              tableCells: [
+                ['Region', 'Q1', 'Q2'],
+                ['North', '120', '150'],
+              ],
+              ...overrides,
+            }),
+          ],
+        },
+      ],
+    })
+  }
+
+  it('draws cells instead of a paragraph of tab-separated text', () => {
+    const html = buildHtmlDocument(tableDoc(), base)
+    expect(html).toContain('<table>')
+    expect(html).toContain('<tr><td>Region</td><td>Q1</td><td>Q2</td></tr>')
+    expect(html).toContain('<tr><td>North</td><td>120</td><td>150</td></tr>')
+    expect(html).not.toContain('Region \t')
+  })
+
+  it('never lets a table become a heading', () => {
+    const html = buildHtmlDocument(tableDoc({ headingLevel: 1 }), base)
+    expect(html).not.toMatch(/<h[1-6][^>]*data-block-id/)
+  })
+
+  it('rules the cells in the absolute layout', () => {
+    expect(buildHtmlDocument(tableDoc(), base)).toContain('.page td {')
+  })
+
+  it('renders the table in the flow layout through a div, not a p', () => {
+    const html = buildHtmlDocument(tableDoc(), { ...base, layout: 'flow' })
+    expect(html).toContain('<div class="tgt table"')
+    expect(html).toContain('<table>')
+    expect(html).not.toMatch(/<p[^>]*><table>/)
+  })
+
+  it('falls back to the paragraph when the printed text has no cells left', () => {
+    const html = buildHtmlDocument(
+      tableDoc({ translatedText: 'The figures were summarised in prose.' }),
+      base,
+    )
+    expect(html).not.toContain('<table>')
+    expect(html).toContain('The figures were summarised in prose.')
+  })
+
+  it('leaves an ordinary block out of the table styling', () => {
+    expect(buildHtmlDocument(doc(), base)).not.toContain('<table>')
   })
 })

@@ -144,6 +144,15 @@ export interface BlockRecord extends BaseRecord {
    * were captured simply has none, and every reader must default it.
    */
   links?: LinkRef[]
+  /**
+   * The cells of `kind === 'table'` — one array of cell strings per row, every
+   * row the same length, `null` for every other kind. Optional for the same
+   * reason `headingLevel` and `links` are: a row parsed before cells were
+   * captured as data simply has none, and every reader must default it. The
+   * block's `sourceText` still carries the cells as ` \t `-separated text, so
+   * an old row renders — just through the text fallback rather than the grid.
+   */
+  tableCells?: string[][] | null
   /** 0..1 heuristic quality of the last successful translation (null = none). */
   translationConfidence: number | null
   /** Flag from the last translation pass (null = clean). */

@@ -1,0 +1,272 @@
+/**
+ * Table detection acceptance tests.
+ *
+ * Two things are being pinned here, and they pull in opposite directions:
+ *
+ *  - the block builder must turn a real table — cells as separate positioned
+ *    show-text operators — into one rectangular grid, which only geometry can
+ *    do because `groupItemsIntoLines` has already flattened the layout out of
+ *    `line.text`;
+ *  - the reading-order pass must keep cutting a row fused across a column
+ *    gutter, which only the text form can tell apart from a table row, since
+ *    the two fixtures in `readingOrder.test.ts` differ in no measurable way
+ *    except that one was written with a double space.
+ *
+ * `fixtures/table.pdf` is the end of this: it is built cell by cell, exactly
+ * as a document processor writes a table, and neither of its pages can be
+ * reached by any test that constructs a line by hand.
+ */
+import { describe, expect, it } from 'vitest'
+import {
+  cellBoundaries,
+  cellGapThreshold,
+  looksLikeTableRow,
+  rowCells,
+  tableForLines,
+} from './rowSplit'
+import type { GroupedLine, LineRun, LineStyle } from './lineGrouping'
+import { lineId, type BBox } from './stableId'
+
+const BASE_STYLE: LineStyle = {
+  fontFamily: 'Helvetica',
+  fontSize: 12,
+  bold: false,
+  italic: false,
+  color: '#000000',
+  rotation: 0,
+}
+
+/** A line with per-run geometry — the shape a real PDF produces. */
+function row(y: number, cells: Array<[text: string, x: number, w: number]>): GroupedLine {
+  const runs: LineRun[] = cells.map(([text, x, w]) => ({ x, w, text }))
+  const left = Math.min(...runs.map((run) => run.x))
+  const right = Math.max(...runs.map((run) => run.x + run.w))
+  const bbox: BBox = { x: left, y, w: right - left, h: 14 }
+  const text = cells.map(([value]) => value).join(' ')
+  return { id: lineId(0, bbox, text), text, bbox, style: { ...BASE_STYLE }, itemIndexes: [], runs }
+}
+
+/** A line with no sub-line geometry: hand-built fixtures and OCR output. */
+function plain(text: string, y = 100): GroupedLine {
+  const bbox: BBox = { x: 72, y, w: 200, h: 14 }
+  return { id: lineId(0, bbox, text), text, bbox, style: { ...BASE_STYLE }, itemIndexes: [] }
+}
+
+describe('cellGapThreshold', () => {
+  it('is one em, and never smaller than four points', () => {
+    expect(cellGapThreshold(12)).toBe(12)
+    expect(cellGapThreshold(3)).toBe(4)
+  })
+
+  it('sits well above any word space', () => {
+    // Proportional faces set 0.2-0.5 em for a space, so a gap of a full em
+    // cannot be typography — it is layout, and layout on a baseline is a cell.
+    expect(cellGapThreshold(11)).toBeGreaterThan(11 * 0.5)
+  })
+})
+
+describe('cellBoundaries', () => {
+  it('marks the left edge of every run preceded by a cell-sized gap', () => {
+    expect(
+      cellBoundaries(
+        row(100, [
+          ['Region', 72, 35],
+          ['Q1', 260, 15],
+          ['Q2', 430, 15],
+        ]),
+      ),
+    ).toEqual([260, 430])
+  })
+
+  it('finds nothing when every gap is a word space', () => {
+    expect(
+      cellBoundaries(
+        row(100, [
+          ['Name', 72, 30],
+          ['Value', 110, 35],
+        ]),
+      ),
+    ).toEqual([])
+  })
+
+  it('finds nothing in a line made of one run', () => {
+    expect(cellBoundaries(row(100, [['A single sentence.', 72, 120]]))).toEqual([])
+  })
+
+  it('finds nothing in a line with no geometry at all', () => {
+    expect(cellBoundaries(plain('Name    Value'))).toEqual([])
+  })
+})
+
+describe('rowCells', () => {
+  it('splits a line on its own runs', () => {
+    expect(
+      rowCells(
+        row(100, [
+          ['North', 72, 30],
+          ['120', 260, 18],
+          ['150', 430, 18],
+        ]),
+      ),
+    ).toEqual(['North', '120', '150'])
+  })
+
+  it('falls back to the text when the line carries no runs', () => {
+    expect(rowCells(plain('Name    Value'))).toEqual(['Name', 'Value'])
+  })
+
+  it('is null for an ordinary sentence, however it arrives', () => {
+    expect(rowCells(row(100, [['Revenue rose in the third quarter.', 72, 180]]))).toBeNull()
+    expect(rowCells(plain('Revenue rose in the third quarter.'))).toBeNull()
+  })
+})
+
+describe('tableForLines', () => {
+  it('builds a rectangle from cut positions that recur across the rows', () => {
+    const lines = [
+      row(100, [
+        ['Region', 72, 35],
+        ['Q1', 260, 15],
+        ['Q2', 430, 15],
+      ]),
+      row(84, [
+        ['North', 72, 30],
+        ['120', 260, 18],
+        ['150', 430, 18],
+      ]),
+      row(68, [
+        ['South', 72, 32],
+        ['90', 260, 12],
+        ['110', 430, 18],
+      ]),
+    ]
+    expect(tableForLines(lines)?.rows).toEqual([
+      ['Region', 'Q1', 'Q2'],
+      ['North', '120', '150'],
+      ['South', '90', '110'],
+    ])
+  })
+
+  it('pads a row whose middle cell is empty back to the full width', () => {
+    const lines = [
+      row(100, [
+        ['Product', 72, 40],
+        ['Units', 300, 25],
+        ['Notes', 460, 30],
+      ]),
+      row(84, [
+        ['Widget', 72, 35],
+        ['120', 300, 18],
+        ['restocked', 460, 48],
+      ]),
+      row(68, [
+        ['Gadget', 72, 36],
+        ['clearance', 460, 48],
+      ]),
+    ]
+    expect(tableForLines(lines)?.rows).toEqual([
+      ['Product', 'Units', 'Notes'],
+      ['Widget', '120', 'restocked'],
+      ['Gadget', '', 'clearance'],
+    ])
+  })
+
+  it('needs at least two lines, since one row is not an alignment', () => {
+    expect(
+      tableForLines([
+        row(100, [
+          ['North', 72, 30],
+          ['120', 260, 18],
+        ]),
+      ]),
+    ).toBeNull()
+  })
+
+  it('rejects a run of lines one of which is prose', () => {
+    const lines = [
+      row(100, [
+        ['Region', 72, 35],
+        ['Q1', 260, 15],
+        ['Q2', 430, 15],
+      ]),
+      row(84, [
+        ['North', 72, 30],
+        ['120', 260, 18],
+        ['150', 430, 18],
+      ]),
+      row(68, [['The board accepted these figures without amendment.', 72, 240]]),
+    ]
+    expect(tableForLines(lines)).toBeNull()
+  })
+
+  it('rejects cut positions no two rows agree on', () => {
+    const lines = [
+      row(100, [
+        ['A', 72, 10],
+        ['B', 260, 10],
+      ]),
+      row(84, [
+        ['C', 72, 10],
+        ['D', 150, 10],
+      ]),
+      row(68, [
+        ['E', 72, 10],
+        ['F', 430, 10],
+      ]),
+    ]
+    expect(tableForLines(lines)).toBeNull()
+  })
+
+  it('falls back to the text form when the lines carry no runs', () => {
+    expect(tableForLines([plain('Name    Value'), plain('Alpha   12', 84)])).toEqual({
+      rows: [
+        ['Name', 'Value'],
+        ['Alpha', '12'],
+      ],
+    })
+  })
+
+  it('rejects hand-built lines whose text carries no cell gaps', () => {
+    expect(tableForLines([plain('Name Value'), plain('Alpha 12', 84)])).toBeNull()
+  })
+
+  it('rejects text-form rows that disagree on how many columns there are', () => {
+    expect(tableForLines([plain('Name    Value'), plain('Alpha   12   kg', 84)])).toBeNull()
+  })
+})
+
+describe('looksLikeTableRow', () => {
+  it('protects a hand-built row whose cells are separated as text', () => {
+    expect(looksLikeTableRow(plain('Col0  00'))).toBe(true)
+  })
+
+  it('leaves a hand-built three-column row to the gutters', () => {
+    expect(looksLikeTableRow(plain('A0 B0 C0'))).toBe(false)
+  })
+
+  it('protects a real row whose cells are cell-sized', () => {
+    expect(
+      looksLikeTableRow(
+        row(100, [
+          ['North', 72, 30],
+          ['120', 260, 18],
+          ['150', 430, 18],
+        ]),
+      ),
+    ).toBe(true)
+  })
+
+  it('leaves a span of prose crossing a gutter to the cut', () => {
+    // Both gaps are wide enough to be cells, but each run is a clause rather
+    // than a label — that is what makes this a column line and not a table row.
+    const span = row(100, [
+      ['Revenue rose across the', 72, 150],
+      ['northern region last year', 330, 150],
+    ])
+    expect(looksLikeTableRow(span)).toBe(false)
+  })
+
+  it('never protects a line with no runs and no cell gaps', () => {
+    expect(looksLikeTableRow(plain('A sentence that just runs on.'))).toBe(false)
+  })
+})

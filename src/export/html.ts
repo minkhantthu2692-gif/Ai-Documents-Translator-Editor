@@ -33,6 +33,7 @@ import {
   pageBlocks,
   pt,
   round,
+  tableGrid,
 } from './shared'
 import type { ExportBlock, ExportDocument, ExportOptions } from './types'
 
@@ -150,18 +151,57 @@ function printedText(block: ExportBlock, options: HtmlOptions): string {
 
 /** Everything `blockHtml` renders as text, list marker included. */
 function printedLine(block: ExportBlock, options: HtmlOptions): string {
+  // A table is reflowed as the grid it will draw, not as the tab-separated
+  // string: `\t` has no reliable width in a measuring canvas, so a row with
+  // tabs in it would measure narrower than it prints and the block would be
+  // given too little room. Three spaces per cell gap is about what the cell
+  // padding and the border come to, and every row is one line — which is what
+  // the `<tr>` is.
+  if (block.kind === 'table') {
+    const grid = tableGrid(printedText(block, options))
+    if (grid) return grid.map((row) => row.join('   ')).join('\n')
+  }
   const text = printedText(block, options)
   return `${listPrefix(block, text)}${text}`
+}
+
+/**
+ * A `<table>` for the printed text of a table block, or `''` when the text
+ * turned out not to be tabular.
+ *
+ * Every cell is a `<td>` — including the first row. Which row is the header is
+ * not something the extractor knows (a table without one is perfectly legal),
+ * and inventing a bold header would be a claim the PDF never made. Markdown is
+ * the one format that *requires* a header row, so it promotes row 0 there and
+ * says so in its own comment.
+ */
+function tableHtml(text: string, block: ExportBlock): string {
+  const grid = tableGrid(text)
+  if (!grid) return ''
+  const rows = grid
+    .map(
+      (cells) =>
+        `<tr>${cells.map((cell) => `<td>${htmlText(cell, block.links)}</td>`).join('')}</tr>`,
+    )
+    .join('')
+  return `<table><tbody>${rows}</tbody></table>`
 }
 
 function blockHtml(block: ExportBlock, options: HtmlOptions, classes: string[]): string {
   const text = printedText(block, options)
   if (text.trim().length === 0) return ''
-  const marker = listPrefix(block, text)
-  const content = `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${htmlText(
-    text,
-    block.links,
-  )}`
+  // A table draws cells, not a paragraph of tab-separated text. `tableHtml`
+  // returns '' when the printed text turns out to carry no cells — a model
+  // that answered a table with one sentence — and the block then falls back to
+  // being the paragraph it now is rather than emitting an empty grid.
+  const table = block.kind === 'table' ? tableHtml(text, block) : ''
+  const marker = table ? '' : listPrefix(block, text)
+  const content =
+    table ||
+    `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${htmlText(
+      text,
+      block.links,
+    )}`
   const dir = block.direction === 'rtl' ? ' dir="rtl"' : ''
   const style =
     options.layout === 'absolute'
@@ -178,11 +218,12 @@ function blockHtml(block: ExportBlock, options: HtmlOptions, classes: string[]):
   const level = headingOffset(block, options.mode === 'print' ? 0 : 1)
   // A code snippet is never a heading: the size rule that would promote a
   // short line runs *after* the code detector, but `headingLevel` is written by
-  // a pass over the whole ladder, so the tag is held back here as well.
-  const tag = level === null || block.kind === 'code' ? 'div' : `h${level}`
+  // a pass over the whole ladder, so the tag is held back here as well. A
+  // table is not a heading either, and `<table>` cannot live inside `<h2>`.
+  const tag = level === null || block.kind === 'code' || table ? 'div' : `h${level}`
 
   return (
-    `<${tag} class="${classes.join(' ')}${block.kind === 'code' ? ' code' : ''}${flagged}"` +
+    `<${tag} class="${classes.join(' ')}${block.kind === 'code' ? ' code' : ''}${table ? ' has-table' : ''}${flagged}"` +
     ` data-block-id="${escapeHtml(block.id)}"${dir} style="${style}">${content}</${tag}>`
   )
 }
@@ -233,6 +274,38 @@ function flowPage(page: ExportDocument['pages'][number], options: HtmlOptions): 
     const openTag = isCode ? `<p` : `<${tag}`
     const closeTag = isCode ? `p` : tag
     const codeClass = isCode ? ' code' : ''
+
+    // A table draws cells. `<p>` cannot contain a `<table>`, so the wrapper is
+    // a `<div>` wearing the same `.src`/`.tgt` classes the flow stylesheet
+    // styles — and if the printed text turned out to carry no cells, the block
+    // falls through and renders as the paragraph it now is.
+    if (block.kind === 'table') {
+      const targetTable = tableHtml(target, block)
+      if (targetTable) {
+        const dirAttr = ` dir="${block.direction === 'rtl' ? 'rtl' : 'ltr'}"`
+        if (options.includeOriginal && source.trim().length > 0 && source !== target) {
+          const sourceTable = tableHtml(source, block)
+          rows.push(
+            `<div class="pair${pair}">` +
+              (sourceTable
+                ? `<div class="src" data-block-id="${escapeHtml(block.id)}">${sourceTable}</div>`
+                : `<p class="src" data-block-id="${escapeHtml(block.id)}">${htmlText(
+                    source,
+                    block.links,
+                  )}</p>`) +
+              `<div class="tgt table" data-block-id="${escapeHtml(block.id)}"${dirAttr}>` +
+              `${targetTable}</div>` +
+              `</div>`,
+          )
+        } else {
+          rows.push(
+            `<div class="tgt table" data-block-id="${escapeHtml(block.id)}"${dirAttr}>` +
+              `${targetTable}</div>`,
+          )
+        }
+        continue
+      }
+    }
 
     if (options.includeOriginal && source.trim().length > 0 && source !== target) {
       const sourceIsRtl = directionOf(source) === 'rtl'
@@ -337,6 +410,24 @@ ${print ? '.page { border: none; }' : ''}
   font-family: ${CODE_FONT_STACK};
   tab-size: 4;
   white-space: pre-wrap;
+}
+/* A table draws its own grid. Cells keep the block's face and the block's
+   line-height (they are regular text), so the only things added here are the
+   rules and the padding — and the padding is kept to a point or two on purpose,
+   because reflow measures the rows as plain lines and every point of vertical
+   padding it cannot see is a point of under-measured height. */
+.page table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+}
+.page td {
+  border: 1px solid #d1d5db;
+  padding: 1pt 4pt;
+  vertical-align: top;
+  overflow-wrap: break-word;
 }
 .page.flow { padding: 18pt 22pt; overflow: hidden; }
 .page.flow .src, .page.flow .tgt {

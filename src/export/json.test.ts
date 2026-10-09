@@ -24,6 +24,7 @@ function block(overrides: Partial<ExportBlock>): ExportBlock {
     listMarker: null,
     headingLevel: null,
     links: [],
+    tableCells: null,
     sourceText: '',
     translatedText: '',
     characterCount: 0,
@@ -215,6 +216,45 @@ describe('buildJsonDocument', () => {
       buildJsonDocument(makeDoc(), { pretty: false, includeGeometry: true }),
     )
     expect(parsed.pages[0].blocks[0].links).toEqual([])
+  })
+
+  it('carries a table grid with or without geometry, and back unchanged', () => {
+    const tableCells = [
+      ['Name', 'Value'],
+      ['Alpha', '12'],
+    ]
+    const doc: ExportDocument = {
+      ...makeDoc(),
+      pages: [
+        {
+          index: 0,
+          width: 612,
+          height: 792,
+          rotation: 0,
+          contentClass: 'text',
+          blocks: [
+            block({
+              id: 'tbl',
+              kind: 'table',
+              tableCells,
+              sourceText: 'Name \t Value\nAlpha \t 12',
+            }),
+          ],
+        },
+      ],
+    }
+
+    for (const includeGeometry of [true, false]) {
+      const parsed = parseJsonDocument(buildJsonDocument(doc, { pretty: false, includeGeometry }))
+      expect(parsed.pages[0].blocks[0].tableCells).toEqual(tableCells)
+    }
+  })
+
+  it('writes null rather than omitting a block with no cells', () => {
+    const parsed = parseJsonDocument(
+      buildJsonDocument(makeDoc(), { pretty: false, includeGeometry: true }),
+    )
+    expect(parsed.pages[0].blocks[0].tableCells).toBeNull()
   })
 })
 

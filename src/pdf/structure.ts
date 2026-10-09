@@ -26,7 +26,7 @@ import {
   looksLikeCodeBlock,
   looksLikeCodeLine,
 } from './codeBlocks'
-import { splitRow } from './rowSplit'
+import { rowCells, tableForLines } from './rowSplit'
 import { blockId, type BBox } from './stableId'
 
 export type BlockKind =
@@ -67,6 +67,16 @@ export interface PageBlock {
   placeholders: Placeholder[]
   /** Bullet / numbering marker captured from the first line (`•`, `1.`, …). */
   listMarker: string | null
+  /**
+   * The cells of a `kind === 'table'` block as data — one array of cell
+   * strings per row, every row the same length. `null` for every other kind.
+   *
+   * It is kept beside `text` rather than instead of it: `text` is what the
+   * model sees and what a fallback renderer prints (` \t ` between cells), and
+   * it must stay byte-identical for the translation cache to hit. This is what
+   * the exporters draw a real table from.
+   */
+  tableCells: string[][] | null
   /**
    * 1..6 when `kind === 'heading'`, else null — the depth of the heading
    * inside the document's own ladder (`headings.ts`). A level means nothing on
@@ -411,14 +421,16 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
     const context = { gap, medianSize, bodyGap }
     // Columns of a table align horizontally — allow small x jumps for them.
     // Footnote lines are excluded: citation spacing reads as cells to the row
-    // detector, but a note is prose.
-    const previousRow = splitRow(previous)
-    const currentRow = splitRow(line)
+    // detector, but a note is prose. Each line is judged on its own runs, since
+    // the block is not yet known to be a table; `tableForLines` decides that
+    // later, once there are enough rows to look for alignment across.
+    const previousRow = rowCells(previous) !== null
+    const currentRow = rowCells(line) !== null
     if (
       region === 'body' &&
       !footnote &&
-      previousRow.isTable &&
-      currentRow.isTable &&
+      previousRow &&
+      currentRow &&
       Math.abs(gap) <= previous.style.fontSize * 1.2
     ) {
       current.lines.push(line)
@@ -436,22 +448,30 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
   for (const open of blocks) {
     const first = open.lines[0]
     const bbox = mergedBBox(open.lines)
-    const rowSplit = splitRow(open.lines[0])
-    const isTableRow = rowSplit.isTable && open.lines.length > 1
     const isFootnote = open.footnote
     // A code snippet is decided ahead of the list, table and size rules: a
     // `for (const x of xs) {` line can look like a bullet and an aligned block
     // of `|` like a table, and both readings would wreck the indentation the
     // block is about to get back from its own geometry.
     const isCode = open.region === 'body' && !isFootnote && looksLikeCodeBlock(open.lines)
+    // A table is *aligned columns across rows*, so it can only be judged once
+    // the whole run is here. One line with a wide gap is a long word space; the
+    // same gap recurring at the same x on three lines is a column.
+    const grid = open.region === 'body' && !isFootnote && !isCode ? tableForLines(open.lines) : null
+    const isTableRow = grid !== null
+    const tableCells = grid ? grid.rows : null
     const isList =
-      !isCode && open.region === 'body' && !isFootnote && BULLET.test(open.lines[0].text.trim())
+      !isCode &&
+      !isTableRow &&
+      open.region === 'body' &&
+      !isFootnote &&
+      BULLET.test(open.lines[0].text.trim())
     const marker = isList ? (open.lines[0].text.trim().match(BULLET)?.[1] ?? null) : null
 
     const text = isCode
       ? codeBlockText(open.lines)
-      : isTableRow
-        ? open.lines.map((line) => splitRow(line).cells.join(' \t ')).join('\n')
+      : isTableRow && grid
+        ? grid.rows.map((row) => row.join(' \t ')).join('\n')
         : open.lines.map((line) => line.text).join('\n')
 
     const sizeRatio = medianSize > 0 ? first.style.fontSize / medianSize : 1
@@ -502,6 +522,8 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
       skipRule: decision.skip ? decision.rule : isCode ? 'code' : null,
       placeholders: placeholderResult.placeholders,
       listMarker: marker,
+      /** Cells as data: `rows × columns`, rectangular, empty string for a gap. */
+      tableCells,
       headingLevel: null,
       links: [],
       lineSpacing: Number.isFinite(spacing) ? spacing : 1.4,

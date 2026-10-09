@@ -32,6 +32,7 @@ import {
   langTag,
   listPrefix,
   pageBlocks,
+  tableGrid,
   textOf,
 } from './shared'
 import type { ExportBlock, ExportDocument, ExportPage } from './types'
@@ -155,6 +156,35 @@ function paragraph(
 }
 
 /**
+ * One `<table>` wearing the same classes, `xml:lang`, `dir` and style a
+ * `<p>` would have.
+ *
+ * Every cell is a `<td>`, the first row included: the extractor does not know
+ * which row (if any) is a header, and promoting one would be a claim the PDF
+ * never made. Only Markdown does that, because its syntax leaves it no choice.
+ */
+function tableMarkup(
+  grid: string[][],
+  block: ExportBlock,
+  classes: readonly string[],
+  lang: string,
+  style: string,
+): string {
+  const rtl = directionOf(grid.map((row) => row.join(' ')).join(' ')) === 'rtl'
+  const all = rtl ? [...classes, 'rtl'] : classes
+  const dir = rtl ? ' dir="rtl"' : ''
+  const safeLang = escapeHtml(lang)
+  const cell = (text: string): string => applyLinks(text, block.links, linkHtml, escapeHtml)
+  const rows = grid
+    .map((row) => `<tr>${row.map((value) => `<td>${cell(value)}</td>`).join('')}</tr>`)
+    .join('')
+  return (
+    `<table class="${escapeHtml(all.join(' '))}" xml:lang="${safeLang}" lang="${safeLang}"${dir}${style}>` +
+    `<tbody>${rows}</tbody></table>`
+  )
+}
+
+/**
  * The paragraphs for one block: the primary text always first (carrying the
  * list marker), then — with `includeOriginal` — the translation on its own
  * paragraph. Blocks whose text is empty contribute nothing.
@@ -181,6 +211,25 @@ function blockParagraphs(block: ExportBlock, doc: ExportDocument, options: EpubO
   const isCode = block.kind === 'code'
   const fontStack = escapeHtml(fontStackForCode(block, { fontStack: options.fontStack }))
   const style = ` style="font-family: ${fontStack}${isCode ? '; white-space: pre-wrap' : ''}"`
+
+  // A table is a table, in both columns of a bilingual book. One entry whose
+  // text has no cells left in it — a model that answered a table with a
+  // sentence — falls through to its own paragraph rather than emitting an
+  // empty grid, and if *no* entry is tabular the whole block falls through.
+  if (block.kind === 'table') {
+    const grids = entries.map((entry) => tableGrid(entry.text))
+    if (grids.some((grid) => grid !== null)) {
+      return entries.map((entry, index) => {
+        const lang = entry.source ? langTag(doc.sourceLang) : langTag(doc.targetLang)
+        const classes = entry.source ? ['source', 'block'] : ['block']
+        const grid = grids[index]
+        return grid
+          ? tableMarkup(grid, block, classes, lang, style)
+          : paragraph(entry.text, classes, lang, style, null, block.links, false)
+      })
+    }
+  }
+
   return entries.map((entry, index) => {
     const lang = entry.source ? langTag(doc.sourceLang) : langTag(doc.targetLang)
     // A snippet's first line is a statement, not a list item: the bullet a
@@ -335,6 +384,18 @@ function mainCss(options: EpubOptions): string {
     '.source {',
     '  color: #555;',
     '  font-size: 0.9em;',
+    '}',
+    'table.block {',
+    '  border-collapse: collapse;',
+    '  table-layout: fixed;',
+    '  width: 100%;',
+    '  font-size: 1em;',
+    '  margin-bottom: 1em;',
+    '}',
+    'table.block td {',
+    '  border: 1px solid #999;',
+    '  padding: 0.2em 0.4em;',
+    '  vertical-align: top;',
     '}',
   )
   return `${rules.join('\n')}\n`

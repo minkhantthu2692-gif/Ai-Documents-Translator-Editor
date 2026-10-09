@@ -13,6 +13,9 @@
  *   fixtures/links.pdf       1 page, five /Link annotations: a mid-line URL,
  *                            a mid-line word, an internal destination, a
  *                            `data:` URI and a URI with no scheme
+ *   fixtures/table.pdf       2 pages, two tables whose cells are each their
+ *                            own positioned show-text operator — the shape a
+ *                            real document uses — one row leaving a cell empty
  *
  * Everything is written by hand (xref offsets computed exactly) so the script
  * only depends on node:crypto for MD5. Content is ASCII so a latin-1 stream
@@ -274,6 +277,89 @@ function buildTextPdf(pageCount) {
     Author: 'Finance Department',
     Subject: 'Operations review for the financial year',
     Keywords: 'annual, report, operations',
+    Creator: 'make-fixtures.mjs',
+    Producer: 'make-fixtures.mjs',
+    CreationDate: "D:20260115093000+06'30'",
+    ModDate: "D:20260320174500+06'30'",
+  })
+  return writer.render()
+}
+
+/**
+ * One positioned text run: its own `BT`/`ET` and its own `Tm`.
+ *
+ * This is how a real PDF draws a table — one show-text operator per cell, each
+ * at its own x — so pdf.js hands back one *item* per cell and the detector has
+ * real geometry to read. Writing a row as one string with spaces between the
+ * columns (which is what a fixture writer reaches for first) yields a single
+ * item, and a single item has no gaps in it: it would never be split.
+ */
+function cell(x, y, size, font, text) {
+  return `BT\n/${font} ${size} Tf\n1 0 0 1 ${x} ${y} Tm\n(${escape(text)}) Tj\nET\n`
+}
+
+/**
+ * A two-page fixture whose tables are drawn the way a document processor
+ * draws them.
+ *
+ * Page 1 is a plain three-column table between two paragraphs. Page 2 is
+ * another, with one row whose middle cell is empty — no operator draws it, so
+ * that row arrives with one fewer run, and one fewer boundary, than its
+ * neighbours. Both are the shape `tableForLines` has to turn into a
+ * rectangle, and neither can be reached by any test that builds lines by hand.
+ */
+function buildTablePdf() {
+  const writer = new PdfWriter()
+  const pagesNum = addPagesObject(writer)
+  const regular = writer.add(FONT_REGULAR)
+  const bold = writer.add(FONT_BOLD)
+  const resources = `/Font << /F1 ${regular} 0 R /F2 ${bold} 0 R >>`
+
+  const page1 = [
+    cell(72, 740, 14, 'F2', 'Quarterly revenue'),
+    cell(72, 700, 11, 'F1', 'Revenue was reviewed for the three regions below.'),
+    cell(72, 684, 11, 'F1', 'Every figure is stated in thousands of dollars.'),
+    cell(72, 644, 11, 'F1', 'Region'),
+    cell(260, 644, 11, 'F1', 'Q1'),
+    cell(430, 644, 11, 'F1', 'Q2'),
+    cell(72, 628, 11, 'F1', 'North'),
+    cell(260, 628, 11, 'F1', '120'),
+    cell(430, 628, 11, 'F1', '150'),
+    cell(72, 612, 11, 'F1', 'South'),
+    cell(260, 612, 11, 'F1', '90'),
+    cell(430, 612, 11, 'F1', '110'),
+    cell(72, 596, 11, 'F1', 'East'),
+    cell(260, 596, 11, 'F1', '75'),
+    cell(430, 596, 11, 'F1', '80'),
+    cell(72, 548, 11, 'F1', 'The board accepted the figures without amendment.'),
+  ].join('')
+
+  const page2 = [
+    cell(72, 740, 14, 'F2', 'Detail by product'),
+    cell(72, 700, 11, 'F1', 'The second table leaves one cell empty in a single row.'),
+    cell(72, 660, 11, 'F1', 'Product'),
+    cell(300, 660, 11, 'F1', 'Units'),
+    cell(460, 660, 11, 'F1', 'Notes'),
+    cell(72, 644, 11, 'F1', 'Widget'),
+    cell(300, 644, 11, 'F1', '120'),
+    cell(460, 644, 11, 'F1', 'restocked'),
+    cell(72, 628, 11, 'F1', 'Gadget'),
+    cell(460, 628, 11, 'F1', 'clearance'),
+    cell(72, 612, 11, 'F1', 'Gizmo'),
+    cell(300, 612, 11, 'F1', '80'),
+    cell(460, 612, 11, 'F1', 'backorder'),
+    cell(72, 564, 11, 'F1', 'Two of the three rows had a second column.'),
+  ].join('')
+
+  const kids = [
+    addPage(writer, pagesNum, resources, writer.addStream('', Buffer.from(page1, 'latin1'))),
+    addPage(writer, pagesNum, resources, writer.addStream('', Buffer.from(page2, 'latin1'))),
+  ]
+  finalizePages(writer, pagesNum, kids)
+  writer.setInfo({
+    Title: 'Tables',
+    Author: 'Finance Department',
+    Subject: 'Two tables drawn cell by cell',
     Creator: 'make-fixtures.mjs',
     Producer: 'make-fixtures.mjs',
     CreationDate: "D:20260115093000+06'30'",
@@ -651,6 +737,7 @@ const outputs = [
   ['encrypted.pdf', buildEncryptedPdf(3)],
   ['complex.pdf', buildComplexPdf()],
   ['links.pdf', buildLinksPdf()],
+  ['table.pdf', buildTablePdf()],
 ]
 for (const [name, buffer] of outputs) {
   writeFileSync(join(OUT, name), buffer)

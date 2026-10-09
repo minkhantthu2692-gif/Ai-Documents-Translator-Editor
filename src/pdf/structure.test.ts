@@ -748,3 +748,98 @@ describe('countColumns', () => {
     expect(countColumns(at(40, 226, 412), 0)).toBe(1)
   })
 })
+
+describe('structurePage tables drawn cell by cell', () => {
+  /** A visual line whose cells are separate runs — what a real PDF produces. */
+  function cellRow(y: number, cells: Array<[text: string, x: number, w: number]>): GroupedLine {
+    const runs = cells.map(([text, x, w]) => ({ x, w, text }))
+    const left = Math.min(...runs.map((run) => run.x))
+    const right = Math.max(...runs.map((run) => run.x + run.w))
+    const bbox: BBox = { x: left, y, w: right - left, h: 14 }
+    const text = cells.map(([value]) => value).join(' ')
+    return {
+      id: lineId(0, bbox, text),
+      text,
+      bbox,
+      style: { ...BASE_STYLE },
+      itemIndexes: [],
+      runs,
+    }
+  }
+
+  // y grows downward through the page, so the header is the topmost line and
+  // the rows follow it — `orderBodyLines` reads ascending y.
+  const table = (): GroupedLine[] => [
+    cellRow(612, [
+      ['Region', 72, 35],
+      ['Q1', 260, 15],
+      ['Q2', 430, 15],
+    ]),
+    cellRow(628, [
+      ['North', 72, 30],
+      ['120', 260, 18],
+      ['150', 430, 18],
+    ]),
+    cellRow(644, [
+      ['South', 72, 32],
+      ['90', 260, 12],
+      ['110', 430, 18],
+    ]),
+  ]
+
+  it('builds one table block and carries its cells as data', () => {
+    const blocks = structurePage(table(), options())
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].kind).toBe('table')
+    expect(blocks[0].tableCells).toEqual([
+      ['Region', 'Q1', 'Q2'],
+      ['North', '120', '150'],
+      ['South', '90', '110'],
+    ])
+    // The text form is unchanged: the model still sees ` ` between cells, so
+    // the translation cache and every prompt built from it are unaffected.
+    expect(blocks[0].text).toBe('Region \t Q1 \t Q2\nNorth \t 120 \t 150\nSouth \t 90 \t 110')
+  })
+
+  it('keeps the paragraphs either side of a table out of it', () => {
+    const blocks = structurePage(
+      [
+        line('Revenue was reviewed for the three regions below.', {
+          x: 72,
+          y: 580,
+          w: 320,
+          h: 14,
+        }),
+        ...table(),
+        line('The board accepted the figures without amendment.', {
+          x: 72,
+          y: 700,
+          w: 320,
+          h: 14,
+        }),
+      ],
+      options(),
+    )
+    const tables = blocks.filter((block) => block.kind === 'table')
+    expect(tables).toHaveLength(1)
+    expect(tables[0].lines).toHaveLength(3)
+    const prose = blocks
+      .filter((block) => block.kind !== 'table')
+      .map((block) => block.text)
+      .join(' ')
+    expect(prose).toContain('Revenue was reviewed')
+    expect(prose).toContain('without amendment')
+  })
+
+  it('leaves tableCells null on every block that is not a table', () => {
+    const blocks = structurePage(
+      [
+        line('An ordinary sentence in the body.', { x: 72, y: 620, w: 260, h: 14 }),
+        line('And a second one beneath it.', { x: 72, y: 604, w: 240, h: 14 }),
+      ],
+      options(),
+    )
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].tableCells).toBeNull()
+  })
+})

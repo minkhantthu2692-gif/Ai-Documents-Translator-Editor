@@ -24,6 +24,7 @@ function block(overrides: Partial<ExportBlock>): ExportBlock {
     listMarker: null,
     headingLevel: null,
     links: [],
+    tableCells: null,
     sourceText: '',
     translatedText: '',
     characterCount: 0,

@@ -38,6 +38,7 @@ function block(order: number, x: number, y: number, w: number, h: number, text =
     skipRule: null,
     placeholders: [],
     listMarker: null,
+    tableCells: null,
     headingLevel: null,
     links: [],
     lineSpacing: 1.2,

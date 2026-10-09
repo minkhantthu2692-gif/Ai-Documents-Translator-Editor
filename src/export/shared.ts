@@ -128,6 +128,38 @@ export function listPrefix(block: ExportBlock, text?: string): string {
 }
 
 /**
+ * The cells of a `kind === 'table'` block's *printed* text, as a rectangle.
+ *
+ * Split on the two separators extraction writes — `\t` between cells, `\n`
+ * between rows — then padded to the widest row, because a row with an empty
+ * cell in the middle simply has one fewer tab than its neighbours and every
+ * format that draws a real table needs a rectangle.
+ *
+ * **The printed text, not `block.tableCells`.** A translated table has to show
+ * translated cells, and the model is free to hand back a different number of
+ * columns than it was given; the grid is therefore rebuilt from the exact
+ * string the page is about to print, the same way `reflowBlocks` measures the
+ * exact string it is about to lay out. `tableCells` is the *source* grid and
+ * belongs to the formats that are data rather than a document.
+ *
+ * Returns `null` when the text carries no cell separator at all — a model that
+ * answered a table with a sentence, or a block promoted to `table` by a
+ * misread. One column is not a table, so the caller falls back to printing the
+ * text as the paragraph it now is.
+ */
+export function tableGrid(text: string): string[][] | null {
+  if (!text.includes('\t')) return null
+  const rows = text.split('\n').map((row) => row.split('\t').map((cell) => cell.trim()))
+  const width = rows.reduce((widest, cells) => Math.max(widest, cells.length), 0)
+  if (width < 2) return null
+  return rows.map((cells) =>
+    cells.length === width
+      ? cells
+      : [...cells, ...Array.from({ length: width - cells.length }, () => '')],
+  )
+}
+
+/**
  * Heading level a builder should actually emit for `block`.
  *
  * The extracted level counts *inside the document's own headings* (1..6) but

@@ -205,6 +205,16 @@ export interface RunGutter {
   /** Centre of the empty band. */
   position: number
   width: number
+  /**
+   * The exact coordinates the empty strip lies between, in page points.
+   *
+   * `position ± width / 2` is *not* the same pair. Going through the centre
+   * rounds twice and can land a hair inside one of the real edges — which is
+   * enough to make `cutAtBands` refuse a row that ends exactly on that edge,
+   * leaving one row of a three-column page fused across the fold.
+   */
+  left: number
+  right: number
   /** Runs spanning the band (headers, watermarks) — kept small by design. */
   crossings: number
 }
@@ -268,7 +278,7 @@ export function bestItemGutter(boxes: RunBox[], pageWidth: number): RunGutter | 
       active <= maxCrossings &&
       (!best || active < best.crossings || (active === best.crossings && width > best.width))
     ) {
-      best = { position: start + width / 2, width, crossings: active }
+      best = { position: start + width / 2, width, left: start, right: end, crossings: active }
     }
   }
   return best
@@ -298,10 +308,10 @@ export function gutterBands(
   }
   if (left.length < 3 || right.length < 3) return []
 
-  const band: GutterBand = {
-    left: gutter.position - gutter.width / 2,
-    right: gutter.position + gutter.width / 2,
-  }
+  // The raw sweep coordinates, not `position ± width / 2`: `cutAtBands`
+  // compares a run's own edge against these, and a value that round-tripped
+  // through the centre can miss an exact match by one unit in the last place.
+  const band: GutterBand = { left: gutter.left, right: gutter.right }
   return [
     ...gutterBands(left, pageWidth, depth - 1),
     band,
@@ -358,7 +368,9 @@ function cutAtBands(line: GroupedLine, bands: GutterBand[], pageIndex: number): 
 
   // A band is crossed by the *gap* between two adjacent runs. The min/max form
   // keeps this correct for right-to-left lines, whose runs are stored
-  // right-to-left rather than in ascending x.
+  // right-to-left rather than in ascending x. The band's edges are the sweep's
+  // own event coordinates, so a run ending exactly on one compares equal
+  // instead of missing it by one unit in the last place.
   const cuts: number[] = []
   for (let i = 1; i < runs.length; i += 1) {
     const before = Math.min(runs[i - 1].x + runs[i - 1].w, runs[i].x + runs[i].w)
@@ -414,12 +426,46 @@ function lineOfRuns(
 }
 
 /**
+ * Splits lines into vertical zones at `boundaries`, in reading order.
+ *
+ * Membership is compared by object identity, not by id: two visually identical
+ * lines share an id, and set semantics keyed on it would silently drop one of
+ * them. Every input line appears exactly once — either as a zone member or as
+ * the boundary that follows its own zone.
+ */
+function cutZones(
+  lines: GroupedLine[],
+  boundaries: ReadonlySet<GroupedLine>,
+): Array<{ lines: GroupedLine[]; boundary: GroupedLine | null }> {
+  const segments: Array<{ lines: GroupedLine[]; boundary: GroupedLine | null }> = []
+  let current: GroupedLine[] = []
+  for (const line of sortReadingOrder(lines)) {
+    if (boundaries.has(line)) {
+      segments.push({ lines: current, boundary: line })
+      current = []
+    } else {
+      current.push(line)
+    }
+  }
+  segments.push({ lines: current, boundary: null })
+  return segments
+}
+
+/**
  * Orders one zone's column members left to right, recursing so three- and
  * four-column layouts come out in newspaper order.
  *
- * A sub-group that still contains spanning lines means the split is not clean,
- * so it falls back to plain order rather than guessing where they belong — and
- * keeps every line either way.
+ * A sub-group that still contains spanning lines gets the same treatment the
+ * page gets: those lines are cut out as zone boundaries and each zone is
+ * ordered on its own. Giving up and falling back to plain order — what this
+ * used to do — threw the entire sub-group back to row-by-row, so a single line
+ * reaching across a gutter inside a three-column page interleaved every column
+ * it sat beside.
+ *
+ * `splitsLeft` is deliberately *not* spent on a zone cut. A boundary is removed
+ * from every segment it produces, so each recursive call sees a strictly
+ * smaller set and the recursion terminates on its own; charging for it would
+ * exhaust the split budget on a title and leave the real columns unordered.
  */
 function orderColumns(
   lines: GroupedLine[],
@@ -428,7 +474,17 @@ function orderColumns(
 ): GroupedLine[] {
   if (splitsLeft <= 0 || lines.length < MIN_LINES) return sortReadingOrder(lines)
   const band = findBand(lines, pageWidth)
-  if (!band || band.spanning.length > 0) return sortReadingOrder(lines)
+  if (!band) return sortReadingOrder(lines)
+
+  if (band.spanning.length > 0) {
+    const ordered: GroupedLine[] = []
+    for (const segment of cutZones(lines, new Set(band.spanning))) {
+      ordered.push(...orderColumns(segment.lines, pageWidth, splitsLeft))
+      if (segment.boundary) ordered.push(segment.boundary)
+    }
+    return ordered
+  }
+
   return [
     ...orderColumns(band.left, pageWidth, splitsLeft - 1),
     ...orderColumns(band.right, pageWidth, splitsLeft - 1),
@@ -436,7 +492,35 @@ function orderColumns(
 }
 
 /**
- * Reading order for a page's body: zones cut by spanning lines, columns
+ * Lines that bridge a column gutter and must therefore cut a zone wherever
+ * they fall on the page.
+ *
+ * `findBand` only reports spanning lines against the band *it* chose for this
+ * level. A line crossing a gutter further down the column tree — a rotated
+ * watermark lying across the left fold, say — comes back as an ordinary member
+ * of whichever side its centre falls in, and is then emitted *inside* that
+ * column instead of after the zone it actually ends. Sweeping every detected
+ * gutter for bridges puts such a line where its own y puts it.
+ *
+ * The overlap is measured with `EDGE_EPSILON`: a part's bounding box is rounded
+ * to two decimals, so a column line ending flush with the band can appear to
+ * poke a hundredth of a point into it — and a hundredth is not a bridge.
+ */
+function zoneBoundaries(lines: GroupedLine[], band: Band, pageWidth: number): Set<GroupedLine> {
+  const boundaries = new Set<GroupedLine>(band.spanning)
+  const boxes: RunBox[] = lines.map((line) => ({ x: line.bbox.x, w: line.bbox.w }))
+  for (const gutter of gutterBands(boxes, pageWidth)) {
+    for (const line of lines) {
+      const overlap =
+        Math.min(line.bbox.x + line.bbox.w, gutter.right) - Math.max(line.bbox.x, gutter.left)
+      if (overlap >= EDGE_EPSILON) boundaries.add(line)
+    }
+  }
+  return boundaries
+}
+
+/**
+ * Reading order for a page's body: zones cut by bridging lines, columns
  * ordered left to right inside each zone.
  *
  * Returns every input line exactly once, in reading order.
@@ -446,24 +530,11 @@ export function orderBodyLines(lines: GroupedLine[], pageWidth: number): Grouped
   const band = findBand(lines, pageWidth)
   if (!band) return sortReadingOrder(lines)
 
-  // Cut zones at the spanning lines. Membership is compared by object
-  // identity, not by id: two visually identical lines share an id, and set
-  // semantics keyed on it would silently drop one of them.
-  const spanning = new Set<GroupedLine>(band.spanning)
-  const segments: Array<{ lines: GroupedLine[]; boundary: GroupedLine | null }> = []
-  let current: GroupedLine[] = []
-  for (const line of sortReadingOrder(lines)) {
-    if (spanning.has(line)) {
-      segments.push({ lines: current, boundary: line })
-      current = []
-    } else {
-      current.push(line)
-    }
-  }
-  segments.push({ lines: current, boundary: null })
+  const boundaries = zoneBoundaries(lines, band, pageWidth)
+  if (boundaries.size === 0) return orderColumns(lines, pageWidth)
 
   const ordered: GroupedLine[] = []
-  for (const segment of segments) {
+  for (const segment of cutZones(lines, boundaries)) {
     ordered.push(...orderColumns(segment.lines, pageWidth))
     if (segment.boundary) ordered.push(segment.boundary)
   }

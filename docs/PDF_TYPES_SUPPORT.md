@@ -80,7 +80,7 @@ beyond one cached probe. Configure with `VITE_PDF_SIDECAR_URL` (default
 | (a) Classification | `complex` class, complexity scoring, item-level column detection, wizard metadata | 4, 12, 22 classification ✅ |
 | (b) Extraction methods | Browser Tesseract OCR auto-runs per window (status lifecycle, confidence, cached recognition), hybrid merge with geometric dedup, run-OCR setting persisted per project, Python sidecar server (protocol v1, 20 tests) | 2, 3 extraction ✅ |
 | (b2) Sidecar wiring | `src/sidecar/sidecarClient.ts`: cached `GET /health` probe, `POST /ocr` with page/language/password, per-line confidence added to the server response, lazy render so a sidecar page never rasterises in the browser, automatic fall-back to browser Tesseract on any failure (22 client + 5 pipeline + 1 Python test) | 2 extraction ✅ with a native-OCR fast path |
-| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. **Footnote regions ✅** — `src/pdf/footnotes.ts` marks them before any merging happens. Remaining in this phase: real table cells, links, code blocks, headings | 4 ✅, reading order for 3 / 7 / 12 ✅, footnotes for 7 / 11 / 14 ✅; then 5, 6, 9, 13, 19, 24, 25 |
+| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. `fixtures/complex.pdf` (3 columns + rotated watermark) now reads col 1 → col 2 → col 3 → watermark end-to-end. **Footnote regions ✅** — `src/pdf/footnotes.ts` marks them before any merging happens. Remaining in this phase: real table cells, links, code blocks, headings | 4 ✅, reading order for 3 / 7 / 12 ✅, footnotes for 7 / 11 / 14 ✅; then 5, 6, 9, 13, 19, 24, 25 |
 | (d) Layout auto-adjust | Auto-fit/reflow when translated text grows (EN→MY), export height handling | 1, 8, 10, 12 (translation-time layout) |
 
 ### Why reading order needed two detectors
@@ -99,6 +99,46 @@ block into a stack of single-cell paragraphs. `detectColumns` (complexity
 scoring) deliberately keeps refusing pages whose title bridges the gutter; that
 refusal is correct for scoring and wrong for order, which is why
 `structurePage` does not use it.
+
+### Why one fused row could still collapse a whole page
+
+`fixtures/complex.pdf` — three columns plus a rotated watermark — is the
+fixture that found this. Its rows arrive fused across *both* gutters, and
+`splitMergedLines` cuts them back apart using the empty bands a sweep over the
+run boxes finds. Those bands were reconstructed as `centre ± width / 2`, which
+round-trips through floating point and can land one unit in the last place
+short of the real edge. The *widest* row is precisely the row that defines that
+edge, so its own gap starts exactly on it — and a hair short is enough for the
+cut test to refuse. That row then survives half cut, leaving columns two and
+three fused for the last line of the page, and one line reaching across a
+gutter is enough to send everything to its right back to row-by-row order. The
+sweep now reports the raw event coordinates instead.
+
+Two more defences came out of the same fixture:
+
+- **A sub-group that still contains a spanning line cuts zones instead of
+  giving up.** `orderColumns` fell back to plain order for the *entire*
+  sub-group, so one line reaching across a gutter interleaved every column it
+  sat beside. It now treats that line the way the page treats a title — a
+  boundary, with each zone ordered on its own. The split budget is deliberately
+  not spent on a zone cut: a boundary is removed from every segment it
+  produces, so each recursive call sees a strictly smaller set and terminates
+  on its own, while charging for it would exhaust the budget on a title and
+  leave the real columns unordered.
+- **Zone boundaries are found against every gutter, not only the band the
+  current level chose.** A watermark lying across the left fold has its centre
+  inside the left cluster, so `findBand` reports it as an ordinary member of
+  that side — and ordering the cluster by `y` then drops it between column two
+  and column three, splitting the body of the page in half. `zoneBoundaries`
+  sweeps every detected gutter for lines that bridge it, using an overlap of at
+  least `EDGE_EPSILON`: a part's box is rounded to two decimals, so a column
+  line ending flush with the band can appear to poke a hundredth of a point
+  into it, and a hundredth is not a bridge.
+
+Each of the three fails a test when reverted: the exact edges by
+`complex.pdf`, the sub-group zone cut by `cuts a zone inside a sub-group …`,
+and the page-wide sweep by both that fixture and `keeps the columns whole when
+a line bridges only one gutter`.
 
 ### Why footnotes need three signals
 
@@ -148,8 +188,10 @@ they are data exports, and dropping either half would lose information.
 _Known limitations carried over: table cell truncation at 45k characters,
 style reset on re-parse, no equation rendering (type 23). Reading order is
 unit-tested against synthetic column geometries (2/3/4 columns, fused rows,
-spanning titles, tables); no real multi-column PDF has been run through it
-end-to-end yet. Footnote detection is likewise tested on synthetic geometry: a
+spanning titles, tables) and now also runs `fixtures/complex.pdf` end-to-end —
+but that fixture is generated by `scripts/make-fixtures.mjs`, so no
+real-world multi-column PDF has been through it yet. Footnote detection is
+likewise tested on synthetic geometry: a
 note set at the *same* size as the body is not detected (nothing separates it
 but the horizontal rule above it, which is a graphics path pdf.js never hands
 over), and a page whose text is mostly note type reports the note size as its

@@ -126,6 +126,44 @@ describe('orderBodyLines', () => {
     ])
   })
 
+  it('keeps the columns whole when a line bridges only one gutter', () => {
+    // A rotated watermark lying across the left fold. Its centre falls inside
+    // the left cluster, so `findBand` calls it an ordinary member of that side
+    // — and ordering the cluster by y then drops it between column two and
+    // column three, splitting the body of the page in half.
+    const watermark = line('DRAFT COPY', { x: 40, y: 400, w: 330, h: 60 })
+    const lines = [...column('A', 40, 6), ...column('B', 226, 6), ...column('C', 412, 6), watermark]
+
+    const ordered = orderBodyLines(lines, PAGE_WIDTH)
+
+    expect(texts(ordered)).toEqual([
+      ...Array.from({ length: 6 }, (_u, i) => `A${i}`),
+      ...Array.from({ length: 6 }, (_u, i) => `B${i}`),
+      ...Array.from({ length: 6 }, (_u, i) => `C${i}`),
+      'DRAFT COPY',
+    ])
+  })
+
+  it('cuts a zone inside a sub-group instead of falling back to row-by-row', () => {
+    // Three full-width lines defeat the page-level sweep — too many crossings
+    // for one band — so they are never named as page boundaries. They are only
+    // seen by the split *inside* the left+middle sub-group, and giving up there
+    // (which is what this used to do) interleaved columns two and three.
+    const heads = Array.from({ length: 3 }, (_unused, index) =>
+      line(`Head${index}`, { x: 40, y: 80 + index * 5, w: 330, h: 14 }),
+    )
+    const lines = [...heads, ...column('A', 40, 6), ...column('B', 226, 6), ...column('C', 412, 6)]
+
+    const ordered = orderBodyLines(lines, PAGE_WIDTH)
+
+    expect(texts(ordered)).toEqual([
+      ...heads.map((entry) => entry.text),
+      ...Array.from({ length: 6 }, (_u, i) => `A${i}`),
+      ...Array.from({ length: 6 }, (_u, i) => `B${i}`),
+      ...Array.from({ length: 6 }, (_u, i) => `C${i}`),
+    ])
+  })
+
   it('reads a single column top to bottom', () => {
     const lines = Array.from({ length: 10 }, (_u, index) =>
       line(`L${index}`, { x: 72, y: 100 + index * 20, w: 400, h: 14 }),

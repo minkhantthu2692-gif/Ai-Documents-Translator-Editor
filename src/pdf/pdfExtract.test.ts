@@ -233,6 +233,43 @@ describe('complex.pdf', () => {
     expect(extracted.blocks.length).toBeGreaterThan(1)
     expect(extracted.blocks.some((block) => block.text.includes('Column filler line'))).toBe(true)
   })
+
+  it('reads the three columns column-by-column and leaves the watermark last', async () => {
+    const doc = await open('complex.pdf')
+    const page = await doc.getPage(1)
+    const extracted = await extractPage(page, { pageIndex: 0 })
+    const body = extracted.blocks
+      .filter((block) => block.region === 'body')
+      .sort((a, b) => a.order - b.order)
+
+    // One block per column, in left-to-right order. Before the gutter band kept
+    // its exact edges, the last row of the page survived the column cut fused
+    // across the fold, and that one fused line sent the whole right-hand side
+    // of the page back to row-by-row order.
+    const columns = body.filter((block) => block.text.includes('Column filler'))
+    expect(columns.map((block) => Math.round(block.bbox.x))).toEqual([40, 226, 412])
+
+    // Every column is whole and top-to-bottom: lines 1 … 10, nothing missing,
+    // nothing from a neighbouring column interleaved.
+    for (const column of columns) {
+      expect([...column.text.matchAll(/line (\d+) of/g)].map((match) => match[1])).toEqual([
+        '1',
+        '2',
+        '3',
+        '4',
+        '5',
+        '6',
+        '7',
+        '8',
+        '9',
+        '10',
+      ])
+    }
+
+    // The rotated watermark is an overlay: it belongs after the body it crosses,
+    // not wedged between column two and column three.
+    expect(body[body.length - 1].text).toContain('DRAFT COPY')
+  })
 })
 
 describe('encrypted.pdf', () => {

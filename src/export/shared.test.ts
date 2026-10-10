@@ -324,6 +324,49 @@ describe('linkSegments', () => {
   })
 })
 
+describe('linkSegments with internal destinations', () => {
+  const internal = { text: 'Chapter 3', url: '', destPage: 2 }
+
+  it('emits the in-document anchor for the destination page', () => {
+    expect(linkSegments('See Chapter 3 for details.', [internal])).toEqual([
+      { text: 'See ', url: null },
+      { text: 'Chapter 3', url: '#page-3' },
+      { text: ' for details.', url: null },
+    ])
+  })
+
+  it('offers only the words — the anchor is never searched in the text', () => {
+    // An external link falls back to matching its URL verbatim; an internal
+    // one must not, or `#page-3` appearing in the prose would fire the link
+    // on the wrong words.
+    expect(linkSegments('Jump #page-3 or Chapter 3', [internal])).toEqual([
+      { text: 'Jump #page-3 or ', url: null },
+      { text: 'Chapter 3', url: '#page-3' },
+    ])
+  })
+
+  it('prefers the URL when a link carries both kinds', () => {
+    expect(
+      linkSegments('Chapter 3', [{ text: 'Chapter 3', url: 'https://x.com/c3', destPage: 2 }]),
+    ).toEqual([{ text: 'Chapter 3', url: 'https://x.com/c3' }])
+  })
+
+  it('drops a malformed destination index rather than anchoring somewhere', () => {
+    expect(linkSegments('Chapter 3', [{ text: 'Chapter 3', url: '', destPage: -1 }])).toEqual([
+      { text: 'Chapter 3', url: null },
+    ])
+    expect(linkSegments('Chapter 3', [{ text: 'Chapter 3', url: '', destPage: null }])).toEqual([
+      { text: 'Chapter 3', url: null },
+    ])
+  })
+
+  it('numbers pages from 1 the way every page heading does', () => {
+    expect(linkSegments('Top', [{ text: 'Top', url: '', destPage: 0 }])).toEqual([
+      { text: 'Top', url: '#page-1' },
+    ])
+  })
+})
+
 describe('applyLinks', () => {
   const wrap = (url: string, anchor: string) => `<${anchor}|${url}>`
   const escape = (segment: string) => segment.replace(/&/g, '&amp;')

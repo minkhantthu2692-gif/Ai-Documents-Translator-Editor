@@ -9,7 +9,13 @@
  */
 import { describe, expect, it } from 'vitest'
 import { groupItemsIntoLines, type TextItemLike } from './lineGrouping'
-import { attachLinks, linkAnchors, linksFromAnnotations, safeLinkUrl } from './links'
+import {
+  attachLinks,
+  internalDestinations,
+  linkAnchors,
+  linksFromAnnotations,
+  safeLinkUrl,
+} from './links'
 import { structurePage, type PageBlock } from './structure'
 
 const PAGE_HEIGHT = 792
@@ -104,6 +110,48 @@ describe('linksFromAnnotations', () => {
   })
 })
 
+describe('internalDestinations', () => {
+  it('takes only /Link annotations carrying a destination and no URI', () => {
+    const found = internalDestinations(
+      [
+        { subtype: 'Link', dest: 'chapter-7', rect: [72, 600, 172, 620] },
+        { subtype: 'Link', dest: [1, 'XYZ', null, null, null], rect: [72, 500, 172, 520] },
+        // None of these belong: not a link, no destination, has a URI the
+        // PDF chose to navigate instead, or a destination that is neither a
+        // name nor an array.
+        { subtype: 'Widget', dest: 'chapter-7', rect: [0, 0, 10, 10] },
+        { subtype: 'Link', rect: [10, 10, 20, 20] },
+        {
+          subtype: 'Link',
+          dest: 'chapter-7',
+          url: 'https://example.com',
+          rect: [200, 600, 300, 620],
+        },
+        { subtype: 'Link', dest: 42, rect: [10, 30, 20, 40] },
+      ],
+      PAGE_HEIGHT,
+    )
+    expect(found).toHaveLength(2)
+    expect(found[0].dest).toBe('chapter-7')
+    expect(found[1].dest).toEqual([1, 'XYZ', null, null, null])
+  })
+
+  it('flips the rectangle into top-left page points', () => {
+    const [only] = internalDestinations(
+      [{ subtype: 'Link', dest: 'a', rect: [100, 500, 200, 520] }],
+      792,
+    )
+    expect(only.bbox).toEqual({ x: 100, y: 272, w: 100, h: 20 })
+  })
+
+  it('drops a degenerate or missing rectangle', () => {
+    expect(internalDestinations([{ subtype: 'Link', dest: 'a' }], 792)).toEqual([])
+    expect(
+      internalDestinations([{ subtype: 'Link', dest: 'a', rect: [10, 10, 10, 20] }], 792),
+    ).toEqual([])
+  })
+})
+
 describe('linkAnchors', () => {
   const items = [
     line('Read more at https://example.com/api now', 640),
@@ -118,7 +166,13 @@ describe('linkAnchors', () => {
     const x = 72 + 13 * CH
     const w = 23 * CH
     const anchors = linkAnchors(
-      [{ url: 'https://example.com/api', bbox: { x, y: PAGE_HEIGHT - 652, w, h: 20 } }],
+      [
+        {
+          url: 'https://example.com/api',
+          destPage: null,
+          bbox: { x, y: PAGE_HEIGHT - 652, w, h: 20 },
+        },
+      ],
       lines,
       items,
     )
@@ -134,7 +188,13 @@ describe('linkAnchors', () => {
     const splitLines = groupItemsIntoLines(split, { pageIndex: 0, pageHeight: PAGE_HEIGHT })
     const [x, w] = [72 + 9 * CH, 12 * CH]
     const anchors = linkAnchors(
-      [{ url: 'https://example.com/pricing', bbox: { x, y: PAGE_HEIGHT - 626, w, h: 20 } }],
+      [
+        {
+          url: 'https://example.com/pricing',
+          destPage: null,
+          bbox: { x, y: PAGE_HEIGHT - 626, w, h: 20 },
+        },
+      ],
       splitLines,
       split,
     )
@@ -149,7 +209,13 @@ describe('linkAnchors', () => {
     // Vertically clear of the line above.
     expect(
       linkAnchors(
-        [{ url: 'https://example.com', bbox: { x: 72, y: PAGE_HEIGHT - 626, w: 200, h: 20 } }],
+        [
+          {
+            url: 'https://example.com',
+            destPage: null,
+            bbox: { x: 72, y: PAGE_HEIGHT - 626, w: 200, h: 20 },
+          },
+        ],
         only,
         [line('Read more at https://example.com/api now', 640)],
       ),
@@ -157,7 +223,13 @@ describe('linkAnchors', () => {
     // Horizontally clear of every glyph.
     expect(
       linkAnchors(
-        [{ url: 'https://example.com', bbox: { x: 500, y: PAGE_HEIGHT - 652, w: 60, h: 20 } }],
+        [
+          {
+            url: 'https://example.com',
+            destPage: null,
+            bbox: { x: 500, y: PAGE_HEIGHT - 652, w: 60, h: 20 },
+          },
+        ],
         only,
         [line('Read more at https://example.com/api now', 640)],
       ),
@@ -170,7 +242,13 @@ describe('linkAnchors', () => {
       { pageIndex: 0, pageHeight: PAGE_HEIGHT },
     )
     const anchors = linkAnchors(
-      [{ url: 'https://example.com', bbox: { x: 72, y: PAGE_HEIGHT - 646, w: 300, h: 46 } }],
+      [
+        {
+          url: 'https://example.com',
+          destPage: null,
+          bbox: { x: 72, y: PAGE_HEIGHT - 646, w: 300, h: 46 },
+        },
+      ],
       twoLines,
       [line('Continued onto', 640), line('the second line here.', 614)],
     )

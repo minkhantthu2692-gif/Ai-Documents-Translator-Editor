@@ -58,7 +58,17 @@ export interface BlockLine {
 export interface LinkRef {
   /** Always a substring of the block it is attached to. */
   text: string
+  /** Absolute URL for external links; empty string for internal ones. */
   url: string
+  /**
+   * 0-based target page of an internal `/Dest` link (a table of contents or a
+   * cross-reference pointing into the same document). Optional for the same
+   * reason `headingLevel` is: a row written before internal links were
+   * resolved has no value, and every reader must default it. Exporters turn
+   * it into an in-document anchor (`#page-N`, 1-based) — a destination is a
+   * page, not a URL, and inventing a URL for it would be a lie.
+   */
+  destPage?: number | null
 }
 
 /**

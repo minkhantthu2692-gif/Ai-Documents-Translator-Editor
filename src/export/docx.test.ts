@@ -300,6 +300,21 @@ describe('buildDocx links', () => {
     const xml = await zipText(await bytesFor([]), 'word/document.xml')
     expect(xml).not.toContain('<w:hyperlink')
   })
+
+  it('prints an internal destination as words, never as a hash "web" link', async () => {
+    // Word resolves in-document jumps through bookmarks this exporter does
+    // not write; an ExternalHyperlink to `#page-3` would open as a broken
+    // target. The words still print — only the destination is lost.
+    const bytes = await bytesFor(
+      [{ text: 'Introduction', url: '', destPage: 1 }],
+      'See Introduction for the background.',
+    )
+    const xml = await zipText(bytes, 'word/document.xml')
+    const rels = await zipText(bytes, 'word/_rels/document.xml.rels')
+    expect(xml).toContain('Introduction')
+    expect(xml).not.toContain('<w:hyperlink')
+    expect(rels).not.toContain('#page-2')
+  })
 })
 
 describe('buildDocx code blocks', () => {

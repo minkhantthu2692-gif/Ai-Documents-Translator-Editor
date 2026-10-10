@@ -29,7 +29,8 @@ import { headingTiers } from './headings'
 import { anchorFigures } from './figures'
 import { annotationNotes, attachAnnotationNotes } from './annotations'
 import { attachFieldLabels, fieldLabels } from './formFields'
-import { attachLinks, linkAnchors, linksFromAnnotations } from './links'
+import { attachLinks, internalDestinations, linkAnchors, linksFromAnnotations } from './links'
+import type { PageLink } from './links'
 import { traceImagePlacements, type ImagePlacement } from './imageOps'
 import {
   groupItemsIntoLines,
@@ -230,6 +231,8 @@ export interface AnnotationLike {
   quadPoints?: number[]
   url?: string
   unsafeUrl?: string
+  /** `/Dest` — where an internal link points: a name, or `[ref, /XYZ, …]`. */
+  dest?: unknown
   rect?: number[]
 }
 
@@ -252,6 +255,12 @@ export interface PageSource {
   styles?: Array<Partial<LineStyle> | null> | undefined
   /** `/Link` rectangles; absent when there is no pdf.js page to ask. */
   annotations?: AnnotationLike[] | undefined
+  /**
+   * Internal `/Link` rectangles already resolved to 0-based page indexes
+   * (see `resolveDest`), filled by `extractPage` before `assemblePage` runs.
+   * Absent on sidecar pages, whose producer never sees annotations.
+   */
+  internalLinks?: PageLink[] | undefined
   /**
    * Image rectangles traced from the operator list; absent when the producer
    * had no operator list to walk. `recoverWithSidecar` fills this for a page
@@ -615,6 +624,13 @@ export interface ExtractPageOptions {
    * for any page whose predecessor could not be read.
    */
   continuation?: TableContinuation | null
+  /**
+   * Resolves an internal `/Dest` (a name, or `[ref, /XYZ, …]`) to a 0-based
+   * page index. Resolving needs the document, which this module never sees —
+   * the analysis worker builds one from its open pdf.js doc. Absent means
+   * internal links stay unanchored, exactly as they were before.
+   */
+  resolveDest?: (dest: unknown) => Promise<number | null>
 }
 
 export interface ExtractedPage {
@@ -740,12 +756,16 @@ export function assemblePage(
   }
 
   const blocks = structurePage(lines, structureOptions)
-  // `/Link` annotations are rectangles plus a URI and nothing else: the words
-  // they cover are recovered from the *lines*, not from the blocks, because a
-  // rectangle that spans two paragraphs would otherwise have no block to
-  // belong to, and one that lands mid-paragraph would be sliced against a
-  // merged line of text that never existed on the page.
-  const pageLinks = linksFromAnnotations(source.annotations ?? [], source.height)
+  // `/Link` annotations are rectangles plus a URI (or a resolved page index)
+  // and nothing else: the words they cover are recovered from the *lines*,
+  // not from the blocks, because a rectangle that spans two paragraphs would
+  // otherwise have no block to belong to, and one that lands mid-paragraph
+  // would be sliced against a merged line of text that never existed on the
+  // page.
+  const pageLinks = [
+    ...linksFromAnnotations(source.annotations ?? [], source.height),
+    ...(source.internalLinks ?? []),
+  ]
   attachLinks(blocks, linkAnchors(pageLinks, lines, source.items))
   // Figures come last: they are the only input here that is not text, and the
   // pairing depends on boxes every pass above has already settled.
@@ -791,12 +811,74 @@ export function assemblePage(
   }
 }
 
+/** Most internal destinations a single page may resolve before we stop. */
+const MAX_INTERNAL_LINKS = 32
+
+/**
+ * One internal `/Dest` — a name, or `[ref, /XYZ, …]` — to a 0-based page index.
+ *
+ * This is the one piece of link resolution that genuinely needs the open
+ * document: a named destination is a lookup table entry (`/Dests`), and a ref
+ * is an object number that only the page tree can turn into a page number.
+ * Every failure — a name nothing defines, a ref outside the document, pdf.js
+ * declining the lookup — answers `null`, which drops the link; a jump to the
+ * wrong page would be worse than no jump at all.
+ */
+export async function resolveDestination(
+  doc: PDFDocumentProxy,
+  dest: unknown,
+): Promise<number | null> {
+  try {
+    const destination =
+      typeof dest === 'string' ? await doc.getDestination(dest) : (dest as unknown[])
+    if (!Array.isArray(destination) || destination.length === 0) return null
+    const ref = destination[0] as { num?: unknown; gen?: unknown } | null
+    if (ref === null || typeof ref !== 'object' || typeof ref.num !== 'number') return null
+    return await doc.getPageIndex(ref as { num: number; gen: number })
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Internal `/Link` rectangles → links carrying a page index, bounded.
+ *
+ * Exported for the one other producer that holds a page's annotations after
+ * `extractPage` has already run — the sidecar retry, which reads its text
+ * from PyMuPDF but takes its annotations from the still-open pdf.js page, so
+ * a recovered page keeps its links in both kinds. A table of contents never
+ * needs more than a handful of destinations, and a hostile PDF could
+ * otherwise hang a page on hundreds; every failure (a name nothing defines, a
+ * ref outside the document) resolves to "no link" rather than an exception —
+ * a jump to the wrong page would be worse than no jump at all.
+ */
+export async function resolveInternalLinks(
+  annotations: readonly AnnotationLike[] | undefined,
+  pageHeight: number,
+  resolveDest: ((dest: unknown) => Promise<number | null>) | undefined,
+): Promise<PageLink[]> {
+  if (resolveDest === undefined || annotations === undefined || annotations.length === 0) return []
+  const destinations = internalDestinations(annotations, pageHeight)
+  const links: PageLink[] = []
+  for (const { dest, bbox } of destinations.slice(0, MAX_INTERNAL_LINKS)) {
+    const destPage = await resolveDest(dest).catch(() => null)
+    if (destPage === null || !Number.isInteger(destPage) || destPage < 0) continue
+    links.push({ url: '', destPage, bbox })
+  }
+  return links
+}
+
 /** Extracts ordered blocks for a single page. */
 export async function extractPage(
   page: PDFPageProxy,
   options: ExtractPageOptions,
 ): Promise<ExtractedPage> {
   const prepared = await readPage(page, { annotations: true })
+  const internalLinks = await resolveInternalLinks(
+    prepared.annotations,
+    prepared.height,
+    options.resolveDest,
+  )
   return assemblePage(
     options.pageIndex,
     {
@@ -805,6 +887,7 @@ export async function extractPage(
       styles: prepared.styles,
       annotations: prepared.annotations,
       placements: traceImagePlacements(prepared.ops, prepared.view),
+      internalLinks,
       width: prepared.width,
       height: prepared.height,
       rotation: prepared.rotation,

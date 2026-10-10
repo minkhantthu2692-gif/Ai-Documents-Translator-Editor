@@ -182,8 +182,8 @@ describe('buildEpub', () => {
     expect(chapter).toContain('မြန်မာစာ')
     expect(chapter).toContain('dir="rtl"')
     expect(chapter).toContain('class="block rtl"')
-    expect(chapter).toContain('<h2>Page 1</h2>')
-    expect(chapter).toContain('<h2>Page 2</h2>')
+    expect(chapter).toContain('<h2 id="page-1">Page 1</h2>')
+    expect(chapter).toContain('<h2 id="page-2">Page 2</h2>')
     expect(chapter).toContain('1. ပထမအချက်')
   })
 
@@ -275,7 +275,7 @@ describe('buildEpub', () => {
     const chapter = await zipText(zip, 'OEBPS/text/chap_1.xhtml')
 
     // Each page opens at h2, so the document's own hierarchy starts at h3.
-    expect(chapter).toContain('<h2>Page 1</h2>')
+    expect(chapter).toContain('<h2 id="page-1">Page 1</h2>')
     expect(chapter).toContain('<h3 class="block" xml:lang="my" lang="my"')
     expect(chapter).toContain('>အချက်တစ်ခု</h3>')
     // A body block is still a paragraph, and only one outline entry is added
@@ -329,6 +329,54 @@ describe('buildEpub links', () => {
   it('writes no <a> at all for a block with no links', async () => {
     const chapter = await chapterOf([])
     expect(chapter).not.toContain('<a href=')
+  })
+
+  it('gives every page heading an id and jumps to it in-chapter', async () => {
+    const chapter = await chapterOf(
+      [{ text: 'Introduction', url: '', destPage: 0 }],
+      'See Introduction for the background.',
+    )
+    expect(chapter).toContain('<h2 id="page-1">Page 1</h2>')
+    expect(chapter).toContain('<a href="#page-1">Introduction</a>')
+    expectWellFormed(chapter, 'chap_1.xhtml')
+  })
+
+  it('prefixes the owning chapter when the jump crosses one', async () => {
+    // 21 pages: chapters hold 20, so page 21 lives in chapter 2 and a bare
+    // `#page-21` from chapter 1 would resolve against a file that has no
+    // such id. Every page needs a block of its own or `contentPages` drops
+    // it and the chaptering changes.
+    const linked = block({
+      id: 'linked',
+      links: [{ text: 'Appendix', url: '', destPage: 20 }],
+      sourceText: 'See the Appendix.',
+      translatedText: 'See the Appendix.',
+    })
+    const doc: ExportDocument = {
+      ...fixtureDoc(),
+      pages: Array.from({ length: 21 }, (_, index) =>
+        page(
+          index,
+          index === 0
+            ? [linked]
+            : [
+                block({
+                  id: `filler-${index}`,
+                  sourceText: `Filler ${index}`,
+                  translatedText: `Filler ${index}`,
+                }),
+              ],
+        ),
+      ),
+    }
+    const zip = await JSZip.loadAsync(await buildEpub(doc, epubOptions()))
+    const chapter1 = await zipText(zip, 'OEBPS/text/chap_1.xhtml')
+    expect(chapter1).toContain('<a href="chap_2.xhtml#page-21">Appendix</a>')
+    expectWellFormed(chapter1, 'chap_1.xhtml')
+    // …and the anchor it names does exist, in chapter 2.
+    const chapter2 = await zipText(zip, 'OEBPS/text/chap_2.xhtml')
+    expect(chapter2).toContain('<h2 id="page-21">Page 21</h2>')
+    expectWellFormed(chapter2, 'chap_2.xhtml')
   })
 })
 

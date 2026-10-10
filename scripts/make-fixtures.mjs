@@ -10,9 +10,17 @@
  *   fixtures/mixed.pdf       page 1 = image + text, page 2 = plain text
  *   fixtures/encrypted.pdf   3 pages, RC4 40-bit (V1/R2), password "secret123"
  *   fixtures/complex.pdf     1 page, three text columns + rotated watermark
+ *   fixtures/slide.pdf       1 landscape page: a wide title over two text
+ *                            boxes whose lines share baselines (type 10)
+ *   fixtures/magazine.pdf    1 page: a photo inside the column with copy
+ *                            flowing around it (type 12)
  *   fixtures/links.pdf       1 page, five /Link annotations: a mid-line URL,
  *                            a mid-line word, an internal destination, a
  *                            `data:` URI and a URI with no scheme
+ *   fixtures/links-internal.pdf 2 pages, a contents page whose entries jump
+ *                            to the chapter — a direct `[ref /XYZ …]`, a
+ *                            named destination via `/Dests`, and an external
+ *                            URI beside them
  *   fixtures/table.pdf       2 pages, two tables whose cells are each their
  *                            own positioned show-text operator — the shape a
  *                            real document uses — one row leaving a cell empty
@@ -1052,7 +1060,9 @@ function buildEncryptedPdf(pageCount) {
  * Covers the five shapes the extractor has to tell apart:
  *   1. a URL in the middle of a line  — the usual bare link
  *   2. an ordinary word mid-line      — a citation-style hyperlink
- *   3. an internal `/Dest`            — not a URL, must be skipped
+ *   3. an internal `/Dest`            — no URI, and this one names nothing, so
+ *      it resolves to no link unless a resolver says otherwise (the resolvable
+ *      shapes live in `links-internal.pdf`)
  *   4. a `data:` URI                  — must be rejected, not escaped
  *   5. a URI with no scheme           — navigable once pdf.js gives it one
  */
@@ -1104,7 +1114,8 @@ function buildLinksPdf() {
   const annots = linked.map(([, y, from, to, target]) => {
     const rect = rectFor(y, from, to)
     if (target === null) {
-      // An internal destination: no URI, so it is not a hyperlink at all.
+      // An internal destination with no URI. Nothing in this document defines
+      // the name, so `resolveDestination` answers null and no link is emitted.
       return writer.add(
         `<< /Type /Annot /Subtype /Link /Rect ${rect} /Border [0 0 0] /Dest (chapter-7) >>`,
       )
@@ -1152,6 +1163,119 @@ function buildLinksPdf() {
   const stream = writer.addStream('', content)
   const page = addPage(writer, pagesNum, resources, stream, annots)
   finalizePages(writer, pagesNum, [page])
+  return writer.render()
+}
+
+/**
+ * Two pages of internal destinations: a contents page whose entries jump to
+ * the chapter page, in both shapes a real PDF uses — a direct `[ref /XYZ …]`
+ * array and a named destination resolved through the catalog's `/Dests` —
+ * with one external URI beside them so both kinds on one page are exercised.
+ *
+ * Courier throughout, so every rectangle computes to the exact character
+ * range it covers (10pt → 6pt advance), the way `links.pdf` does it.
+ */
+function buildLinksInternalPdf() {
+  const writer = new PdfWriter()
+  const pagesNum = addPagesObject(writer)
+  const regular = writer.add(FONT_REGULAR)
+  const bold = writer.add(FONT_BOLD)
+  const mono = writer.add(FONT_MONO)
+  const resources = `/Font << /F1 ${regular} 0 R /F2 ${bold} 0 R /F3 ${mono} 0 R >>`
+
+  const CH = 6 // Courier advance at 10pt
+  const LEFT = 72
+  const rectFor = (y, from, to) => `[${LEFT + from * CH} ${y - 2} ${LEFT + to * CH} ${y + 11}]`
+
+  // Page 2 first: page 1's destinations name its object number.
+  const chapter = Buffer.from(
+    [
+      'BT\n',
+      '/F2 16 Tf\n0 0 0 rg\n',
+      `1 0 0 1 ${LEFT} 700 Tm (Introduction) Tj\n`,
+      '/F1 10 Tf\n0 0 0 rg\n',
+      `1 0 0 1 ${LEFT} 670 Tm (The chapter this contents page points at.) Tj\n`,
+      `1 0 0 1 ${LEFT} 656 Tm (Its second line sits here for context.) Tj\n`,
+      '/F2 16 Tf\n',
+      `1 0 0 1 ${LEFT} 420 Tm (Method) Tj\n`,
+      '/F1 10 Tf\n',
+      `1 0 0 1 ${LEFT} 390 Tm (The named destination lands on this heading.) Tj\n`,
+      'ET\n',
+    ].join(''),
+    'latin1',
+  )
+  const page2 = addPage(writer, pagesNum, resources, writer.addStream('', chapter))
+
+  const direct = (rect) =>
+    writer.add(
+      `<< /Type /Annot /Subtype /Link /Rect ${rect} /Border [0 0 0] ` +
+        `/Dest [${page2} 0 R /XYZ null null null] >>`,
+    )
+  const named = (rect) =>
+    writer.add(`<< /Type /Annot /Subtype /Link /Rect ${rect} /Border [0 0 0] /Dest (method) >>`)
+  const uri = (rect, target) =>
+    writer.add(
+      `<< /Type /Annot /Subtype /Link /Rect ${rect} /Border [0 0 0] ` +
+        `/A << /S /URI /URI (${escape(target)}) >> >>`,
+    )
+
+  // Three contents entries: text, baseline, anchor as `[from, to)` in glyphs,
+  // and which kind of destination carries it.
+  const toc = [
+    ['Chapter 1  Introduction', 640, 11, 23, 'direct'],
+    ['Chapter 2  Method', 588, 11, 17, 'named'],
+    ['See https://example.com/spec for the errata.', 536, 4, 28, 'https://example.com/spec'],
+  ]
+  const fillers = [
+    'The opening chapter defines the terms.',
+    'The method chapter shows the working.',
+    'The errata live behind that address.',
+  ]
+
+  const annots = toc.map(([, y, from, to, target]) => {
+    const rect = rectFor(y, from, to)
+    if (target === 'direct') return direct(rect)
+    if (target === 'named') return named(rect)
+    return uri(rect, target)
+  })
+
+  const parts = ['BT\n', '/F2 16 Tf\n0 0 0 rg\n']
+  parts.push(`1 0 0 1 ${LEFT} 700 Tm (Contents) Tj\n`)
+  toc.forEach(([line, y], index) => {
+    parts.push('/F3 10 Tf\n')
+    parts.push(`1 0 0 1 ${LEFT} ${y} Tm (${escape(line)}) Tj\n`)
+    parts.push('/F1 10 Tf\n')
+    parts.push(`1 0 0 1 ${LEFT} ${y - 14} Tm (${escape(fillers[index])}) Tj\n`)
+  })
+  parts.push('ET\n')
+  const content = Buffer.from(
+    [
+      'BT\n',
+      '/F2 9 Tf\n1 0 0 rg\n',
+      `72 770 Td (${escape('Table of Contents')}) Tj\n`,
+      '0 0 0 rg\n/F1 9 Tf\n',
+      `0 -712 Td (${escape('Page 1 of 2')}) Tj\n`,
+      'ET\n',
+      ...parts,
+    ].join(''),
+    'latin1',
+  )
+  const page1 = addPage(writer, pagesNum, resources, writer.addStream('', content), annots)
+
+  // The named destination lives on the catalog: `/Dests << /method [page 2 …] >>`.
+  writer.replaceBody(
+    1,
+    `<< /Type /Catalog /Pages ${pagesNum} 0 R ` +
+      `/Dests << /method [${page2} 0 R /XYZ null null null] >> >>`,
+  )
+  finalizePages(writer, pagesNum, [page1, page2])
+  writer.setInfo({
+    Title: 'Internal destination sample',
+    Creator: 'make-fixtures.mjs',
+    Producer: 'make-fixtures.mjs',
+    CreationDate: "D:20260115093000+06'30'",
+    ModDate: "D:20260320174500+06'30'",
+  })
   return writer.render()
 }
 
@@ -1435,6 +1559,7 @@ const outputs = [
   ['slide.pdf', buildSlidePdf()],
   ['magazine.pdf', buildMagazinePdf()],
   ['links.pdf', buildLinksPdf()],
+  ['links-internal.pdf', buildLinksInternalPdf()],
   ['table.pdf', buildTablePdf()],
   ['table-spans.pdf', buildTableSpansPdf()],
   ['table-continued.pdf', buildTableContinuationPdf()],

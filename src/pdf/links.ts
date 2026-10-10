@@ -2,9 +2,10 @@
  * Link annotations → links an export can actually render.
  *
  * pdf.js hands back a `/Link` annotation as a rectangle in PDF user space and
- * a URI; it never says *which words* it covers, and that is the whole problem:
- * an export has to wrap the right characters in an `<a>` (or a `TextRun`), not
- * just remember that the page had a link somewhere on it.
+ * either a URI or an internal destination; it never says *which words* it
+ * covers, and that is the whole problem: an export has to wrap the right
+ * characters in an `<a>` (or a `TextRun`), not just remember that the page had
+ * a link somewhere on it.
  *
  * The anchor is therefore reconstructed geometrically — the rectangle is
  * matched against the page's lines, and the runs inside it are located inside
@@ -13,12 +14,14 @@
  * block it lands in: `structurePage` joins lines with `\n`, so a match in the
  * line is a match in the block, and the exporter needs exactly that.
  *
- * Two limits are deliberate. Internal destinations (`/Dest`, a table of
- * contents pointing at page 5) carry no URI and are skipped — resolving them
- * needs the document's outline, which this layer does not have. And an anchor
- * only survives translation if the model kept the words; URLs and citations
- * do, ordinary prose does not, which is why `applyLinks` in the exporters also
- * falls back to wrapping a literal occurrence of the URL.
+ * Internal destinations (`/Dest`, a table of contents pointing at page 5) are
+ * captured with their raw destination by `internalDestinations`; turning that
+ * into a page index needs the document (`getDestination` / `getPageIndex`),
+ * which this layer does not have — the caller resolves them and hands the
+ * result back as a `PageLink` with a `destPage`. An anchor only survives
+ * translation if the model kept the words; URLs and citations do, ordinary
+ * prose does not, which is why `applyLinks` in the exporters also falls back
+ * to wrapping a literal occurrence of the URL.
  */
 
 import type { GroupedLine, TextItemLike } from './lineGrouping'
@@ -29,7 +32,10 @@ export type { LinkRef } from './structure'
 
 /** A `/Link` annotation as a rectangle in top-left page points. */
 export interface PageLink {
+  /** Absolute URL for external links; empty string for internal ones. */
   url: string
+  /** 0-based target page for internal links, null for external ones. */
+  destPage: number | null
   bbox: BBox
 }
 
@@ -94,10 +100,10 @@ export function rectToBBox(rect: unknown, pageHeight: number): BBox | null {
 /**
  * External links on one page, in annotation order.
  *
- * Internal destinations are skipped here: they are not broken links, they are
- * a different feature (`/Dest` resolves through the document outline), and
- * silently turning them into a relative `href` would be worse than dropping
- * them.
+ * A `/Link` that carries an internal destination instead of a URI is not a
+ * broken link — it is a different feature, and it comes out of
+ * `internalDestinations` rather than here, because a page index cannot be
+ * resolved without the document.
  */
 export function linksFromAnnotations(
   annotations: ReadonlyArray<{
@@ -115,9 +121,48 @@ export function linksFromAnnotations(
     if (url === null) continue
     const bbox = rectToBBox(annotation.rect, pageHeight)
     if (bbox === null) continue
-    links.push({ url, bbox })
+    links.push({ url, destPage: null, bbox })
   }
   return links
+}
+
+/** One internal `/Link`: its raw destination and the rectangle it sits on. */
+export interface InternalDestination {
+  /** The annotation's `/Dest` — a name (string) or `[ref, /XYZ, …]`. */
+  dest: unknown
+  bbox: BBox
+}
+
+/**
+ * Internal links on one page — `/Link` annotations whose action is a
+ * destination inside the same document rather than a URI.
+ *
+ * The destination is handed back raw: resolving a named destination to a page
+ * index needs `getDestination`/`getPageIndex` on the document, which this
+ * layer never sees. An annotation with a safe URI is excluded even if it also
+ * carries a `dest`, because the URI is what the PDF chose to navigate.
+ */
+export function internalDestinations(
+  annotations: ReadonlyArray<{
+    subtype?: string
+    url?: string
+    unsafeUrl?: string
+    dest?: unknown
+    rect?: number[]
+  }>,
+  pageHeight: number,
+): InternalDestination[] {
+  const destinations: InternalDestination[] = []
+  for (const annotation of annotations) {
+    if (annotation.subtype !== 'Link') continue
+    if (safeLinkUrl(annotation.url) !== null || safeLinkUrl(annotation.unsafeUrl) !== null) continue
+    const dest = annotation.dest
+    if (typeof dest !== 'string' && !Array.isArray(dest)) continue
+    const bbox = rectToBBox(annotation.rect, pageHeight)
+    if (bbox === null) continue
+    destinations.push({ dest, bbox })
+  }
+  return destinations
 }
 
 /**
@@ -216,7 +261,12 @@ export function linkAnchors(
       if (!overlapsY(line, link.bbox)) continue
       const text = anchorSlice(line, items, link.bbox)
       if (text.length === 0) continue
-      anchors.push({ text, url: link.url, bbox: link.bbox })
+      anchors.push({
+        text,
+        url: link.url,
+        ...(link.destPage !== null ? { destPage: link.destPage } : {}),
+        bbox: link.bbox,
+      })
     }
   }
   return anchors
@@ -271,8 +321,19 @@ export function attachLinks(blocks: PageBlock[], anchors: readonly LinkAnchor[])
   for (const anchor of anchors) {
     const block = blockFor(blocks, anchor.bbox)
     if (block === null || block.links.length >= MAX_LINKS_PER_BLOCK) continue
-    const seen = block.links.some((link) => link.url === anchor.url && link.text === anchor.text)
+    const seen = block.links.some(
+      (link) =>
+        link.url === anchor.url &&
+        link.text === anchor.text &&
+        (link.destPage ?? null) === (anchor.destPage ?? null),
+    )
     if (seen) continue
-    block.links.push({ text: anchor.text, url: anchor.url })
+    block.links.push({
+      text: anchor.text,
+      url: anchor.url,
+      ...(anchor.destPage !== undefined && anchor.destPage !== null
+        ? { destPage: anchor.destPage }
+        : {}),
+    })
   }
 }

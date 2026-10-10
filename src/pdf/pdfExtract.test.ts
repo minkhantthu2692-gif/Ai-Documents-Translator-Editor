@@ -22,6 +22,7 @@ import {
   parsePdfDate,
   probeDocument,
   readDocumentInfo,
+  resolveDestination,
   type ExtractedPage,
 } from './pdfExtract'
 import type { PageBlock } from './structure'
@@ -324,6 +325,59 @@ describe('links.pdf', () => {
   it('leaves every block holding a list, never undefined', () => {
     expect(blocks.length).toBeGreaterThan(4)
     expect(blocks.every((block) => Array.isArray(block.links))).toBe(true)
+  })
+})
+
+describe('links-internal.pdf', () => {
+  // A contents page whose entries jump to the chapter page in both shapes a
+  // real PDF uses — a direct `[ref /XYZ …]` array and a named destination
+  // resolved through the catalog's `/Dests` — with an external URI beside
+  // them so both kinds on one page are exercised together.
+  let doc: PDFDocumentProxy
+  let blocks: Awaited<ReturnType<typeof extractPage>>['blocks']
+
+  beforeAll(async () => {
+    doc = await open('links-internal.pdf')
+    const page = await doc.getPage(1)
+    blocks = (
+      await extractPage(page, {
+        pageIndex: 0,
+        resolveDest: (dest) => resolveDestination(doc, dest),
+      })
+    ).blocks
+  })
+
+  const linksOf = (needle: string) => blocks.find((block) => block.text.includes(needle))?.links
+
+  it('anchors a direct destination on the page it points at', () => {
+    expect(linksOf('Chapter 1')).toEqual([{ text: 'Introduction', url: '', destPage: 1 }])
+  })
+
+  it('anchors a named destination through the catalog', () => {
+    expect(linksOf('Chapter 2')).toEqual([{ text: 'Method', url: '', destPage: 1 }])
+  })
+
+  it('keeps an external URI external beside the internal ones', () => {
+    expect(linksOf('errata')).toEqual([
+      { text: 'https://example.com/spec', url: 'https://example.com/spec' },
+    ])
+  })
+
+  it('leaves the chapter page itself without links', async () => {
+    const page = await doc.getPage(2)
+    const extracted = await extractPage(page, {
+      pageIndex: 1,
+      resolveDest: (dest) => resolveDestination(doc, dest),
+    })
+    expect(extracted.blocks.flatMap((block) => block.links)).toEqual([])
+  })
+
+  it('drops internal links when no resolver is supplied, as every old reader must', async () => {
+    const page = await doc.getPage(1)
+    const plain = await extractPage(page, { pageIndex: 0 })
+    expect(plain.blocks.flatMap((block) => block.links)).toEqual([
+      { text: 'https://example.com/spec', url: 'https://example.com/spec' },
+    ])
   })
 })
 

@@ -172,7 +172,11 @@ function blockChildren(
 ): Array<TextRun | ExternalHyperlink> {
   const runs: Array<TextRun | ExternalHyperlink> = []
   for (const segment of linkSegments(text, block.links)) {
-    if (segment.url === null) {
+    // A `#page-N` segment is an in-document jump: Word renders those through
+    // bookmarks this exporter does not write, and an ExternalHyperlink to a
+    // hash would open as a broken web target. The words still print — only
+    // the destination is lost, which is the honest trade for the format.
+    if (segment.url === null || segment.url.startsWith('#')) {
       // One run per line. Only a plain stretch can be split — a hyperlink is
       // a single run, and breaking it apart would lose the anchor.
       segment.text

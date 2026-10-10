@@ -35,6 +35,8 @@ import {
   extractPage,
   needsSidecarFallback,
   probeDocument,
+  resolveDestination,
+  resolveInternalLinks,
   type AnnotationLike,
   type ExtractedPage,
   type ExtractPageOptions,
@@ -346,14 +348,24 @@ async function recoverWithSidecar(
       } catch (error) {
         if (isAbortError(error)) throw error
       }
+      const options = pageOptions(retry.pageIndex, continuationHintFor(pages[retry.position - 1]))
       pages[retry.position] = assemblePage(
         retry.pageIndex,
-        { ...entry.source, annotations, placements },
+        {
+          ...entry.source,
+          annotations,
+          placements,
+          internalLinks: await resolveInternalLinks(
+            annotations,
+            entry.source.height,
+            options.resolveDest,
+          ),
+        },
         // The page before this one is settled by now — every earlier retry has
         // been reassembled — so its table, if it ended with one, still speaks
         // for the top of this page even though the engines disagreed about how
         // to read it.
-        pageOptions(retry.pageIndex, continuationHintFor(pages[retry.position - 1])),
+        options,
       )
       continue
     }
@@ -387,6 +399,7 @@ async function handleExtract(request: ExtractRequest): Promise<void> {
     ...(request.headingSizes ? { headingSizes: request.headingSizes } : {}),
     ...(request.convertZawgyi !== undefined ? { convertZawgyi: request.convertZawgyi } : {}),
     ...(continuation ? { continuation } : {}),
+    resolveDest: (dest: unknown) => resolveDestination(open.doc, dest),
   })
 
   try {

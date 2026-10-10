@@ -253,12 +253,20 @@ export function linkSegments(text: string, links: readonly LinkRef[]): LinkSegme
   if (text.length === 0 || links.length === 0) return [{ text, url: null }]
 
   // Each link is offered as the words it covered, then — if that is not what
-  // came out of the translation — as the URL verbatim.
-  const offered: Array<{ link: LinkRef; needle: string }> = []
+  // came out of the translation — as the URL verbatim. An internal link (a
+  // `/Dest` pointing at another page of the same document) has no URL to fall
+  // back on: its href is the in-document anchor we build from the page index,
+  // and only its words can find a home in the printed text.
+  const offered: Array<{ link: LinkRef; needle: string; href: string }> = []
   for (const link of links) {
-    if (safeLinkUrl(link.url) === null) continue
-    if (link.text.trim().length > 0) offered.push({ link, needle: link.text })
-    if (link.url.length > 0 && link.url !== link.text) offered.push({ link, needle: link.url })
+    const external = safeLinkUrl(link.url)
+    const internal = external === null ? internalHref(link) : null
+    const href = external ?? internal
+    if (href === null) continue
+    if (link.text.trim().length > 0) offered.push({ link, needle: link.text, href })
+    if (external !== null && link.url.length > 0 && link.url !== link.text) {
+      offered.push({ link, needle: link.url, href })
+    }
   }
   if (offered.length === 0) return [{ text, url: null }]
 
@@ -266,7 +274,7 @@ export function linkSegments(text: string, links: readonly LinkRef[]): LinkSegme
   const fired = new Set<LinkRef>()
   let cursor = 0
   for (;;) {
-    let best: { link: LinkRef; needle: string; index: number } | null = null
+    let best: { link: LinkRef; needle: string; index: number; href: string } | null = null
     for (const candidate of offered) {
       if (fired.has(candidate.link)) continue
       const index = text.indexOf(candidate.needle, cursor)
@@ -275,16 +283,33 @@ export function linkSegments(text: string, links: readonly LinkRef[]): LinkSegme
         best === null ||
         index < best.index ||
         (index === best.index && candidate.needle.length > best.needle.length)
-      if (wins) best = { link: candidate.link, needle: candidate.needle, index }
+      if (wins) {
+        best = { link: candidate.link, needle: candidate.needle, index, href: candidate.href }
+      }
     }
     if (best === null) break
     if (best.index > cursor) segments.push({ text: text.slice(cursor, best.index), url: null })
-    segments.push({ text: best.needle, url: best.link.url })
+    segments.push({ text: best.needle, url: best.href })
     fired.add(best.link)
     cursor = best.index + best.needle.length
   }
   if (cursor < text.length) segments.push({ text: text.slice(cursor), url: null })
   return segments.length > 0 ? segments : [{ text, url: null }]
+}
+
+/**
+ * The in-document anchor an internal link jumps to: `#page-N`, 1-based — the
+ * same numbering every exporter gives its page headings and page sections.
+ *
+ * A destination is a page, not a URL, so the href is an anchor we control
+ * end to end; nothing user-authored reaches it, which is why formats are free
+ * to escape (or ignore) it however they like. Negative or non-numeric indexes
+ * are malformed captures and answer `null`, dropping the link.
+ */
+export function internalHref(link: LinkRef): string | null {
+  if (typeof link.destPage !== 'number' || !Number.isFinite(link.destPage) || link.destPage < 0)
+    return null
+  return `#page-${Math.floor(link.destPage) + 1}`
 }
 
 /**

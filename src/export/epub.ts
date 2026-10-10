@@ -38,6 +38,7 @@ import {
   tableSpansFor,
   textOf,
 } from './shared'
+import type { LinkWrap } from './shared'
 import type { ExportBlock, ExportDocument, ExportPage } from './types'
 
 /** Options the export worker fills from the export dialog. */
@@ -176,6 +177,7 @@ function paragraph(
   heading: number | null = null,
   links: readonly LinkRef[] = [],
   preformatted = false,
+  wrap: LinkWrap = linkHtml,
 ): string {
   const rtl = directionOf(text) === 'rtl'
   const all = rtl ? [...classes, 'rtl'] : classes
@@ -189,7 +191,7 @@ function paragraph(
   // are, so a program keeps its shape instead of being flattened onto one line
   // by XHTML's whitespace collapsing — and a URL inside it stays data, so no
   // anchors are woven in.
-  const inner = preformatted ? escapeHtml(text) : applyLinks(text, links, linkHtml, escapeHtml)
+  const inner = preformatted ? escapeHtml(text) : applyLinks(text, links, wrap, escapeHtml)
   return `<${tag} class="${escapeHtml(all.join(' '))}" xml:lang="${safeLang}" lang="${safeLang}"${dir}${style}>${inner}</${tag}>`
 }
 
@@ -207,12 +209,13 @@ function tableMarkup(
   classes: readonly string[],
   lang: string,
   style: string,
+  wrap: LinkWrap = linkHtml,
 ): string {
   const rtl = directionOf(grid.map((row) => row.join(' ')).join(' ')) === 'rtl'
   const all = rtl ? [...classes, 'rtl'] : classes
   const dir = rtl ? ' dir="rtl"' : ''
   const safeLang = escapeHtml(lang)
-  const cell = (text: string): string => applyLinks(text, block.links, linkHtml, escapeHtml)
+  const cell = (text: string): string => applyLinks(text, block.links, wrap, escapeHtml)
   // `colspan` only when the printed grid is still the shape the spans were
   // measured on, and never for the cells a merge already covers — see
   // `tableSpansFor` and `tableHtml`.
@@ -277,7 +280,12 @@ function blockFiguresMarkup(
   return { before, after }
 }
 
-function blockParagraphs(block: ExportBlock, doc: ExportDocument, options: EpubOptions): string[] {
+function blockParagraphs(
+  block: ExportBlock,
+  doc: ExportDocument,
+  options: EpubOptions,
+  wrap: LinkWrap = linkHtml,
+): string[] {
   const { source, target, primary } = textOf(block, options.includeOriginal)
   const entries: Array<{ text: string; source: boolean }> = []
   if (options.includeOriginal) {
@@ -308,8 +316,8 @@ function blockParagraphs(block: ExportBlock, doc: ExportDocument, options: EpubO
         const classes = entry.source ? ['source', 'block'] : ['block']
         const grid = grids[index]
         return grid
-          ? tableMarkup(grid, block, classes, lang, style)
-          : paragraph(entry.text, classes, lang, style, null, block.links, false)
+          ? tableMarkup(grid, block, classes, lang, style, wrap)
+          : paragraph(entry.text, classes, lang, style, null, block.links, false, wrap)
       })
     }
   }
@@ -329,18 +337,24 @@ function blockParagraphs(block: ExportBlock, doc: ExportDocument, options: EpubO
       isCode ? null : index === headingIndex ? headingOffset(block, CHAPTER_LEVELS_ABOVE) : null,
       block.links,
       isCode,
+      wrap,
     )
   })
 }
 
 /** One chapter: an `<h2>` per source page, then that page's blocks. */
-function chapterXhtml(pages: ExportPage[], doc: ExportDocument, options: ChapterOptions): string {
+function chapterXhtml(
+  pages: ExportPage[],
+  doc: ExportDocument,
+  options: ChapterOptions,
+  wrap: LinkWrap = linkHtml,
+): string {
   const body: string[] = []
   for (const page of pages) {
-    body.push(`  <h2>Page ${page.index + 1}</h2>`)
+    body.push(`  <h2 id="page-${page.index + 1}">Page ${page.index + 1}</h2>`)
     for (const block of pageBlocks(page)) {
       const { before, after } = blockFiguresMarkup(block, options)
-      for (const line of [...before, ...blockParagraphs(block, doc, options), ...after]) {
+      for (const line of [...before, ...blockParagraphs(block, doc, options, wrap), ...after]) {
         body.push(`  ${line}`)
       }
     }
@@ -502,9 +516,34 @@ function mainCss(options: EpubOptions): string {
   return `${rules.join('\n')}\n`
 }
 
+/**
+ * `#page-N` as it should read from inside chapter `chapterNumber`.
+ *
+ * Readers resolve an anchor against the file it is printed in, so a bare
+ * `#page-40` from chapter 1 lands nowhere when page 40 lives in chapter 3 —
+ * the owning chapter's file name is prefixed in that case and dropped in no
+ * case. Every other href (an external URL) passes through untouched.
+ */
+function linkHtmlAcross(
+  url: string,
+  anchor: string,
+  chapterNumber: number,
+  chapterOf: ReadonlyMap<number, number>,
+): string {
+  const match = /^#page-(\d+)$/.exec(url)
+  if (match === null) return linkHtml(url, anchor)
+  const owner = chapterOf.get(Number(match[1]) - 1)
+  const href = owner !== undefined && owner !== chapterNumber ? `chap_${owner}.xhtml${url}` : url
+  return linkHtml(href, anchor)
+}
+
 /** Returns EPUB bytes (Uint8Array). */
 export async function buildEpub(doc: ExportDocument, options: EpubOptions): Promise<Uint8Array> {
   const chapters = groupPages(contentPages(doc))
+  // Which chapter owns each page — an internal jump that crosses a chapter
+  // boundary needs the target's file name, not just its anchor.
+  const chapterOf = new Map<number, number>()
+  chapters.forEach((pages, index) => pages.forEach((page) => chapterOf.set(page.index, index + 1)))
   const resolved = chapterOptions(options, doc)
   const zip = new JSZip()
   // Must stay the first entry: readers verify it without unzipping.
@@ -523,7 +562,13 @@ export async function buildEpub(doc: ExportDocument, options: EpubOptions): Prom
     )
   })
   chapters.forEach((pages, index) => {
-    zip.file(`OEBPS/text/chap_${index + 1}.xhtml`, chapterXhtml(pages, doc, resolved))
+    const chapterNumber = index + 1
+    zip.file(
+      `OEBPS/text/chap_${chapterNumber}.xhtml`,
+      chapterXhtml(pages, doc, resolved, (url, anchor) =>
+        linkHtmlAcross(url, anchor, chapterNumber, chapterOf),
+      ),
+    )
   })
   return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' })
 }

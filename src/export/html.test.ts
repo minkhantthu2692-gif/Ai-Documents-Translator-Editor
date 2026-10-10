@@ -433,6 +433,32 @@ describe('links', () => {
     const html = buildHtmlDocument(linkedDoc({ links: [] }), base)
     expect(html).not.toContain('<a href=')
   })
+
+  it('anchors every page section so an internal jump has somewhere to land', () => {
+    const html = buildHtmlDocument(linkedDoc(), base)
+    expect(html).toContain('id="page-1"')
+    expect(html).toContain('data-page="0"')
+  })
+
+  it('turns a destination page into an in-document href', () => {
+    const html = buildHtmlDocument(
+      linkedDoc({
+        sourceText: 'See Chapter 3 for details.',
+        translatedText: 'See Chapter 3 for details.',
+        links: [{ text: 'Chapter 3', url: '', destPage: 2 }],
+      }),
+      base,
+    )
+    expect(html).toContain('<a href="#page-3">')
+    expect(html).toContain('>Chapter 3</a>')
+    // The jump stays in this tab — no opener, no new window.
+    expect(html).not.toContain('target="_blank">Chapter 3')
+  })
+
+  it('anchors the flow layout too', () => {
+    const html = buildHtmlDocument(linkedDoc(), { ...base, layout: 'flow' })
+    expect(html).toContain('id="page-1"')
+  })
 })
 
 describe('absolute export height handling', () => {

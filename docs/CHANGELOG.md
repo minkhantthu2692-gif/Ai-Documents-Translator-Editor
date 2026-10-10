@@ -335,6 +335,25 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   above the photo) → the four narrow beside-photo lines at their own x origin → the closing
   paragraph, with the photo anchored to one block instead of becoming a block of its own;
   the page probes `mixed` with the text layer intact. Both rows move 🔶→⏳ to ✅.
+- **Phase (e) — internal `/Dest` links (TOC, cross-references) render as in-document
+  anchors** (type 25, previously a documented refusal; `fixtures/links-internal.pdf` new).
+  `links.ts` captures every `/Link` carrying a destination beside the URI ones, and
+  `resolveDestination` (in `pdfExtract.ts`, threaded from the analysis worker's open pdf.js
+  doc) maps a named destination through `getDestination` and a ref through `getPageIndex` to
+  a 0-based page index — bounded to 32 per page, `null` (link dropped) for every failure,
+  because a jump to the wrong page is worse than no jump at all. `LinkRef` gains an optional
+  `destPage`; `linkSegments` turns it into `#page-N` (1-based, the numbering every page
+  heading already uses), offering the words only — the anchor never appears in source text,
+  so it is never searched for in prose. HTML page sections gain `id="page-N"` and an
+  internal anchor skips `target="_blank"` (a contents page must not open a window per
+  entry); EPUB page headings gain the same id and a cross-chapter jump is prefixed with the
+  owning `chap_M.xhtml`; Markdown lands on the `## Page N` slug; DOCX prints the words
+  without a hyperlink, because Word resolves those through bookmarks we do not write. The
+  sidecar retry resolves with the same helper, so a recovered page keeps both kinds of
+  link. Twenty tests: `internalDestinations` units, end-to-end over the new fixture (a
+  direct `[ref /XYZ …]`, a named `/Dests` entry and an external URI on one page, plus the
+  no-resolver behavior older readers rely on), `linkSegments` internals, and one test per
+  exporter. Matrix type 25 moves 🔶→⏳ to ✅.
 
 ### Security
 

@@ -434,6 +434,29 @@ describe('links', () => {
     expect(out).toContain('> See the [pricing page](https://example.com/pricing) for details.')
     expect(out).toContain('စျေးနှုန်းကို ကြည့်ပါ')
   })
+
+  it('writes an in-document anchor for a destination page', () => {
+    const out = buildMarkdown(
+      linkedDoc(
+        [{ text: 'Introduction', url: '', destPage: 1 }],
+        'See Introduction for the background.',
+      ),
+      opts,
+    )
+    expect(out).toContain('[Introduction](#page-2)')
+  })
+
+  it('lands on the page heading its anchor names', () => {
+    // Page headings are what make `#page-N` resolvable in Markdown: the slug
+    // of `## Page 1` is `page-1`, which is exactly the numbering the anchor
+    // uses. Without the heading the link still prints, it just dangles.
+    const out = buildMarkdown(
+      linkedDoc([{ text: 'Introduction', url: '', destPage: 0 }], 'See Introduction now.'),
+      { ...opts, includePageHeadings: true },
+    )
+    expect(out).toContain('## Page 1')
+    expect(out).toContain('[Introduction](#page-1)')
+  })
 })
 
 describe('code blocks', () => {

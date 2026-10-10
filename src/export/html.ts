@@ -124,10 +124,15 @@ function htmlText(text: string, links: readonly LinkRef[]): string {
   return applyLinks(
     text,
     links,
-    (url, anchor) =>
-      `<a href="${escapeHtml(url)}" rel="noopener noreferrer" target="_blank">${escapeHtml(
-        anchor,
-      )}</a>`,
+    (url, anchor) => {
+      // An in-document jump stays in this tab: a contents page that opens a
+      // new window per entry is hostile, and there is no opener to guard —
+      // the href cannot name another origin.
+      const attrs = url.startsWith('#')
+        ? `href="${escapeHtml(url)}"`
+        : `href="${escapeHtml(url)}" rel="noopener noreferrer" target="_blank"`
+      return `<a ${attrs}>${escapeHtml(anchor)}</a>`
+    },
     escapeHtml,
   )
 }
@@ -278,7 +283,8 @@ function absolutePage(
   const background = image ? `<img class="page-bg" alt="" src="${image}">` : ''
 
   return (
-    `<section class="page ${pageName(page.width, page.height)}" data-page="${page.index}"` +
+    `<section class="page ${pageName(page.width, page.height)}" id="page-${page.index + 1}"` +
+    ` data-page="${page.index}"` +
     ` style="width:${pt(page.width)};height:${pt(page.height)}">\n` +
     `${background}\n${blocks}\n</section>`
   )
@@ -370,7 +376,8 @@ function flowPage(page: ExportDocument['pages'][number], options: HtmlOptions): 
   }
 
   return (
-    `<section class="page flow" data-page="${page.index}" style="width:${pt(page.width)}">\n` +
+    `<section class="page flow" id="page-${page.index + 1}" data-page="${page.index}"` +
+    ` style="width:${pt(page.width)}">\n` +
     `${rows.join('\n')}\n</section>`
   )
 }

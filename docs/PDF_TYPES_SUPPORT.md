@@ -71,7 +71,7 @@ same kinds, text, `tableCells`, link anchors and boxes within 3 pt.
 | 4  | Multi-Column PDF (2/3-col, newspaper, reading order) | ✅     | `complex` classification for ≥3 columns ✅ (item-level gutter detection); reading order ✅ — rows fused across a gutter are cut back into one line per column, columns are read left-to-right (2–4), and a title spanning the fold opens its own zone ahead of both columns |
 | 5  | PDF With Images (captions, diagrams, charts) | 🔶→⏳ | Images kept in the page render/background ✅; **image-anchored extraction ✅** — every painted image's rectangle is traced from the operator list, filtered against page furniture and anchored to the block it illustrates as `PageBlock.figures` (see below); **cropped and embedded in DOCX / EPUB / Markdown ✅** (phase 9b, see "How a figure reaches DOCX, EPUB and Markdown") |
 | 6  | PDF With Tables (simple/complex, merged cells, multi-page) | 🔶→⏳ | **Real table cells ✅** — a run of rows whose columns align becomes one `kind: 'table'` block carrying `tableCells` (rows × columns) as data, and HTML/EPUB draw a real `<table>`, DOCX a real `w:tbl`, Markdown a pipe table, JSON the grid (see below); table rows are explicitly exempt from the column split so merging cells stay one row; **Merged cells ✅** — a cell drawn across a column boundary becomes `tableSpans` beside the grid, and HTML/EPUB emit `colspan`, DOCX `w:gridSpan` (see below); **multi-page tables ✅** — the row a break orphaned joins the table it was cut from, by a geometry hint read from the page above and a mark read across the document at export (see below), with a cross-window rescue not attempted; and a gutter narrower than one em is not read as a column |
-| 7  | Academic / Research PDF (footnotes, refs, citations, equations) | 🔶→⏳ | 2-column papers classified `text` ✅ and read in column order ✅; footnote regions ✅ (see below); heading hierarchy ✅ — every heading carries a 1–6 level from a document-wide ladder (see below); equations ❌ (see #23) |
+| 7  | Academic / Research PDF (footnotes, refs, citations, equations) | 🔶→⏳ | 2-column papers classified `text` ✅ and read in column order ✅; footnote regions ✅ (see below); heading hierarchy ✅ — every heading carries a 1–6 level from a document-wide ladder (see below); equations ✅ (see #23) |
 | 8  | Business / Report PDF (reports, invoices, financial) | 🔶 | Paragraph/table extraction ✅; invoice form layout understanding ❌ |
 | 9  | Forms / Structured PDF (fillable, checkboxes, signatures) | ✅ | Field detection/counted in probe ✅, password-style unlock flow ✅, **field labels translated ✅** (a widget's `/TU` and a dropdown's `/Opt` captions become `kind: 'form-field'` blocks — see below); form filling ❌ (out of scope) |
 | 10 | Presentation PDF (slides, big headings, text boxes) | ✅ | Size-spread/complexity signal ✅; per-slide text-box reading order ✅ — a wide title above two free-floating text boxes whose lines share baselines comes out title → left box → right box, each box whole, never row-by-row across both boxes (`fixtures/slide.pdf`, `pdfExtract.test.ts`) |
@@ -87,7 +87,7 @@ same kinds, text, `tableCells`, link anchors and boxes within 3 pt.
 | 20 | Damaged / Invalid PDF | 🔶     | Load/probe failures surface as actionable errors ✅; structural repair ✅ (rebuilt xref/trailer, append-only) |
 | 21 | PDF With Embedded Fonts (subset/custom/fallback) | ✅     | Font inventory (embedded/standard/other) in metadata ✅, subset-prefix cleaning ✅, Myanmar fallback stack in export ✅ |
 | 22 | PDF With Complex Layout (text boxes, overlap, sidebars, watermarks) | ⏳→✅   | `complex` class + scoring ✅ (this phase); column/sidebar reading order ✅; text-box + overlap repair in phase c |
-| 23 | PDF With Equations / Math content | ❌     | Formulas extract as plain text (lossy); LaTeX/OCR-of-equations not implemented |
+| 23 | PDF With Equations / Math content | 🔶     | Display equations marked from face + geometry and kept out of the model ✅ (see below); superscripts/subscripts reassembled (`x^2`, `x_1`) ✅; stacked parts kept in reading order ✅; inline maths placeholder-protected ✅; LaTeX typesetting / `$$` output not implemented ❌ |
 | 24 | PDF With Code (syntax, monospace, formatting) | ✅ | Monospace face extracted as style ✅; **block-level code formatting** ✅ — a snippet is fenced in Markdown, `<pre>` in EPUB, `Courier New` with real `<w:br/>` in DOCX, and monospace with `white-space: pre-wrap` in HTML/print; **syntax colouring** ✅ — the PDF never hands over which tokens were which colour per glyph, so a language-agnostic lexer re-derives them from the printed text at export (`src/export/highlight.ts`) and one shared palette paints them everywhere: `.tok-*` spans in HTML/EPUB over CSS shipped in both stylesheets, coloured runs in DOCX, plain fenced text in Markdown (CommonMark has no inline colour and a fence labelled with a guessed language would misrender with authority); a snippet with surviving annotation links keeps the links and goes unpainted |
 | 25 | PDF With Hyperlinks (external, internal, TOC, cross-references) | ✅ | External links ✅ — rectangle → words → `LinkRef[]` → anchored output in HTML/EPUB/Markdown/DOCX/JSON; URL text preserved as plain text ✅ in every format; internal `/Dest` links ✅ — resolved through the open document (named destinations via `getDestination`, refs via `getPageIndex`) to a page index and rendered as in-document anchors (`#page-N`) against HTML page sections, EPUB page headings (chapter-aware: a cross-chapter jump prefixes the owning `chap_M.xhtml`) and Markdown page-heading slugs; DOCX prints the words without a hyperlink (Word renders those through bookmarks we do not write) (`fixtures/links-internal.pdf`, direct + named + external on one page) |
 
@@ -868,4 +868,29 @@ salvages those pages. An applied repair is reported in the log (`parse.repair`,
 bilingual, with what was done) and the page count comes back like any other
 open. The fixtures are the minimal kind — one 1-page PDF damaged each way and
 opened back through the real pdf.js — so no real-world damaged file has been
-through the pass._
+through the pass. Display-equation detection (types 7 and 23) is geometry, not a
+parser. An inline formula was already safe — `placeholders.ts` swaps `$x+y$` and
+bare `1 + 1 = 2` for tokens before the model sees the line — but the *display*
+equation arrives as several unremarkable fragments: TeX and its relatives set a
+superscript on its own baseline and a fraction as three lines, so
+`groupItemsIntoLines` hands the structure pass `x`, then a raised `2`, then a
+rule, then `n` — each alone indistinguishable from a letter or a number, and
+reading order interleaves them with the prose around them. `src/pdf/equations.ts`
+marks the run on the ordered body before any merging: a line opens it by scoring
+maths (a mathematical face, glyphs like ∑∫², a caret between short tokens; two
+five-letter words veto it — that is what keeps "the α particle decay" prose), and
+the fragments hang off their anchor by geometry — a raised mark starting where
+the previous text ended folds as `x^2` (braced when multi-character, whichever
+side of its line reading order delivered it from), a dropped one as `x_1`, and a
+centred part below stays on its own line, which is how a fraction reads.
+`structure.ts` then gives the run `kind: 'equation'` and `skipRule: 'formula'`,
+so it is never handed to the model: the source stands as its own translation in
+every format, exactly like code — and the exporters needed no change, because an
+unknown kind already renders as a paragraph and paragraphs already carry their
+line breaks. What this is not: no LaTeX is emitted (a fraction exports
+numerator-over-denominator, not `\frac`, and Markdown gets soft breaks rather
+than `$$`), a same-size mark is caught only by its raise, prose that itself
+carries maths glyphs directly under a formula can still join the run (it stays
+verbatim — only a translation is lost), and the tests are synthetic geometry —
+the shapes a TeX- or Cambria-set page produces — with no real academic PDF
+reviewed. Matrix 23: ❌ → 🔶, and with it type 7's last ❌._

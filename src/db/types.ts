@@ -95,6 +95,7 @@ export type BlockKind =
   | 'footnote'
   | 'shape'
   | 'code'
+  | 'equation'
   | 'form-field'
   | 'annotation'
 export type BlockStatus = 'pending' | 'translated' | 'edited' | 'locked' | 'skipped'

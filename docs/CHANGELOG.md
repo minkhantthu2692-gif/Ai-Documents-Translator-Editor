@@ -422,6 +422,30 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   `repair.test.ts`. Matrix type 20: partial repair ❌ → structural repair ✅
   (content-level damage stays with the sidecar path).
 
+- **Phase (e) — display equations (types 7 and 23, the last fully-❌ matrix
+  row)**. Inline maths was already safe — `placeholders.ts` swaps `$x+y$` and
+  bare `1 + 1 = 2` for tokens before the model sees the line — but a display
+  equation arrives as several unremarkable fragments: TeX sets a superscript on
+  its own baseline and a fraction as three lines, so the structure pass gets
+  `x`, a raised `2`, a rule and `n`, each alone indistinguishable from a letter
+  or a number, interleaved with the prose by reading order.
+  `src/pdf/equations.ts` marks the run on the ordered body before any merging —
+  a line opens it by scoring maths (mathematical face, glyphs like ∑∫², a caret
+  between short tokens; two five-letter words veto it, which is what keeps "the
+  α particle decay" prose) and fragments hang off their anchor by geometry,
+  whichever side of the line reading order delivered them — and assembles it
+  back: `x` + raised `2` reads `x^2` (braced when multi-character), a dropped
+  mark `x_1`, a centred part below stays on its own line, which is how a
+  fraction reads. `structure.ts` gives the run `kind: "equation"` (the schema
+  widened) and `skipRule: "formula"`, so the translator never touches it: the
+  source stands as its own translation in every format, exactly like code — and
+  the exporters needed no change, an unknown kind already rendering as a
+  paragraph that carries its line breaks. A stack part must look like maths as
+  well as hang near, or the prose under a tight leading would chain into the
+  formula. 23 geometry tests plus the existing structure suites green; no LaTeX
+  emitted, no real academic PDF reviewed. Matrix 23: ❌ → 🔶, and with it type
+  7's last ❌.
+
 ### Security
 
 - Settings rows whose id or field looks like a credential (`key`, `token`, `secret`,

@@ -20,6 +20,7 @@ import { headingLevelFor, sizeLadder } from './headings'
 import { medianFontSize, type GroupedLine, type LineStyle } from './lineGrouping'
 import { kmeansMidpoint, orderBodyLines, splitMergedLines } from './readingOrder'
 import { footnoteMarker, markFootnoteRegions } from './footnotes'
+import { equationText, markEquationRegions } from './equations'
 import {
   codeBlockText,
   isMonospaceFamily,
@@ -38,6 +39,7 @@ export type BlockKind =
   | 'footnote'
   | 'shape'
   | 'code'
+  | 'equation'
   | 'form-field'
   | 'annotation'
 export type BlockRegion = 'body' | 'header' | 'footer'
@@ -447,6 +449,12 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
     pageHeight: options.pageHeight,
     medianSize,
   })
+  // Display equations are marked on the ordered body for the same reason and
+  // at the same moment: the fragments of one formula (numerator, rule,
+  // denominator, the raised mark) only line up against each other once the
+  // reading order has them in place, and marking earlier would mark lines
+  // `splitMergedLines` is about to replace.
+  const equationIds = markEquationRegions(orderedBody, { medianSize })
   // Ids of the lines that reached the body. A line split into column parts is
   // deliberately absent — its parts are here instead, and the original cannot
   // resurface as a margin line because it was already filtered to the body.
@@ -464,6 +472,8 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
     region: BlockRegion
     /** The line that opened this block sits inside a footnote region. */
     footnote: boolean
+    /** The block is (part of) a display equation: never merged with prose. */
+    equation: boolean
     lines: GroupedLine[]
   }
   const blocks: OpenBlock[] = []
@@ -471,6 +481,7 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
   for (const line of ordered) {
     const region = regionOf(line, options)
     const footnote = footnoteIds.has(line.id)
+    const equation = !footnote && equationIds.has(line.id)
     // Every note begins a block. Continuations of the *same* note carry no
     // marker (see `markFootnoteRegions`), so this splits note from note
     // without ever splitting a note in half — and it does so even when two
@@ -480,14 +491,33 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
     const current = blocks[blocks.length - 1]
     // A footnote is its own block whatever the geometry says: a note that
     // shares the paragraph's size, indent and leading is still not part of the
-    // paragraph, and letting it in would bury its marker mid-sentence.
-    if (!current || current.region !== region || current.footnote !== footnote || opensNote) {
-      blocks.push({ region, footnote, lines: [line] })
+    // paragraph, and letting it in would bury its marker mid-sentence. An
+    // equation is its own block for the opposite reason: `canMerge` judges it
+    // by indent and leading, and a formula has neither to give.
+    if (
+      !current ||
+      current.region !== region ||
+      current.footnote !== footnote ||
+      current.equation !== equation ||
+      opensNote
+    ) {
+      blocks.push({ region, footnote, equation, lines: [line] })
       continue
     }
     const previous = current.lines[current.lines.length - 1]
     const gap = line.bbox.y - (previous.bbox.y + previous.bbox.h)
     const context = { gap, medianSize, bodyGap }
+    // Consecutive equation lines are one block however `canMerge` scores
+    // them — a fraction's parts share no font-size ladder or indent — until
+    // the gap says another formula begins.
+    if (equation) {
+      if (gap <= previous.style.fontSize * 3) {
+        current.lines.push(line)
+        continue
+      }
+      blocks.push({ region, footnote, equation, lines: [line] })
+      continue
+    }
     // Columns of a table align horizontally — allow small x jumps for them.
     // Footnote lines are excluded: citation spacing reads as cells to the row
     // detector, but a note is prose. Each line is judged on its own runs, since
@@ -509,7 +539,7 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
       current.lines.push(line)
       continue
     }
-    blocks.push({ region, footnote, lines: [line] })
+    blocks.push({ region, footnote, equation, lines: [line] })
   }
 
   // --- materialise ---------------------------------------------------------
@@ -523,18 +553,24 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
     const first = open.lines[0]
     const bbox = mergedBBox(open.lines)
     const isFootnote = open.footnote
+    // An equation wins over the code, table and list readings for the same
+    // reason code does: `x = 1` is a program to the heuristic and a formula
+    // to the page, and a fraction's parts aligned by x are a table to the row
+    // detector and none of the three is.
+    const isEquation = open.region === 'body' && !isFootnote && open.equation
     // A code snippet is decided ahead of the list, table and size rules: a
     // `for (const x of xs) {` line can look like a bullet and an aligned block
     // of `|` like a table, and both readings would wreck the indentation the
     // block is about to get back from its own geometry.
-    const isCode = open.region === 'body' && !isFootnote && looksLikeCodeBlock(open.lines)
+    const isCode =
+      open.region === 'body' && !isFootnote && !isEquation && looksLikeCodeBlock(open.lines)
     const opensBody = open.region === 'body' && !bodySeen
     if (open.region === 'body') bodySeen = true
     // A table is *aligned columns across rows*, so it can only be judged once
     // the whole run is here. One line with a wide gap is a long word space; the
     // same gap recurring at the same x on three lines is a column.
     const grid =
-      open.region === 'body' && !isFootnote && !isCode
+      open.region === 'body' && !isFootnote && !isCode && !isEquation
         ? tableForLines(open.lines, opensBody ? options.continuation : null)
         : null
     const isTableRow = grid !== null
@@ -543,22 +579,26 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
     const tableSpans = grid ? grid.spans : null
     const isList =
       !isCode &&
+      !isEquation &&
       !isTableRow &&
       open.region === 'body' &&
       !isFootnote &&
       BULLET.test(open.lines[0].text.trim())
     const marker = isList ? (open.lines[0].text.trim().match(BULLET)?.[1] ?? null) : null
 
-    const text = isCode
-      ? codeBlockText(open.lines)
-      : isTableRow && grid
-        ? grid.rows.map((row) => row.join(' \t ')).join('\n')
-        : open.lines.map((line) => line.text).join('\n')
+    const text = isEquation
+      ? equationText(open.lines, medianSize)
+      : isCode
+        ? codeBlockText(open.lines)
+        : isTableRow && grid
+          ? grid.rows.map((row) => row.join(' \t ')).join('\n')
+          : open.lines.map((line) => line.text).join('\n')
 
     const sizeRatio = medianSize > 0 ? first.style.fontSize / medianSize : 1
     let kind: BlockKind = 'paragraph'
     if (open.region !== 'body') kind = 'paragraph'
     else if (isFootnote) kind = 'footnote'
+    else if (isEquation) kind = 'equation'
     else if (isCode) kind = 'code'
     else if (isTableRow) kind = 'table'
     else if (isList) kind = 'list'
@@ -600,7 +640,9 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
       // A code block is never handed to the model, even when its flattened
       // text happens to read as prose line-by-line: `x = 1` four times over
       // scores below the per-line threshold and would come back translated.
-      skipRule: decision.skip ? decision.rule : isCode ? 'code' : null,
+      // An equation is stamped for the same reason — the source stands as its
+      // own translation, in every format.
+      skipRule: decision.skip ? decision.rule : isCode ? 'code' : isEquation ? 'formula' : null,
       placeholders: placeholderResult.placeholders,
       listMarker: marker,
       /** Cells as data: `rows × columns`, rectangular, empty string for a gap. */

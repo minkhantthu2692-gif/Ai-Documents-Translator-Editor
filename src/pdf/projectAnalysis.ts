@@ -13,6 +13,7 @@
 import { blockRepo, pageRepo, type ParsedBlockPatch } from '@/db/repo-content'
 import { sourceFileRepo } from '@/db/repo-sourceFiles'
 import { settingsRepo } from '@/db/repo-settings'
+import { logEvent } from '@/core/eventLogger'
 import { analysisClient, AnalysisError, type OpenOutcome } from './analysisClient'
 import { classHasTextLayer, type ContentTally } from './pageClassify'
 import type { FontStats } from './pdfOps'
@@ -42,6 +43,18 @@ export async function openDocument(
   const outcome = await analysisClient.open(fileId, bytes, options)
   if (outcome.status === 'opened') openFiles.add(fileId)
   else openFiles.delete(fileId)
+  // A damaged structure the worker had to rebuild is worth a line in the
+  // log: the file opened, but not as its author wrote it.
+  if (outcome.status === 'opened' && outcome.repaired?.length) {
+    logEvent({
+      state: 'PROJECT',
+      action: 'parse.repair',
+      severity: 'info',
+      messageMy: 'PDF ဖွဲ့စည်းပုံ ပြင်ဆင်ပြီး',
+      messageEn: 'Damaged PDF structure repaired',
+      technicalDetail: `repairs=${outcome.repaired.join(',')}`,
+    })
+  }
   return outcome
 }
 

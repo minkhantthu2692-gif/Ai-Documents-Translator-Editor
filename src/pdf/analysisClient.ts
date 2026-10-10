@@ -37,7 +37,8 @@ export class AnalysisCancelled extends Error {
 }
 
 export type OpenOutcome =
-  { status: 'opened'; pageCount: number } | { status: 'password'; reason: 'missing' | 'incorrect' }
+  | { status: 'opened'; pageCount: number; repaired?: string[] }
+  | { status: 'password'; reason: 'missing' | 'incorrect' }
 
 interface PendingRequest {
   resolve: (event: AnalysisEvent) => void
@@ -182,7 +183,13 @@ class AnalysisClient {
     if (event.kind === 'passwordRequired') {
       return { status: 'password', reason: event.reason }
     }
-    if (event.kind === 'opened') return { status: 'opened', pageCount: event.pageCount }
+    if (event.kind === 'opened') {
+      return {
+        status: 'opened',
+        pageCount: event.pageCount,
+        ...(event.repaired ? { repaired: event.repaired } : {}),
+      }
+    }
     throw unexpected(event)
   }
 

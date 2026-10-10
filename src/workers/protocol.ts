@@ -100,6 +100,11 @@ export interface OpenedEvent {
   id: string
   fileId: string
   pageCount: number
+  /**
+   * Damaged-structure repairs the worker applied before this open succeeded
+   * (see `repairPdf`); absent when the file opened as-is.
+   */
+  repaired?: string[]
 }
 
 export interface PasswordRequiredEvent {

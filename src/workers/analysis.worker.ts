@@ -50,6 +50,7 @@ import {
 } from '@/pdf/pageRender'
 import { traceImagePlacements, type ImagePlacement } from '@/pdf/imageOps'
 import type { OpList } from '@/pdf/pdfOps'
+import { repairPdf } from '@/pdf/repair'
 import { probeSidecarExtract, sidecarExtract } from '@/sidecar/sidecarClient'
 import type {
   AnalysisEvent,
@@ -189,14 +190,34 @@ async function handleOpen(request: OpenRequest): Promise<void> {
     // Started before the document so it overlaps: deciding whether to keep
     // the bytes must not cost a round trip on top of opening.
     const sidecarReady = probeSidecarExtract()
-    const task = getDocument({
-      // Take a private copy: the transferred buffer must stay readable for the
-      // document's whole lifetime (pdf.js reads it lazily).
-      data: new Uint8Array(request.bytes).slice(),
+    const params = {
       ...(request.password ? { password: request.password } : {}),
       ...PDF_DOCUMENT_PARAMS,
-    })
-    const [doc, canFallBack] = await Promise.all([task.promise, sidecarReady])
+    }
+    // Take a private copy: the transferred buffer must stay readable for the
+    // document's whole lifetime (pdf.js reads it lazily).
+    let task = getDocument({ data: new Uint8Array(request.bytes).slice(), ...params })
+    let opened: [PDFDocumentProxy, boolean]
+    let workingBytes = request.bytes
+    let repaired: string[] | undefined
+    try {
+      opened = await Promise.all([task.promise, sidecarReady])
+    } catch (failure) {
+      // Passwords and aborts are not damage — they must reach the caller
+      // unchanged.
+      if (failure instanceof PasswordException || isAbortError(failure)) throw failure
+      // pdf.js self-heals most structural damage (it re-indexes the whole
+      // file), but a destroyed xref table, a dead /Root or a lost trailer
+      // stop it: append a rebuilt index and try once more.
+      const attempt = repairPdf(new Uint8Array(request.bytes))
+      if (!attempt) throw failure
+      await task.destroy().catch(() => undefined)
+      repaired = attempt.fixes
+      workingBytes = attempt.bytes.buffer as ArrayBuffer
+      task = getDocument({ data: new Uint8Array(attempt.bytes).slice(), ...params })
+      opened = await Promise.all([task.promise, sidecarReady])
+    }
+    const [doc, canFallBack] = opened
     if (controller.signal.aborted) {
       await task.destroy().catch(() => undefined)
       post({ kind: 'cancelled', id: request.id, fileId: request.fileId })
@@ -206,7 +227,7 @@ async function handleOpen(request: OpenRequest): Promise<void> {
       task,
       doc,
       pageCount: doc.numPages,
-      bytes: canFallBack ? request.bytes : null,
+      bytes: canFallBack ? workingBytes : null,
       password: request.password ?? null,
     })
     post({
@@ -214,6 +235,7 @@ async function handleOpen(request: OpenRequest): Promise<void> {
       id: request.id,
       fileId: request.fileId,
       pageCount: doc.numPages,
+      ...(repaired ? { repaired } : {}),
     })
   } catch (error) {
     if (error instanceof PasswordException) {

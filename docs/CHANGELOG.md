@@ -400,6 +400,27 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   against the real matrix, not a re-derivation) plus wiring tests through the
   real `recognizeOcr` seam. Matrix type 2 moves to OSD ✅, with the
   synthetic-fixture caveat carried in the limitations.
+- **Phase (e) — damaged-PDF structural repair (type 20)**. pdf.js already heals a
+  great deal on its own — it re-indexes every object when `startxref` is missing
+  or its entries point at garbage, tolerates a missing header or junk before it —
+  so what remained were three shapes it refuses outright: a destroyed xref *table*
+  whose `startxref` still points at it, a `/Root` naming an object that does not
+  exist, and a lost trailer. `src/pdf/repair.ts` fixes all three with one
+  append-only move: a byte scan of `N G obj` headers rebuilds a classic xref
+  table (last occurrence of a duplicated number wins — the incremental-update
+  rule, generation kept), appended with a fresh trailer (`/Root` retargeted at
+  the last `<< /Type /Catalog >>` the scan saw, `/Info` carried when its object
+  survived), a new `startxref` and `%%EOF`; original bytes are never touched, so
+  a wrong guess cannot corrupt anything further, and no catalog readable by the
+  scan means `null` and the honest failure the caller already knew how to report.
+  The analysis worker runs it once, only after pdf.js itself has failed, and the
+  result rides `opened.repaired` into `parse.repair`, a bilingual info event with
+  what was done. Probes pinned the design (which shapes pdf.js self-heals, and
+  that a blanked `startxref` is *not* an escape — its indexer only adopts a
+  trailer when it meets a parseable `xref` keyword); tests are byte-level plus
+  the three damaged fixtures opened back through the real pdf.js in
+  `repair.test.ts`. Matrix type 20: partial repair ❌ → structural repair ✅
+  (content-level damage stays with the sidecar path).
 
 ### Security
 

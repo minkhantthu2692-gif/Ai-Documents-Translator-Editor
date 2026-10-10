@@ -84,7 +84,7 @@ same kinds, text, `tableCells`, link anchors and boxes within 3 pt.
 | 17 | Unicode / Multilingual (Burmese, CJK, Arabic, Devanagari, Cyrillic) | 🔶→⏳ | Language detection + Zawgyi/Unicode handling ✅, Myanmar rendering ✅; OCR validated for English end-to-end, other scripts need their tesseract traineddata (mya available, untested) |
 | 18 | RTL PDF (Arabic, Hebrew, mixed) | 🔶     | RTL line ordering in grouping ✅; bidi/visual-order edge cases ❌ |
 | 19 | PDF With Annotations (comments, highlights, stamps, links) | 🔶→✅ | Annotation/link counting in probe ✅; `/Annots` `/Link` rectangles now become anchored `<a>` / `[text](url)` / docx `ExternalHyperlink` ✅ (external only — see below); a note's own words — a sticky note's message, the reason a passage was highlighted, a `/FreeText` callout's body, a stamp's legend — become one `kind: 'annotation'` block each ✅ (see below); the annotation's **author** (`/T`) and date (`/M`) stay out of it ❌ — a name is not for translating |
-| 20 | Damaged / Invalid PDF | 🔶     | Load/probe failures surface as actionable errors ✅; partial repair ❌ |
+| 20 | Damaged / Invalid PDF | 🔶     | Load/probe failures surface as actionable errors ✅; structural repair ✅ (rebuilt xref/trailer, append-only) |
 | 21 | PDF With Embedded Fonts (subset/custom/fallback) | ✅     | Font inventory (embedded/standard/other) in metadata ✅, subset-prefix cleaning ✅, Myanmar fallback stack in export ✅ |
 | 22 | PDF With Complex Layout (text boxes, overlap, sidebars, watermarks) | ⏳→✅   | `complex` class + scoring ✅ (this phase); column/sidebar reading order ✅; text-box + overlap repair in phase c |
 | 23 | PDF With Equations / Math content | ❌     | Formulas extract as plain text (lossy); LaTeX/OCR-of-equations not implemented |
@@ -847,4 +847,25 @@ quarter-turn matrices, but resampled through `drawImage` rather than the
 source's own pixels). Pages already marked `done` keep their pre-OSD reading:
 the cache key gained `#osd`, so only a page re-selected after a failure picks
 the trials up. Script detection does not run — the script follows from the
-source language the reader picked anyway._
+source language the reader picked anyway._ Damaged-file repair (type 20) is
+append-only and structural. pdf.js already heals a great deal itself — it
+re-indexes every object when `startxref` is gone or its entries point at
+garbage, and it tolerates a missing header or junk before it — so
+`src/pdf/repair.ts` runs only when that self-recovery has already failed, and
+it fixes exactly the three shapes that defeat it: a destroyed xref *table*
+whose `startxref` still points at it, a `/Root` naming an object that does not
+exist, and a lost trailer. One move covers all three: a byte scan of `N G obj`
+headers rebuilds a classic xref table, appended with a fresh trailer (`/Root`
+retargeted at the last `<< /Type /Catalog >>` the scan saw, `/Info` carried
+when its object survived), a new `startxref` and `%%EOF`. The original bytes
+are never touched — the tail is pure ASCII — so a wrong guess cannot corrupt
+anything further, and the last occurrence of a duplicated object number wins,
+which is the incremental-update rule. What stays beyond repair stays honest:
+a catalog packed inside a compressed object stream cannot be seen by a byte
+scan, a genuinely missing object cannot be invented, and content-level damage
+opens fine but reads as damage — the page-level sidecar path, not this one,
+salvages those pages. An applied repair is reported in the log (`parse.repair`,
+bilingual, with what was done) and the page count comes back like any other
+open. The fixtures are the minimal kind — one 1-page PDF damaged each way and
+opened back through the real pdf.js — so no real-world damaged file has been
+through the pass._

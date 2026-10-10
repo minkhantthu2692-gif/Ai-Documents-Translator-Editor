@@ -176,6 +176,44 @@ Behaviour:
   - `mode=text` → pure text extraction; scanned pages return `blocks: []`
     (no OCR) regardless of availability.
 
+**How the frontend calls it** — `sidecarExtract` in
+`src/sidecar/sidecarClient.ts` always sends `mode=text` (the app's own OCR
+pipeline owns scanned pages: confidence floor, cache, persistence) plus an
+explicit `pages` range, and treats the endpoint as a **fallback, never a
+first choice**. pdf.js answers a 12-page parse window in ~20 ms where this
+takes ~1.3 s — `find_tables` and the classify-level signal sweep run on every
+page — so `analysis.worker.ts` calls it only after `extractPage` has thrown,
+or has read text it could not turn into a single block
+(`needsSidecarFallback`); an ordinary document never reaches it, and the
+worker keeps the file's bytes in memory only while `/health` says a sidecar
+is reachable.
+
+Of the payload, only `blocks[].lines[]` is consumed. Block-level `kind`,
+`region`, `alignment` and `order` are deliberately ignored — `structurePage`
+in TypeScript is the single source of truth for reading order, footnotes,
+code, tables and headings on both paths, which is what lets a recovered page
+be asserted identical to a browser-read one. Line boxes become pdf.js-shaped
+text runs at one em of height (PyMuPDF spans ascender-to-descender, pdf.js
+one em; matching the convention keeps `canMerge`'s gap threshold meaning the
+same thing), and are then pushed through the same `groupItemsIntoLines`.
+
+A page that cannot be used comes back with a `decline` reason instead of an
+exception, and the browser's answer stands:
+
+| Reason | Why |
+|--------|-----|
+| `page-rotation` | display space (rotation applied) ≠ the browser's user space |
+| `line-rotation` | an axis-aligned box cannot carry a −45° title |
+| `pdfplumber-table` | the in-table prose was removed and the cells have no rectangles |
+| `extraction-method` | a scan (`ocr`) or an empty page (`none`) — nothing to recover |
+| `page-size`, `page-blocks`, `page-index` | unusable page envelope |
+| `line-geometry`, `line-font-size`, `line-text` | one bad line would silently drop text |
+| `no-lines` | nothing left after normalising |
+
+`fixtures/sidecar/*.json` are recordings of this endpoint; replay them with
+`node scripts/record-sidecar-extract.mjs` after changing the server, then
+`npx vitest run src/sidecar` to confirm the two readers still agree.
+
 ### `POST /ocr?password=&page=0&lang=eng,mya`
 
 Single-page OCR (page is a 0-based index, default `0`), rendered at 300 DPI.

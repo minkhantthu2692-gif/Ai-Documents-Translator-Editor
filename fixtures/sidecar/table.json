@@ -1,0 +1,635 @@
+{
+  "ok": true,
+  "pages": [
+    {
+      "index": 0,
+      "width": 612,
+      "height": 792,
+      "rotation": 0,
+      "extractionMethod": "text",
+      "contentClass": "text",
+      "blocks": [
+        {
+          "order": 0,
+          "kind": "paragraph",
+          "region": "header",
+          "text": "Quarterly revenue",
+          "bbox": {
+            "x": 72,
+            "y": 37.02,
+            "w": 119.83,
+            "h": 19.28
+          },
+          "fontSize": 14,
+          "fontFamily": "Helvetica-Bold",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Quarterly revenue",
+              "bbox": {
+                "x": 72,
+                "y": 37.02,
+                "w": 119.83,
+                "h": 19.28
+              },
+              "fontFamily": "Helvetica-Bold",
+              "fontSize": 14,
+              "bold": true,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 1,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "Revenue was reviewed for the three regions below.\nEvery figure is stated in thousands of dollars.",
+          "bbox": {
+            "x": 72,
+            "y": 80.18,
+            "w": 250.05,
+            "h": 31.11
+          },
+          "fontSize": 11,
+          "fontFamily": "Helvetica",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Revenue was reviewed for the three regions below.",
+              "bbox": {
+                "x": 72,
+                "y": 80.18,
+                "w": 250.05,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Every figure is stated in thousands of dollars.",
+              "bbox": {
+                "x": 72,
+                "y": 96.18,
+                "w": 218.88,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 2,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "Region\nQ1\nQ2\nNorth\n120\n150\nSouth\n90\n110\nEast\n75\n80",
+          "bbox": {
+            "x": 72,
+            "y": 136.18,
+            "w": 376.35,
+            "h": 63.11
+          },
+          "fontSize": 11,
+          "fontFamily": "Helvetica",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Region",
+              "bbox": {
+                "x": 72,
+                "y": 136.18,
+                "w": 34.85,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Q1",
+              "bbox": {
+                "x": 260,
+                "y": 136.18,
+                "w": 14.67,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Q2",
+              "bbox": {
+                "x": 430,
+                "y": 136.18,
+                "w": 14.67,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "North",
+              "bbox": {
+                "x": 72,
+                "y": 152.18,
+                "w": 26.89,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "120",
+              "bbox": {
+                "x": 260,
+                "y": 152.18,
+                "w": 18.35,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "150",
+              "bbox": {
+                "x": 430,
+                "y": 152.18,
+                "w": 18.35,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "South",
+              "bbox": {
+                "x": 72,
+                "y": 168.18,
+                "w": 28.74,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "90",
+              "bbox": {
+                "x": 260,
+                "y": 168.18,
+                "w": 12.23,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "110",
+              "bbox": {
+                "x": 430,
+                "y": 168.18,
+                "w": 18.35,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "East",
+              "bbox": {
+                "x": 72,
+                "y": 184.18,
+                "w": 22.01,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "75",
+              "bbox": {
+                "x": 260,
+                "y": 184.18,
+                "w": 12.23,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "80",
+              "bbox": {
+                "x": 430,
+                "y": 184.18,
+                "w": 12.23,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 3,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "The board accepted the figures without amendment.",
+          "bbox": {
+            "x": 72,
+            "y": 232.18,
+            "w": 254.35,
+            "h": 15.11
+          },
+          "fontSize": 11,
+          "fontFamily": "Helvetica",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "The board accepted the figures without amendment.",
+              "bbox": {
+                "x": 72,
+                "y": 232.18,
+                "w": 254.35,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "width": 612,
+      "height": 792,
+      "rotation": 0,
+      "extractionMethod": "text",
+      "contentClass": "complex",
+      "blocks": [
+        {
+          "order": 0,
+          "kind": "paragraph",
+          "region": "header",
+          "text": "Detail by product",
+          "bbox": {
+            "x": 72,
+            "y": 37.02,
+            "w": 114.35,
+            "h": 19.28
+          },
+          "fontSize": 14,
+          "fontFamily": "Helvetica-Bold",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Detail by product",
+              "bbox": {
+                "x": 72,
+                "y": 37.02,
+                "w": 114.35,
+                "h": 19.28
+              },
+              "fontFamily": "Helvetica-Bold",
+              "fontSize": 14,
+              "bold": true,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 1,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "The second table leaves one cell empty in a single row.",
+          "bbox": {
+            "x": 72,
+            "y": 80.18,
+            "w": 269.62,
+            "h": 15.11
+          },
+          "fontSize": 11,
+          "fontFamily": "Helvetica",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "The second table leaves one cell empty in a single row.",
+              "bbox": {
+                "x": 72,
+                "y": 80.18,
+                "w": 269.62,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 2,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "Two of the three rows had a second column.",
+          "bbox": {
+            "x": 72,
+            "y": 216.18,
+            "w": 216.44,
+            "h": 15.11
+          },
+          "fontSize": 11,
+          "fontFamily": "Helvetica",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Two of the three rows had a second column.",
+              "bbox": {
+                "x": 72,
+                "y": 216.18,
+                "w": 216.44,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 3,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "Product\nUnits\nNotes\nWidget\n120\nrestocked\nGadget\nclearance\nGizmo\n80\nbackorder",
+          "bbox": {
+            "x": 72,
+            "y": 120.18,
+            "w": 436.91,
+            "h": 63.11
+          },
+          "fontSize": 11,
+          "fontFamily": "Helvetica",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Product",
+              "bbox": {
+                "x": 72,
+                "y": 120.18,
+                "w": 37.91,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Units",
+              "bbox": {
+                "x": 300,
+                "y": 120.18,
+                "w": 25.06,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Notes",
+              "bbox": {
+                "x": 460,
+                "y": 120.18,
+                "w": 28.73,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Widget",
+              "bbox": {
+                "x": 72,
+                "y": 136.18,
+                "w": 34.23,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "120",
+              "bbox": {
+                "x": 300,
+                "y": 136.18,
+                "w": 18.35,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "restocked",
+              "bbox": {
+                "x": 460,
+                "y": 136.18,
+                "w": 47.68,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Gadget",
+              "bbox": {
+                "x": 72,
+                "y": 152.18,
+                "w": 36.08,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "clearance",
+              "bbox": {
+                "x": 460,
+                "y": 152.18,
+                "w": 47.68,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Gizmo",
+              "bbox": {
+                "x": 72,
+                "y": 168.18,
+                "w": 31.78,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "80",
+              "bbox": {
+                "x": 300,
+                "y": 168.18,
+                "w": 12.23,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "backorder",
+              "bbox": {
+                "x": 460,
+                "y": 168.18,
+                "w": 48.91,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,795 @@
+{
+  "ok": true,
+  "pages": [
+    {
+      "index": 0,
+      "width": 612,
+      "height": 792,
+      "rotation": 0,
+      "extractionMethod": "text",
+      "contentClass": "text",
+      "blocks": [
+        {
+          "order": 0,
+          "kind": "paragraph",
+          "region": "header",
+          "text": "Annual Report 2026 - Chapter 1",
+          "bbox": {
+            "x": 72,
+            "y": 12.37,
+            "w": 134.03,
+            "h": 12.39
+          },
+          "fontSize": 9,
+          "fontFamily": "Helvetica-Bold",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Annual Report 2026 - Chapter 1",
+              "bbox": {
+                "x": 72,
+                "y": 12.37,
+                "w": 134.03,
+                "h": 12.39
+              },
+              "fontFamily": "Helvetica-Bold",
+              "fontSize": 9,
+              "bold": true,
+              "italic": false,
+              "color": "#ff0000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 1,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "Introduction\nThis document summarises the operations of the past financial year.\n• Revenue grew by twelve percent compared with the previous year.\n• Operating costs stayed flat despite higher shipment volumes.\n• Headcount increased by forty people in the engineering team.",
+          "bbox": {
+            "x": 72,
+            "y": 37.02,
+            "w": 332.58,
+            "h": 82.27
+          },
+          "fontSize": 11,
+          "fontFamily": "Helvetica",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Introduction",
+              "bbox": {
+                "x": 72,
+                "y": 37.02,
+                "w": 81.66,
+                "h": 19.28
+              },
+              "fontFamily": "Helvetica-Bold",
+              "fontSize": 14,
+              "bold": true,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "This document summarises the operations of the past financial year.",
+              "bbox": {
+                "x": 72,
+                "y": 56.17,
+                "w": 332.58,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "• Revenue grew by twelve percent compared with the previous year.",
+              "bbox": {
+                "x": 72,
+                "y": 72.18,
+                "w": 331.54,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "• Operating costs stayed flat despite higher shipment volumes.",
+              "bbox": {
+                "x": 72,
+                "y": 88.18,
+                "w": 304.04,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "• Headcount increased by forty people in the engineering team.",
+              "bbox": {
+                "x": 72,
+                "y": 104.18,
+                "w": 307.12,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 2,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "See https://example.com/docs for the detailed methodology.",
+          "bbox": {
+            "x": 72,
+            "y": 152.18,
+            "w": 292.26,
+            "h": 15.11
+          },
+          "fontSize": 11,
+          "fontFamily": "Helvetica",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "See https://example.com/docs for the detailed methodology.",
+              "bbox": {
+                "x": 72,
+                "y": 152.18,
+                "w": 292.26,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 3,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "Energy is E=mc^2 when the model is applied to production data.",
+          "bbox": {
+            "x": 72,
+            "y": 200.18,
+            "w": 313,
+            "h": 15.11
+          },
+          "fontSize": 11,
+          "fontFamily": "Helvetica",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Energy is E=mc^2 when the model is applied to production data.",
+              "bbox": {
+                "x": 72,
+                "y": 200.18,
+                "w": 313,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 4,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "Page 1 of 300",
+          "bbox": {
+            "x": 72,
+            "y": 724.33,
+            "w": 56.04,
+            "h": 12.37
+          },
+          "fontSize": 9,
+          "fontFamily": "Helvetica",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Page 1 of 300",
+              "bbox": {
+                "x": 72,
+                "y": 724.33,
+                "w": 56.04,
+                "h": 12.37
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 9,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "width": 612,
+      "height": 792,
+      "rotation": 0,
+      "extractionMethod": "text",
+      "contentClass": "text",
+      "blocks": [
+        {
+          "order": 0,
+          "kind": "paragraph",
+          "region": "header",
+          "text": "Annual Report 2026 - Chapter 1",
+          "bbox": {
+            "x": 72,
+            "y": 12.37,
+            "w": 134.03,
+            "h": 12.39
+          },
+          "fontSize": 9,
+          "fontFamily": "Helvetica-Bold",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Annual Report 2026 - Chapter 1",
+              "bbox": {
+                "x": 72,
+                "y": 12.37,
+                "w": 134.03,
+                "h": 12.39
+              },
+              "fontFamily": "Helvetica-Bold",
+              "fontSize": 9,
+              "bold": true,
+              "italic": false,
+              "color": "#ff0000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 1,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "Employee satisfaction improved after the flexible schedule policy was introduced.\nSafety inspections found no critical issues at any of the production facilities.\nThe mobile application now supports offline editing and automatic synchronisation.\nMarketing spent the additional budget on search, events and partner programmes.\nRevenue growth was driven mainly by the subscription tier and renewals.\nLegal confirmed that the new terms comply with the updated data protection rules.\nResearch findings will be published in the annual technical report next quarter.\nFacilities upgraded the cooling system to reduce energy consumption in the data hall.\nSupport tickets were resolved faster after the knowledge base was reorganised.\nThe quarterly review covers revenue, operating costs and headcount across all regions.\nOur team finished the migration ahead of schedule and reduced infrastructure spend.\nCustomers reported faster page loads after the caching layer was enabled by default.\nRisk management remains a priority for the board and the audit committee this year.\nInventory levels returned to normal in the second half of the reporting period.\nThe training programme reached every branch office before the end of March.\nSupplier contracts were renegotiated to reflect the new volume commitments.\nEmployee satisfaction improved after the flexible schedule policy was introduced.\nSafety inspections found no critical issues at any of the production facilities.",
+          "bbox": {
+            "x": 72,
+            "y": 40.17,
+            "w": 426.13,
+            "h": 287.11
+          },
+          "fontSize": 11,
+          "fontFamily": "Helvetica",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Employee satisfaction improved after the flexible schedule policy was introduced.",
+              "bbox": {
+                "x": 72,
+                "y": 40.17,
+                "w": 394.33,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Safety inspections found no critical issues at any of the production facilities.",
+              "bbox": {
+                "x": 72,
+                "y": 56.17,
+                "w": 366.84,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "The mobile application now supports offline editing and automatic synchronisation.",
+              "bbox": {
+                "x": 72,
+                "y": 72.18,
+                "w": 401.07,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Marketing spent the additional budget on search, events and partner programmes.",
+              "bbox": {
+                "x": 72,
+                "y": 88.18,
+                "w": 400.48,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Revenue growth was driven mainly by the subscription tier and renewals.",
+              "bbox": {
+                "x": 72,
+                "y": 104.18,
+                "w": 355.19,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Legal confirmed that the new terms comply with the updated data protection rules.",
+              "bbox": {
+                "x": 72,
+                "y": 120.18,
+                "w": 399.24,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Research findings will be published in the annual technical report next quarter.",
+              "bbox": {
+                "x": 72,
+                "y": 136.18,
+                "w": 380.9,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Facilities upgraded the cooling system to reduce energy consumption in the data hall.",
+              "bbox": {
+                "x": 72,
+                "y": 152.18,
+                "w": 415.14,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Support tickets were resolved faster after the knowledge base was reorganised.",
+              "bbox": {
+                "x": 72,
+                "y": 168.18,
+                "w": 387.62,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "The quarterly review covers revenue, operating costs and headcount across all regions.",
+              "bbox": {
+                "x": 72,
+                "y": 184.18,
+                "w": 426.13,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Our team finished the migration ahead of schedule and reduced infrastructure spend.",
+              "bbox": {
+                "x": 72,
+                "y": 200.18,
+                "w": 413.93,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Customers reported faster page loads after the caching layer was enabled by default.",
+              "bbox": {
+                "x": 72,
+                "y": 216.18,
+                "w": 414.54,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Risk management remains a priority for the board and the audit committee this year.",
+              "bbox": {
+                "x": 72,
+                "y": 232.18,
+                "w": 409.61,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Inventory levels returned to normal in the second half of the reporting period.",
+              "bbox": {
+                "x": 72,
+                "y": 248.18,
+                "w": 372.35,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "The training programme reached every branch office before the end of March.",
+              "bbox": {
+                "x": 72,
+                "y": 264.17,
+                "w": 379.06,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Supplier contracts were renegotiated to reflect the new volume commitments.",
+              "bbox": {
+                "x": 72,
+                "y": 280.17,
+                "w": 375.98,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Employee satisfaction improved after the flexible schedule policy was introduced.",
+              "bbox": {
+                "x": 72,
+                "y": 296.17,
+                "w": 394.33,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Safety inspections found no critical issues at any of the production facilities.",
+              "bbox": {
+                "x": 72,
+                "y": 312.17,
+                "w": 366.84,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 2,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "Page 2 of 300",
+          "bbox": {
+            "x": 72,
+            "y": 724.33,
+            "w": 56.04,
+            "h": 12.37
+          },
+          "fontSize": 9,
+          "fontFamily": "Helvetica",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Page 2 of 300",
+              "bbox": {
+                "x": 72,
+                "y": 724.33,
+                "w": 56.04,
+                "h": 12.37
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 9,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "width": 612,
+      "height": 792,
+      "rotation": 0,
+      "extractionMethod": "text",
+      "contentClass": "text",
+      "blocks": [
+        {
+          "order": 0,
+          "kind": "paragraph",
+          "region": "header",
+          "text": "Annual Report 2026 - Chapter 1",
+          "bbox": {
+            "x": 72,
+            "y": 12.37,
+            "w": 134.03,
+            "h": 12.39
+          },
+          "fontSize": 9,
+          "fontFamily": "Helvetica-Bold",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Annual Report 2026 - Chapter 1",
+              "bbox": {
+                "x": 72,
+                "y": 12.37,
+                "w": 134.03,
+                "h": 12.39
+              },
+              "fontFamily": "Helvetica-Bold",
+              "fontSize": 9,
+              "bold": true,
+              "italic": false,
+              "color": "#ff0000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 1,
+          "kind": "paragraph",
+          "region": "header",
+          "text": "Name    Value\nAlpha   12\nBeta    34\nGamma   56\nThe table above lists the measured values for each sample group.",
+          "bbox": {
+            "x": 72,
+            "y": 40.17,
+            "w": 321.6,
+            "h": 79.11
+          },
+          "fontSize": 11,
+          "fontFamily": "Helvetica",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Name    Value",
+              "bbox": {
+                "x": 72,
+                "y": 40.17,
+                "w": 69.7,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Alpha   12",
+              "bbox": {
+                "x": 72,
+                "y": 56.17,
+                "w": 49.53,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Beta    34",
+              "bbox": {
+                "x": 72,
+                "y": 72.18,
+                "w": 47.09,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Gamma   56",
+              "bbox": {
+                "x": 72,
+                "y": 88.18,
+                "w": 60.52,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "The table above lists the measured values for each sample group.",
+              "bbox": {
+                "x": 72,
+                "y": 104.18,
+                "w": 321.6,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 2,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "Page 3 of 300",
+          "bbox": {
+            "x": 72,
+            "y": 724.33,
+            "w": 56.04,
+            "h": 12.37
+          },
+          "fontSize": 9,
+          "fontFamily": "Helvetica",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Page 3 of 300",
+              "bbox": {
+                "x": 72,
+                "y": 724.33,
+                "w": 56.04,
+                "h": 12.37
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 9,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "pages": [
+    {
+      "index": 0,
+      "width": 612,
+      "height": 792,
+      "rotation": 0,
+      "extractionMethod": "ocr",
+      "contentClass": "scanned",
+      "blocks": [],
+      "ocrAvailable": true
+    }
+  ]
+}

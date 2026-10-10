@@ -43,6 +43,24 @@ browser Tesseract path takes over, and the user sees no error and no delay
 beyond one cached probe. Configure with `VITE_PDF_SIDECAR_URL` (default
 `http://localhost:8790`; set it blank to disable the sidecar entirely).
 
+`POST /extract` is wired in as well — **as a fallback only**. Measured on the
+300-page fixture it answers one 12-page parse window in ~1.3 s where pdf.js
+takes ~20 ms (pdfplumber's table finder and the classify-level signal sweep
+run on every page), so it is never the first reader. `assemblePage` in
+`src/pdf/pdfExtract.ts` is the one tail both engines feed: sidecar lines are
+rewritten as pdf.js-shaped text runs and pushed through the same
+`groupItemsIntoLines` → `structurePage` → links passes, so reading order,
+footnotes, code, tables, headings and link anchors stay single-sourced in
+TypeScript rather than being reimplemented in Python. The worker retains the
+file bytes only while the health probe says a sidecar is reachable, retries a
+page only when pdf.js *threw* or handed over text it could not turn into a
+block, and otherwise never calls it — an ordinary document pays nothing. A
+page the sidecar cannot answer for is declined by name (`page-rotation`,
+`line-rotation`, `pdfplumber-table`, `extraction-method`, …) and the browser's
+result stands. Recordings of six fixtures are replayed in
+`src/sidecar/extractParity.test.ts` and asserted identical block for block:
+same kinds, text, `tableCells`, link anchors and boxes within 3 pt.
+
 ## The 25 types
 
 | #  | Type                                    | Status | Notes |

@@ -6,6 +6,14 @@
  * tesseract WASM core plus a `.traineddata` pack fetched from a CDN, while the
  * sidecar uses the tesseract binary already installed on the machine.
  *
+ * `POST /extract` is the other endpoint and it is deliberately **not** a fast
+ * path: measured against the 300-page fixture it answers one 12-page parse
+ * window in ~1.3 s where pdf.js takes ~20 ms, because every page also runs
+ * pdfplumber's table finder and the classify-level signal sweep. So pdf.js
+ * keeps the ordinary work and `/extract` is reached only after it has *already
+ * failed* a page — a throw, or text it read but could not turn into a single
+ * block. That is the only shape in which a slower native reader is a win.
+ *
  * Three rules make it safe to reach for unconditionally:
  *
  *  1. **It is optional by construction.** Every entry point returns `null`
@@ -32,6 +40,8 @@
 
 import type { OcrResult } from '@/ocr/ocrClient'
 import type { OcrBBox, OcrLine, OcrPageData } from '@/ocr/ocrTypes'
+import type { PageSource } from '@/pdf/pdfExtract'
+import type { LineStyle, TextItemLike } from '@/pdf/lineGrouping'
 
 /** Local sidecar default; override with `VITE_PDF_SIDECAR_URL`. */
 export const DEFAULT_SIDECAR_URL = 'http://localhost:8790'
@@ -273,6 +283,272 @@ export async function sidecarOcr(pdf: Blob, options: SidecarOcrOptions): Promise
   } catch {
     // Transport failure. Do not poison a probe cached by an intentional
     // cancellation — the sidecar is probably still fine.
+    if (!options.signal?.aborted) healthCache = null
+    return null
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Text extraction                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * How far a line may lean before the page is left to pdf.js.
+ *
+ * The browser path reads a line's real text matrix, so a title drawn at −45°
+ * keeps its tilt and its box. The sidecar reports an axis-aligned rectangle,
+ * and a rectangle is not enough to rebuild a rotation: feeding a square box
+ * back through the corner walk as if it were upright would move the line and
+ * hand `canMerge` a rotation it never had. One tilted line on a page is
+ * enough to send that whole page back to pdf.js.
+ */
+const MAX_LINE_TILT_DEGREES = 1
+
+/** Extraction methods whose pages carry a text layer. */
+const TEXT_METHODS = new Set(['text', 'hybrid'])
+
+/**
+ * One sidecar page, ready to hand to `assemblePage`.
+ *
+ * `decline` is `null` when the page may be used, and otherwise names the
+ * reason it may not. Declining is never an error — the caller simply runs the
+ * browser path for that page — which is why every reason is a stable string
+ * rather than an exception: they are the vocabulary the fallback tests pin.
+ */
+export interface SidecarExtractPage {
+  /** Page index exactly as the sidecar echoed it. */
+  index: number
+  /** `null` when usable; otherwise why the page was declined. */
+  decline: string | null
+  /**
+   * Positioned runs plus page dimensions, with `annotations` left for the
+   * caller (only pdf.js can read `/Link` rectangles, and it still has the
+   * page open).
+   */
+  source: PageSource
+}
+
+export interface SidecarExtractOptions {
+  /** 0-based pages to read; compressed into ranges for the query string. */
+  pageIndexes: readonly number[]
+  /** PDF password, when the document needs one. */
+  password?: string
+  signal?: AbortSignal
+}
+
+/**
+ * `0,1,2,7,9` → `0-2,7,9`.
+ *
+ * A parse window is 12 consecutive pages, so the naive form is already short,
+ * but a caller may pass anything: compressing keeps the URL bounded however
+ * sparse the list is, and it sorts, which makes the request deterministic and
+ * therefore cacheable in a test.
+ */
+export function pageRanges(indexes: readonly number[]): string {
+  const sorted = [...new Set(indexes)].sort((a, b) => a - b)
+  const parts: string[] = []
+  let start = 0
+  for (let at = 1; at <= sorted.length; at += 1) {
+    if (at < sorted.length && sorted[at] === sorted[at - 1] + 1) continue
+    const first = sorted[start]
+    const last = sorted[at - 1]
+    parts.push(first === last ? String(first) : `${first}-${last}`)
+    start = at
+  }
+  return parts.join(',')
+}
+
+function finite(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+/**
+ * One sidecar line → one pdf.js-shaped text run, or the reason it cannot be.
+ *
+ * The transform is written in pdf.js's convention so that
+ * `groupItemsIntoLines` needs no knowledge of where the run came from:
+ * `e`/`f` put the origin on the left edge of the line's **top** (pdf.js puts
+ * it on the baseline, and `groupItemsIntoLines` converts back with
+ * `pageHeight - maxY`), `d = -fontSize` so `hypot(c, d)` reads the size back
+ * out, and `a = 1, b = 0` so the rotation comes out as the sidecar's own
+ * axis-aligned 0.
+ *
+ * `height` is the font size rather than the box PyMuPDF measured, because
+ * the two engines disagree about what a line's rectangle *is*. pdf.js spans
+ * exactly one em above the baseline; PyMuPDF spans ascender to descender,
+ * which for the fixtures is 1.31 em — so a block would come back ~3 pt taller
+ * per edge than pdf.js made it, and every gap the block builder measures
+ * would be 3 pt short. Taking the top PyMuPDF reports and one em of height
+ * puts both engines' rectangles on the same convention, which is what makes
+ * `canMerge`'s gap threshold mean the same thing on either path.
+ */
+function pushLine(
+  entry: Record<string, unknown>,
+  pageHeight: number,
+  items: TextItemLike[],
+  styles: Array<Partial<LineStyle>>,
+): string | null {
+  const text = entry.text
+  if (typeof text !== 'string') return 'line-text'
+
+  const box = entry.bbox
+  if (!isRecord(box)) return 'line-geometry'
+  const x = finite(box.x)
+  const y = finite(box.y)
+  const w = finite(box.w)
+  const h = finite(box.h)
+  if (x === null || y === null || w === null || h === null || w <= 0 || h <= 0) {
+    return 'line-geometry'
+  }
+
+  const size = finite(entry.fontSize)
+  if (size === null || size <= 0) return 'line-font-size'
+  const tilt = finite(entry.rotation) ?? 0
+  if (Math.abs(tilt) > MAX_LINE_TILT_DEGREES) return 'line-rotation'
+
+  // A line PyMuPDF kept only for its spacing carries nothing; dropping it
+  // costs no text and keeps `items` free of runs the grouper rejects anyway.
+  if (!text.trim()) return null
+
+  items.push({
+    str: text,
+    transform: [1, 0, 0, -size, x, pageHeight - y],
+    width: w,
+    height: size,
+    fontName: typeof entry.fontFamily === 'string' ? entry.fontFamily : undefined,
+  })
+  styles.push({
+    fontFamily:
+      typeof entry.fontFamily === 'string' && entry.fontFamily ? entry.fontFamily : 'Helvetica',
+    bold: entry.bold === true,
+    italic: entry.italic === true,
+    color:
+      typeof entry.color === 'string' && /^#[0-9a-f]{6}$/i.test(entry.color)
+        ? entry.color.toLowerCase()
+        : '#000000',
+  })
+  return null
+}
+
+function emptySource(width: number, height: number, rotation: number): PageSource {
+  return { items: [], width, height, rotation }
+}
+
+/** One `/extract` page entry → a normalised page, or `null` if it is not one. */
+function normalisePage(raw: Record<string, unknown>): SidecarExtractPage | null {
+  const index = finite(raw.index)
+  if (index === null) return null
+
+  const width = finite(raw.width) ?? 0
+  const height = finite(raw.height) ?? 0
+  const rotation = finite(raw.rotation) ?? 0
+  const source = emptySource(width, height, rotation)
+  const decline = (reason: string): SidecarExtractPage => ({ index, decline: reason, source })
+
+  // Display space (rotation applied) on the sidecar, user space on the
+  // browser: for an upright page the two are the same rectangle, and for any
+  // other they are not, so a rotated page is not comparable and is refused.
+  if (rotation % 360 !== 0) return decline('page-rotation')
+  // `none` is an empty page, `ocr` a scanned one the app's own OCR pipeline
+  // owns — neither has text for this path to recover.
+  if (typeof raw.extractionMethod !== 'string' || !TEXT_METHODS.has(raw.extractionMethod)) {
+    return decline('extraction-method')
+  }
+  if (width <= 0 || height <= 0) return decline('page-size')
+  if (!Array.isArray(raw.blocks)) return decline('page-blocks')
+
+  const items: TextItemLike[] = []
+  const styles: Array<Partial<LineStyle>> = []
+  for (const block of raw.blocks) {
+    if (!isRecord(block)) return decline('page-blocks')
+    // pdfplumber's reading of a ruled table replaces the text blocks that
+    // were inside it, so the page is no longer a drop-in for what pdf.js
+    // would have read: the cells have no rectangles attached and the
+    // surrounding prose has already been removed. pdf.js reads those pages
+    // correctly, and better, so they stay with it.
+    if (block.table !== null && block.table !== undefined) return decline('pdfplumber-table')
+    if (!Array.isArray(block.lines)) return decline('page-blocks')
+    for (const entry of block.lines) {
+      if (!isRecord(entry)) return decline('line-geometry')
+      const reason = pushLine(entry, height, items, styles)
+      if (reason !== null) return decline(reason)
+    }
+  }
+
+  if (items.length === 0) return decline('no-lines')
+  source.items = items
+  source.styles = styles
+  return { index, decline: null, source }
+}
+
+/**
+ * `/extract` payload → normalised pages, or `null` when the payload is not
+ * the answer this adapter was written against (the caller then keeps the
+ * browser's result, which it already has).
+ */
+export function normaliseExtract(payload: unknown): SidecarExtractPage[] | null {
+  if (!isRecord(payload) || payload.ok !== true) return null
+  if (!Array.isArray(payload.pages)) return null
+  const pages: SidecarExtractPage[] = []
+  for (const entry of payload.pages) {
+    if (!isRecord(entry)) return null
+    const page = normalisePage(entry)
+    if (page === null) return null
+    pages.push(page)
+  }
+  return pages
+}
+
+/**
+ * Should this window be able to fall back to `POST /extract`?
+ *
+ * The gate is pymupdf, not tesseract — `probeSidecar` answers the OCR
+ * question and would wrongly refuse a sidecar that can extract text but has
+ * no OCR binary. Reuses the same cached health probe, so a window that has
+ * already asked for OCR pays nothing extra.
+ */
+export async function probeSidecarExtract(): Promise<boolean> {
+  if (!sidecarUrl()) return false
+  const health = await sidecarHealth()
+  return health !== null && health.libs.fitz === true
+}
+
+/**
+ * Read pages through the sidecar — the *fallback* reader, never the first.
+ *
+ * Resolves `null` whenever the browser's own answer should stand: no sidecar
+ * configured, nothing to ask for, unreachable, an error status, or a payload
+ * that does not match the protocol. Individual pages inside a successful
+ * answer carry their own `decline` reason.
+ */
+export async function sidecarExtract(
+  pdf: Blob,
+  options: SidecarExtractOptions,
+): Promise<SidecarExtractPage[] | null> {
+  const base = sidecarUrl()
+  if (!base || options.pageIndexes.length === 0) return null
+
+  const params = new URLSearchParams({
+    // The app's OCR pipeline owns scanned pages (confidence floor, cache,
+    // persistence), so it must not race the sidecar's own OCR.
+    mode: 'text',
+    pages: pageRanges(options.pageIndexes),
+  })
+  if (options.password) params.set('password', options.password)
+
+  try {
+    const response = await fetch(`${base}/extract?${params.toString()}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/pdf' },
+      body: pdf,
+      ...(options.signal ? { signal: options.signal } : {}),
+    })
+    if (!response.ok) return null
+    const payload: unknown = await response.json()
+    return normaliseExtract(payload)
+  } catch {
+    // Same rule as OCR: an intentional cancellation says nothing about the
+    // sidecar's health, so only a real transport failure drops the probe.
     if (!options.signal?.aborted) healthCache = null
     return null
   }

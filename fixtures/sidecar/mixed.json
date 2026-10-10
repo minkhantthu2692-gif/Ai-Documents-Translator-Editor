@@ -1,0 +1,150 @@
+{
+  "ok": true,
+  "pages": [
+    {
+      "index": 0,
+      "width": 612,
+      "height": 792,
+      "rotation": 0,
+      "extractionMethod": "hybrid",
+      "contentClass": "mixed",
+      "blocks": [
+        {
+          "order": 0,
+          "kind": "caption",
+          "region": "header",
+          "text": "Figure 1 - Deployment pipeline",
+          "bbox": {
+            "x": 72,
+            "y": 12.37,
+            "w": 131.03,
+            "h": 12.39
+          },
+          "fontSize": 9,
+          "fontFamily": "Helvetica-Bold",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Figure 1 - Deployment pipeline",
+              "bbox": {
+                "x": 72,
+                "y": 12.37,
+                "w": 131.03,
+                "h": 12.39
+              },
+              "fontFamily": "Helvetica-Bold",
+              "fontSize": 9,
+              "bold": true,
+              "italic": false,
+              "color": "#ff0000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 1,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "The figure shows the stages of the deployment pipeline described below.\nEach stage is validated before the next one is allowed to start.\nRollback is automatic when a health check fails twice in a row.",
+          "bbox": {
+            "x": 72,
+            "y": 40.17,
+            "w": 354.62,
+            "h": 47.11
+          },
+          "fontSize": 11,
+          "fontFamily": "Helvetica",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "The figure shows the stages of the deployment pipeline described below.",
+              "bbox": {
+                "x": 72,
+                "y": 40.17,
+                "w": 354.62,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Each stage is validated before the next one is allowed to start.",
+              "bbox": {
+                "x": 72,
+                "y": 56.17,
+                "w": 302.05,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Rollback is automatic when a health check fails twice in a row.",
+              "bbox": {
+                "x": 72,
+                "y": 72.18,
+                "w": 302.61,
+                "h": 15.11
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 11,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 2,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "Page 1",
+          "bbox": {
+            "x": 72,
+            "y": 724.33,
+            "w": 28.52,
+            "h": 12.37
+          },
+          "fontSize": 9,
+          "fontFamily": "Helvetica",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Page 1",
+              "bbox": {
+                "x": 72,
+                "y": 724.33,
+                "w": 28.52,
+                "h": 12.37
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 9,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        }
+      ]
+    }
+  ]
+}

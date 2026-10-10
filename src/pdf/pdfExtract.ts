@@ -8,6 +8,8 @@
  *   probeDocument     — every page: text coverage, images, annotations,
  *                       language, content class, plus running-head/foot sets
  *   extractPage       — lines → ordered blocks for a single page
+ *   assemblePage      — the shared tail both text engines feed (pdf.js and,
+ *                       as a fallback only, the local sidecar)
  *
  * The module has no pdf.js *runtime* dependency (types only), which keeps the
  * operator-list maths unit-testable and lets the integration test drive the
@@ -193,9 +195,37 @@ export async function readDocumentInfo(doc: PDFDocumentProxy): Promise<PdfDocume
 /* Page reading                                                        */
 /* ------------------------------------------------------------------ */
 
-interface AnnotationLike {
+/** The subset of a pdf.js annotation the structure pass actually reads. */
+export interface AnnotationLike {
   subtype?: string
   fieldType?: string
+  url?: string
+  unsafeUrl?: string
+  rect?: number[]
+}
+
+/**
+ * Everything a page needs *after* its text runs are in hand.
+ *
+ * Two producers fill it: `readPage` (pdf.js — the ordinary path) and the
+ * sidecar's `/extract` normaliser (PyMuPDF — the fallback). Both are only
+ * ever a list of positioned text runs plus page dimensions, because
+ * `assemblePage` is the single place lines are grouped, ordered, classified
+ * and linked. A sidecar page therefore cannot drift from a browser page: it
+ * never gets its own copy of any semantic decision.
+ */
+export interface PageSource {
+  /** Positioned runs, in whatever order the producer read them. */
+  items: TextItemLike[]
+  /** Per-item fill colours (pdf.js operator list); absent on sidecar pages. */
+  colors?: Array<string | null> | undefined
+  /** Per-item font overrides, indexed like `items`. */
+  styles?: Array<Partial<LineStyle> | null> | undefined
+  /** `/Link` rectangles; absent when there is no pdf.js page to ask. */
+  annotations?: AnnotationLike[] | undefined
+  width: number
+  height: number
+  rotation: number
 }
 
 interface PreparedPage {
@@ -552,27 +582,59 @@ export interface ExtractedPage {
   blocks: PageBlock[]
 }
 
-/** Extracts ordered blocks for a single page. */
-export async function extractPage(
-  page: PDFPageProxy,
+/** Non-whitespace characters across a page's runs — the yield it reported. */
+function itemCount(items: readonly TextItemLike[]): number {
+  return items.reduce((sum, item) => sum + item.str.replace(/\s+/g, '').length, 0)
+}
+
+/**
+ * Did pdf.js read text it could not turn into a single block?
+ *
+ * The one silent failure worth a second reader. `structurePage` never returns
+ * empty when it was given lines, so the only way to reach here is
+ * `groupItemsIntoLines` rejecting *every* run — which it does when a font
+ * matrix produces coordinates it cannot measure. The characters exist and the
+ * page is not blank; only pdf.js's idea of where they sit is unusable, and
+ * PyMuPDF measures them without asking pdf.js.
+ *
+ * Deliberately not "the page came back empty": a scan, a divider page or a
+ * blank verso is empty *correctly*, and re-reading one through the sidecar
+ * would spend a second on every image-heavy page of a 350-page document to
+ * arrive at the same nothing. Throws are handled separately by the caller,
+ * because a page that threw has no result to inspect.
+ */
+export function needsSidecarFallback(page: ExtractedPage): boolean {
+  return page.charCount > 0 && page.blocks.length === 0
+}
+
+/**
+ * The shared tail of extraction: runs → lines → ordered blocks → links.
+ *
+ * Exported because the sidecar fallback enters *here* rather than beside it —
+ * a page recovered from `POST /extract` must go through the same grouping,
+ * reading order, footnote, code, table and heading passes as any other, or the
+ * document would change shape depending on which engine read it.
+ */
+export function assemblePage(
+  pageIndex: number,
+  source: PageSource,
   options: ExtractPageOptions,
-): Promise<ExtractedPage> {
-  const prepared = await readPage(page, { annotations: true })
+): ExtractedPage {
   const structureOptions: StructureOptions = {
-    pageIndex: options.pageIndex,
-    pageWidth: prepared.width,
-    pageHeight: prepared.height,
+    pageIndex,
+    pageWidth: source.width,
+    pageHeight: source.height,
     ctx: options.ctx,
     headerTexts: new Set(options.headerTexts ?? []),
     footerTexts: new Set(options.footerTexts ?? []),
     headingSizes: options.headingSizes ?? [],
   }
 
-  let lines = groupItemsIntoLines(prepared.items, {
-    pageIndex: options.pageIndex,
-    pageHeight: prepared.height,
-    colors: prepared.colors,
-    styles: prepared.styles,
+  let lines = groupItemsIntoLines(source.items, {
+    pageIndex,
+    pageHeight: source.height,
+    colors: source.colors,
+    styles: source.styles,
   })
 
   if (options.convertZawgyi) {
@@ -582,7 +644,7 @@ export async function extractPage(
       return {
         ...line,
         text: repaired.text,
-        id: lineId(options.pageIndex, line.bbox, repaired.text),
+        id: lineId(pageIndex, line.bbox, repaired.text),
       }
     })
   }
@@ -593,15 +655,39 @@ export async function extractPage(
   // rectangle that spans two paragraphs would otherwise have no block to
   // belong to, and one that lands mid-paragraph would be sliced against a
   // merged line of text that never existed on the page.
-  const pageLinks = linksFromAnnotations(prepared.annotations, prepared.height)
-  attachLinks(blocks, linkAnchors(pageLinks, lines, prepared.items))
+  const pageLinks = linksFromAnnotations(source.annotations ?? [], source.height)
+  attachLinks(blocks, linkAnchors(pageLinks, lines, source.items))
   return {
-    pageIndex: options.pageIndex,
-    width: prepared.width,
-    height: prepared.height,
-    rotation: prepared.rotation,
-    charCount: prepared.items.reduce((sum, item) => sum + item.str.replace(/\s+/g, '').length, 0),
+    pageIndex,
+    width: source.width,
+    height: source.height,
+    rotation: source.rotation,
+    // Counted here rather than by each producer: the page's yield must mean
+    // the same thing whichever engine produced the runs, and the sidecar
+    // fallback has to be able to compare the two.
+    charCount: itemCount(source.items),
     lineCount: lines.length,
     blocks,
   }
+}
+
+/** Extracts ordered blocks for a single page. */
+export async function extractPage(
+  page: PDFPageProxy,
+  options: ExtractPageOptions,
+): Promise<ExtractedPage> {
+  const prepared = await readPage(page, { annotations: true })
+  return assemblePage(
+    options.pageIndex,
+    {
+      items: prepared.items,
+      colors: prepared.colors,
+      styles: prepared.styles,
+      annotations: prepared.annotations,
+      width: prepared.width,
+      height: prepared.height,
+      rotation: prepared.rotation,
+    },
+    options,
+  )
 }

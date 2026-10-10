@@ -15,7 +15,14 @@ import {
   type PDFDocumentLoadingTask,
   type PDFDocumentProxy,
 } from 'pdfjs-dist'
-import { extractPage, parsePdfDate, probeDocument, readDocumentInfo } from './pdfExtract'
+import {
+  extractPage,
+  needsSidecarFallback,
+  parsePdfDate,
+  probeDocument,
+  readDocumentInfo,
+  type ExtractedPage,
+} from './pdfExtract'
 
 const fixture = (name: string): Uint8Array =>
   new Uint8Array(readFileSync(fileURLToPath(new URL(`../../fixtures/${name}`, import.meta.url))))
@@ -430,5 +437,38 @@ describe('table.pdf', () => {
       ['Gadget', '', 'clearance'],
       ['Gizmo', '80', 'backorder'],
     ])
+  })
+})
+
+describe('needsSidecarFallback', () => {
+  const page = (charCount: number, blocks: ExtractedPage['blocks']): ExtractedPage => ({
+    pageIndex: 0,
+    width: 612,
+    height: 792,
+    rotation: 0,
+    charCount,
+    lineCount: blocks.length,
+    blocks,
+  })
+  const someBlock = {} as ExtractedPage['blocks'][number]
+
+  it('asks for a second reader only when text arrived that could not be placed', () => {
+    // The silent failure worth a sidecar round trip: pdf.js handed over 400
+    // characters and the grouper rejected every run, so no block exists to
+    // show the user. `structurePage` cannot return empty for non-empty lines,
+    // so this shape is unreachable unless pdf.js's geometry was unusable.
+    expect(needsSidecarFallback(page(400, []))).toBe(true)
+  })
+
+  it('leaves a page that produced blocks to pdf.js', () => {
+    expect(needsSidecarFallback(page(400, [someBlock]))).toBe(false)
+  })
+
+  it('leaves a genuinely blank page alone — a scan has nothing to recover', () => {
+    // Every scanned page of a 300-page document comes back with no text and
+    // no blocks. That is the *correct* answer, so treating it as a failure
+    // would pay the sidecar a second on each of them to arrive at the same
+    // nothing, while the OCR pipeline reads them properly anyway.
+    expect(needsSidecarFallback(page(0, []))).toBe(false)
   })
 })

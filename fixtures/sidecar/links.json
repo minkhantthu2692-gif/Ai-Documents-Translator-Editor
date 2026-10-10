@@ -1,0 +1,445 @@
+{
+  "ok": true,
+  "pages": [
+    {
+      "index": 0,
+      "width": 612,
+      "height": 792,
+      "rotation": 0,
+      "extractionMethod": "text",
+      "contentClass": "text",
+      "blocks": [
+        {
+          "order": 0,
+          "kind": "paragraph",
+          "region": "header",
+          "text": "Annual Report 2026",
+          "bbox": {
+            "x": 72,
+            "y": 12.37,
+            "w": 84.52,
+            "h": 12.39
+          },
+          "fontSize": 9,
+          "fontFamily": "Helvetica-Bold",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Annual Report 2026",
+              "bbox": {
+                "x": 72,
+                "y": 12.37,
+                "w": 84.52,
+                "h": 12.39
+              },
+              "fontFamily": "Helvetica-Bold",
+              "fontSize": 9,
+              "bold": true,
+              "italic": false,
+              "color": "#ff0000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 1,
+          "kind": "heading",
+          "region": "body",
+          "text": "Useful Links",
+          "bbox": {
+            "x": 72,
+            "y": 84.88,
+            "w": 95.14,
+            "h": 22.03
+          },
+          "fontSize": 16,
+          "fontFamily": "Helvetica-Bold",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Useful Links",
+              "bbox": {
+                "x": 72,
+                "y": 84.88,
+                "w": 95.14,
+                "h": 22.03
+              },
+              "fontFamily": "Helvetica-Bold",
+              "fontSize": 16,
+              "bold": true,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 2,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "Read more at https://example.com/api now\nThe endpoint returns JSON and nothing else.\nRate limits apply per key.",
+          "bbox": {
+            "x": 72,
+            "y": 122.68,
+            "w": 258,
+            "h": 38.49
+          },
+          "fontSize": 10,
+          "fontFamily": "Courier",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Read more at https://example.com/api now",
+              "bbox": {
+                "x": 72,
+                "y": 122.68,
+                "w": 240,
+                "h": 12.49
+              },
+              "fontFamily": "Courier",
+              "fontSize": 10,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "The endpoint returns JSON and nothing else.",
+              "bbox": {
+                "x": 72,
+                "y": 135.68,
+                "w": 258,
+                "h": 12.49
+              },
+              "fontFamily": "Courier",
+              "fontSize": 10,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Rate limits apply per key.",
+              "bbox": {
+                "x": 72,
+                "y": 148.68,
+                "w": 156,
+                "h": 12.49
+              },
+              "fontFamily": "Courier",
+              "fontSize": 10,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 3,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "See the pricing page for details.\nEnterprise plans are quoted separately.\nBilling runs monthly in advance.",
+          "bbox": {
+            "x": 72,
+            "y": 174.68,
+            "w": 234,
+            "h": 38.49
+          },
+          "fontSize": 10,
+          "fontFamily": "Courier",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "See the pricing page for details.",
+              "bbox": {
+                "x": 72,
+                "y": 174.68,
+                "w": 198,
+                "h": 12.49
+              },
+              "fontFamily": "Courier",
+              "fontSize": 10,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Enterprise plans are quoted separately.",
+              "bbox": {
+                "x": 72,
+                "y": 187.68,
+                "w": 234,
+                "h": 12.49
+              },
+              "fontFamily": "Courier",
+              "fontSize": 10,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Billing runs monthly in advance.",
+              "bbox": {
+                "x": 72,
+                "y": 200.68,
+                "w": 192,
+                "h": 12.49
+              },
+              "fontFamily": "Courier",
+              "fontSize": 10,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 4,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "Section 7 explains the batching rules.\nIt is the authoritative reference.\nAsk support if anything is unclear.",
+          "bbox": {
+            "x": 72,
+            "y": 226.68,
+            "w": 228,
+            "h": 38.49
+          },
+          "fontSize": 10,
+          "fontFamily": "Courier",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Section 7 explains the batching rules.",
+              "bbox": {
+                "x": 72,
+                "y": 226.68,
+                "w": 228,
+                "h": 12.49
+              },
+              "fontFamily": "Courier",
+              "fontSize": 10,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "It is the authoritative reference.",
+              "bbox": {
+                "x": 72,
+                "y": 239.68,
+                "w": 204,
+                "h": 12.49
+              },
+              "fontFamily": "Courier",
+              "fontSize": 10,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Ask support if anything is unclear.",
+              "bbox": {
+                "x": 72,
+                "y": 252.68,
+                "w": 210,
+                "h": 12.49
+              },
+              "fontFamily": "Courier",
+              "fontSize": 10,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 5,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "A saved copy sits at data:payload in the archive.\nThat address is not a download.\nUse the release page instead.",
+          "bbox": {
+            "x": 72,
+            "y": 278.68,
+            "w": 294,
+            "h": 38.49
+          },
+          "fontSize": 10,
+          "fontFamily": "Courier",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "A saved copy sits at data:payload in the archive.",
+              "bbox": {
+                "x": 72,
+                "y": 278.68,
+                "w": 294,
+                "h": 12.49
+              },
+              "fontFamily": "Courier",
+              "fontSize": 10,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "That address is not a download.",
+              "bbox": {
+                "x": 72,
+                "y": 291.68,
+                "w": 186,
+                "h": 12.49
+              },
+              "fontFamily": "Courier",
+              "fontSize": 10,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Use the release page instead.",
+              "bbox": {
+                "x": 72,
+                "y": 304.68,
+                "w": 174,
+                "h": 12.49
+              },
+              "fontFamily": "Courier",
+              "fontSize": 10,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 6,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "The index lives at www.example.org/spec weekly.\nIt lists every published revision.\nSubscribe to get a notification.",
+          "bbox": {
+            "x": 72,
+            "y": 330.68,
+            "w": 282,
+            "h": 38.49
+          },
+          "fontSize": 10,
+          "fontFamily": "Courier",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "The index lives at www.example.org/spec weekly.",
+              "bbox": {
+                "x": 72,
+                "y": 330.68,
+                "w": 282,
+                "h": 12.49
+              },
+              "fontFamily": "Courier",
+              "fontSize": 10,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "It lists every published revision.",
+              "bbox": {
+                "x": 72,
+                "y": 343.68,
+                "w": 204,
+                "h": 12.49
+              },
+              "fontFamily": "Courier",
+              "fontSize": 10,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            },
+            {
+              "text": "Subscribe to get a notification.",
+              "bbox": {
+                "x": 72,
+                "y": 356.68,
+                "w": 192,
+                "h": 12.49
+              },
+              "fontFamily": "Courier",
+              "fontSize": 10,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        },
+        {
+          "order": 7,
+          "kind": "paragraph",
+          "region": "body",
+          "text": "Page 1 of 1",
+          "bbox": {
+            "x": 72,
+            "y": 724.33,
+            "w": 46.03,
+            "h": 12.37
+          },
+          "fontSize": 9,
+          "fontFamily": "Helvetica",
+          "alignment": "left",
+          "skipRule": null,
+          "listMarker": null,
+          "lines": [
+            {
+              "text": "Page 1 of 1",
+              "bbox": {
+                "x": 72,
+                "y": 724.33,
+                "w": 46.03,
+                "h": 12.37
+              },
+              "fontFamily": "Helvetica",
+              "fontSize": 9,
+              "bold": false,
+              "italic": false,
+              "color": "#000000",
+              "rotation": 0
+            }
+          ],
+          "table": null
+        }
+      ]
+    }
+  ]
+}

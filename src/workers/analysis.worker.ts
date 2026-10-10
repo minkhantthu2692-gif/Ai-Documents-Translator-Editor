@@ -24,12 +24,22 @@ import {
   PasswordResponses,
   type PDFDocumentLoadingTask,
   type PDFDocumentProxy,
+  type PDFPageProxy,
 } from 'pdfjs-dist'
 import * as pdfjsWorkerHandler from 'pdfjs-dist/build/pdf.worker.mjs'
 import type { ReasonCode } from '@/core/reasonCodes'
 import { PDF_DOCUMENT_PARAMS } from '@/pdf/pdfAssets'
-import { extractPage, probeDocument, type ExtractedPage } from '@/pdf/pdfExtract'
+import {
+  assemblePage,
+  extractPage,
+  needsSidecarFallback,
+  probeDocument,
+  type AnnotationLike,
+  type ExtractedPage,
+  type ExtractPageOptions,
+} from '@/pdf/pdfExtract'
 import { isRenderCancelled, renderPage, type RenderHandle } from '@/pdf/pageRender'
+import { probeSidecarExtract, sidecarExtract } from '@/sidecar/sidecarClient'
 import type {
   AnalysisEvent,
   AnalysisRequest,
@@ -51,6 +61,18 @@ interface OpenDoc {
   task: PDFDocumentLoadingTask
   doc: PDFDocumentProxy
   pageCount: number
+  /**
+   * The file's bytes, retained **only** while the sidecar could serve them.
+   *
+   * `open` transfers the buffer in and hands pdf.js a private copy of it, so
+   * keeping the original costs one extra file-sized allocation and buys the
+   * ability to POST the document somewhere without reading it again. The
+   * probe runs while the document opens, so a sidecar that is not running —
+   * the common case — leaves nothing behind, and closing frees it.
+   */
+  bytes: ArrayBuffer | null
+  /** Kept beside the bytes: `/extract` takes it as a query parameter. */
+  password: string | null
 }
 
 const docs = new Map<string, OpenDoc>()
@@ -142,6 +164,9 @@ async function handleOpen(request: OpenRequest): Promise<void> {
       await previous.task.destroy().catch(() => undefined)
     }
 
+    // Started before the document so it overlaps: deciding whether to keep
+    // the bytes must not cost a round trip on top of opening.
+    const sidecarReady = probeSidecarExtract()
     const task = getDocument({
       // Take a private copy: the transferred buffer must stay readable for the
       // document's whole lifetime (pdf.js reads it lazily).
@@ -149,13 +174,19 @@ async function handleOpen(request: OpenRequest): Promise<void> {
       ...(request.password ? { password: request.password } : {}),
       ...PDF_DOCUMENT_PARAMS,
     })
-    const doc = await task.promise
+    const [doc, canFallBack] = await Promise.all([task.promise, sidecarReady])
     if (controller.signal.aborted) {
       await task.destroy().catch(() => undefined)
       post({ kind: 'cancelled', id: request.id, fileId: request.fileId })
       return
     }
-    docs.set(request.fileId, { task, doc, pageCount: doc.numPages })
+    docs.set(request.fileId, {
+      task,
+      doc,
+      pageCount: doc.numPages,
+      bytes: canFallBack ? request.bytes : null,
+      password: request.password ?? null,
+    })
     post({
       kind: 'opened',
       id: request.id,
@@ -232,6 +263,74 @@ async function handleProbe(request: { id: string; fileId: string }): Promise<voi
   }
 }
 
+/**
+ * A page pdf.js could not deliver, with everything a second attempt needs.
+ *
+ * `error` is the failure it raised; `null` means it returned normally but
+ * produced nothing from text it had read, in which case `fallback` is that
+ * empty result and is what stands if the second attempt declines too.
+ */
+interface FailedPage {
+  position: number
+  pageIndex: number
+  error: unknown
+  fallback: ExtractedPage | null
+}
+
+/**
+ * Second attempt at the pages pdf.js could not read, through the sidecar.
+ *
+ * Never throws for the sidecar's own sake: any way the sidecar can fail — no
+ * bytes kept, unreachable, an error status, a page it declines — leaves the
+ * browser's answer in place and the original failure to surface it. Only a
+ * genuine pdf.js failure with nothing to stand behind it is rethrown, so the
+ * Status Panel still reports `PDF_CORRUPTED` for a document neither engine
+ * can read.
+ */
+async function recoverWithSidecar(
+  open: OpenDoc,
+  retries: FailedPage[],
+  pages: Array<ExtractedPage | null>,
+  pageOptions: (pageIndex: number) => ExtractPageOptions,
+  signal: AbortSignal,
+): Promise<void> {
+  if (retries.length === 0 || !open.bytes) return
+  if (!(await probeSidecarExtract())) return
+
+  const recovered = await sidecarExtract(new Blob([open.bytes]), {
+    pageIndexes: retries.map((retry) => retry.pageIndex),
+    ...(open.password ? { password: open.password } : {}),
+    signal,
+  })
+  const byIndex = new Map((recovered ?? []).map((page) => [page.index, page]))
+
+  for (const retry of retries) {
+    const entry = byIndex.get(retry.pageIndex)
+    if (entry?.decline === null) {
+      // Only pdf.js can read the annotations, and it still has the page
+      // open — so links come from there while the text comes from here.
+      // When the page object itself is what failed, there are no `/Link`
+      // rectangles left to attach; the text still stands, which is the point.
+      let annotations: AnnotationLike[] = []
+      try {
+        const page = await open.doc.getPage(retry.pageIndex + 1)
+        annotations = (await page.getAnnotations().catch(() => [])) as AnnotationLike[]
+        releasePage(page, open.pageCount)
+      } catch (error) {
+        if (isAbortError(error)) throw error
+      }
+      pages[retry.position] = assemblePage(
+        retry.pageIndex,
+        { ...entry.source, annotations },
+        pageOptions(retry.pageIndex),
+      )
+      continue
+    }
+    if (retry.error !== null) throw retry.error
+    pages[retry.position] = retry.fallback
+  }
+}
+
 async function handleExtract(request: ExtractRequest): Promise<void> {
   const open = requireDoc(request.fileId)
   if (!open) {
@@ -246,23 +345,48 @@ async function handleExtract(request: ExtractRequest): Promise<void> {
   }
   const controller = new AbortController()
   aborts.set(request.id, controller)
+  const pageOptions = (pageIndex: number): ExtractPageOptions => ({
+    pageIndex,
+    ...(request.ctx ? { ctx: request.ctx } : {}),
+    ...(request.headerTexts ? { headerTexts: request.headerTexts } : {}),
+    ...(request.footerTexts ? { footerTexts: request.footerTexts } : {}),
+    ...(request.headingSizes ? { headingSizes: request.headingSizes } : {}),
+    ...(request.convertZawgyi !== undefined ? { convertZawgyi: request.convertZawgyi } : {}),
+  })
+
   try {
-    const pages: ExtractedPage[] = []
     const total = request.pageIndexes.length
+    const pages: Array<ExtractedPage | null> = new Array(total).fill(null)
+    const retries: FailedPage[] = []
+
     for (let position = 0; position < total; position += 1) {
       if (controller.signal.aborted) throw new DOMException('aborted', 'AbortError')
       const pageIndex = request.pageIndexes[position]
-      const page = await open.doc.getPage(pageIndex + 1)
-      const extracted = await extractPage(page, {
-        pageIndex,
-        ...(request.ctx ? { ctx: request.ctx } : {}),
-        ...(request.headerTexts ? { headerTexts: request.headerTexts } : {}),
-        ...(request.footerTexts ? { footerTexts: request.footerTexts } : {}),
-        ...(request.headingSizes ? { headingSizes: request.headingSizes } : {}),
-        ...(request.convertZawgyi !== undefined ? { convertZawgyi: request.convertZawgyi } : {}),
-      })
-      pages.push(extracted)
-      releasePage(page, open.pageCount)
+      let page: PDFPageProxy | null = null
+      let extracted: ExtractedPage | null = null
+      let failure: unknown = null
+      try {
+        // Both halves of a read are guarded: a page object pdf.js cannot
+        // even load is the same failure as one it cannot measure. One
+        // unreadable page must not take the window with it — the pages after
+        // it are unaffected by its contents.
+        page = await open.doc.getPage(pageIndex + 1)
+        extracted = await extractPage(page, pageOptions(pageIndex))
+      } catch (error) {
+        if (isAbortError(error)) throw error
+        failure = error
+      } finally {
+        if (page !== null) releasePage(page, open.pageCount)
+      }
+
+      if (failure !== null) {
+        retries.push({ position, pageIndex, error: failure, fallback: extracted })
+      } else if (extracted && needsSidecarFallback(extracted)) {
+        retries.push({ position, pageIndex, error: null, fallback: extracted })
+      } else {
+        pages[position] = extracted
+      }
+
       post({
         kind: 'progress',
         id: request.id,
@@ -272,7 +396,19 @@ async function handleExtract(request: ExtractRequest): Promise<void> {
         total,
       })
     }
-    post({ kind: 'extractResult', id: request.id, fileId: request.fileId, pages })
+
+    await recoverWithSidecar(open, retries, pages, pageOptions, controller.signal)
+
+    // Every position is filled by one engine or the other; anything else is a
+    // programming error, and dropping the page silently would look like a
+    // document that lost content on export.
+    const result = pages.map((page, position) => {
+      if (page === null) {
+        throw new Error(`page ${request.pageIndexes[position]} was not extracted`)
+      }
+      return page
+    })
+    post({ kind: 'extractResult', id: request.id, fileId: request.fileId, pages: result })
   } catch (error) {
     if (isAbortError(error)) {
       post({ kind: 'cancelled', id: request.id, fileId: request.fileId })

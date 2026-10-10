@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -19,6 +19,7 @@ import {
 import { PageContainer, PageHeader } from '@/components/layout/Page'
 import {
   IconArchive,
+  IconDownload,
   IconDuplicate,
   IconEdit,
   IconGrid,
@@ -26,8 +27,10 @@ import {
   IconPlus,
   IconSearch,
   IconTrash,
+  IconUpload,
 } from '@/components/layout/icons'
 import { projectRepo } from '@/db/repo-projects'
+import { downloadProjectFile, importProjectFile } from '@/db/projectFile'
 import type { ProjectRecord, ProjectStatus } from '@/db/types'
 import { logEvent } from '@/core/eventLogger'
 import { toast } from '@/stores/toastStore'
@@ -66,6 +69,7 @@ export function ProjectsPage() {
   const [pending, setPending] = useState<PendingAction>(null)
   const [renameValue, setRenameValue] = useState('')
   const [busy, setBusy] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const projects = useLiveQuery(
     () => projectRepo.list({ search, status, includeArchived: showArchived, sort }),
@@ -189,6 +193,81 @@ export function ProjectsPage() {
     setPending({ kind: 'rename', project })
   }
 
+  /**
+   * UI Phase 4/4 — a whole project as one file. Import is additive: the file
+   * is parsed and validated first, then written as a brand-new project, so it
+   * can never overwrite local work.
+   */
+  async function importFile(file: File): Promise<void> {
+    setBusy(true)
+    try {
+      const result = await importProjectFile(file)
+      logEvent({
+        state: 'PROJECT',
+        action: 'project.import',
+        projectId: result.project.id,
+        severity: 'success',
+        messageMy: `စီမံကိန်း သွင်းယူပြီး: ${result.project.name}`,
+        messageEn: `Project imported: ${result.project.name}`,
+        technicalDetail: `pages=${result.counts.pages} blocks=${result.counts.blocks} glossary=${result.counts.glossary} warnings=${result.warnings.join(',') || 'none'}`,
+      })
+      toast(
+        'success',
+        t('projects.imported', { name: result.project.name }),
+        t('projects.importSummary', {
+          pages: result.counts.pages,
+          blocks: result.counts.blocks,
+        }),
+      )
+      if (result.warnings.includes('source-pdf-not-included')) {
+        toast('warning', t('projects.pdfNotIncluded'), t('projects.pdfNotIncludedBody'))
+      }
+    } catch (error) {
+      const detail = error as Error & { reasonCode?: string }
+      logEvent({
+        state: 'PROJECT',
+        action: 'project.import',
+        severity: 'error',
+        messageMy: 'စီမံကိန်း သွင်းယူ၍ မရပါ',
+        messageEn: `Project import failed: ${file.name}`,
+        technicalDetail: `${detail.reasonCode ?? 'PROJECT_FILE_INVALID'}: ${detail.message}`,
+      })
+      toast('danger', t('projects.importFailed'), detail.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function downloadProject(project: ProjectRecord): Promise<void> {
+    setBusy(true)
+    try {
+      const filename = await downloadProjectFile(project.id)
+      logEvent({
+        state: 'PROJECT',
+        action: 'project.download',
+        projectId: project.id,
+        severity: 'success',
+        messageMy: `စီမံကိန်းဖိုင် ဒေါင်းလုဒ်လုပ်ပြီး: ${filename}`,
+        messageEn: `Project file downloaded: ${filename}`,
+        technicalDetail: filename,
+      })
+      toast('success', t('projects.exported'), filename)
+    } catch (error) {
+      logEvent({
+        state: 'PROJECT',
+        action: 'project.download',
+        projectId: project.id,
+        severity: 'error',
+        messageMy: 'စီမံကိန်းဖိုင် ဒေါင်းလုဒ်လုပ်၍ မရပါ',
+        messageEn: `Project download failed: ${project.name}`,
+        technicalDetail: (error as Error).message,
+      })
+      toast('danger', t('projects.exportFailed'), (error as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const columns: TableColumn<ProjectRecord>[] = [
     {
       key: 'name',
@@ -250,7 +329,12 @@ export function ProjectsPage() {
       header: t('common.actions'),
       align: 'right',
       render: (project) => (
-        <RowActions project={project} onRename={openRename} onPending={setPending} />
+        <RowActions
+          project={project}
+          onRename={openRename}
+          onPending={setPending}
+          onDownload={downloadProject}
+        />
       ),
     },
   ]
@@ -261,12 +345,37 @@ export function ProjectsPage() {
         title={t('projects.title')}
         subtitle={t('projects.subtitle')}
         actions={
-          <Link to="/projects/new">
-            <Button variant="primary" size="sm" iconLeft={<IconPlus className="h-4 w-4" />}>
-              {t('projects.create')}
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              iconLeft={<IconUpload className="h-4 w-4" />}
+              data-testid="project-import"
+              loading={busy}
+              onClick={() => fileRef.current?.click()}
+            >
+              {t('projects.import')}
             </Button>
-          </Link>
+            <Link to="/projects/new">
+              <Button variant="primary" size="sm" iconLeft={<IconPlus className="h-4 w-4" />}>
+                {t('projects.create')}
+              </Button>
+            </Link>
+          </div>
         }
+      />
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept="application/json,.json"
+        className="hidden"
+        data-testid="project-file"
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          event.target.value = ''
+          if (file) void importFile(file)
+        }}
       />
 
       <Card>
@@ -426,7 +535,12 @@ export function ProjectsPage() {
               </dl>
 
               <div className="mt-3 flex items-center justify-end gap-1 border-t border-border pt-2">
-                <RowActions project={project} onRename={openRename} onPending={setPending} />
+                <RowActions
+                  project={project}
+                  onRename={openRename}
+                  onPending={setPending}
+                  onDownload={downloadProject}
+                />
               </div>
             </Card>
           ))}
@@ -511,10 +625,12 @@ function RowActions({
   project,
   onRename,
   onPending,
+  onDownload,
 }: {
   project: ProjectRecord
   onRename: (project: ProjectRecord) => void
   onPending: (action: PendingAction) => void
+  onDownload: (project: ProjectRecord) => void
 }) {
   const { t } = useTranslation()
   return (
@@ -530,6 +646,13 @@ function RowActions({
         label={`${t('common.duplicate')}: ${project.name}`}
         icon={<IconDuplicate />}
         onClick={() => onPending({ kind: 'duplicate', project })}
+      />
+      <IconButton
+        size="sm"
+        label={`${t('projects.download')}: ${project.name}`}
+        icon={<IconDownload />}
+        data-testid="project-download"
+        onClick={() => onDownload(project)}
       />
       <IconButton
         size="sm"

@@ -902,6 +902,94 @@ try {
     check('Data tab reachable', false, 'tab not found')
   }
 
+  // 8b) UI Phase 4/4 — per-project file: download one project, import it back.
+  await goto('/projects')
+  const importReady = await waitFor(
+    `!!document.querySelector('[data-testid="project-import"]')`,
+    15000,
+  )
+  check('projects page offers a project import action', importReady)
+  const downloadCount = Number(
+    (await waitFor(
+      `document.querySelectorAll('[data-testid="project-download"]').length`,
+      15000,
+    )) || 0,
+  )
+  check('project rows offer a download action', downloadCount >= 1, `count=${downloadCount}`)
+
+  if (downloadCount >= 1) {
+    rmSync(DL_DIR, { recursive: true, force: true })
+    try {
+      await send('Browser.setDownloadBehavior', {
+        behavior: 'allow',
+        downloadPath: DL_DIR,
+        eventsEnabled: true,
+      })
+    } catch {
+      await send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: DL_DIR })
+    }
+    await evalJs(`document.querySelector('[data-testid="project-download"]').click()`)
+    let projectFile = null
+    for (let i = 0; i < 50 && !projectFile; i++) {
+      await sleep(200)
+      try {
+        const files = readdirSync(DL_DIR).filter((f) => !f.endsWith('.crdownload'))
+        if (files.length) projectFile = join(DL_DIR, files[0])
+      } catch {
+        /* dir not created yet */
+      }
+    }
+    check('project download saves a file', !!projectFile, projectFile ?? 'no file')
+
+    if (projectFile) {
+      const parsedProject = JSON.parse(readFileSync(projectFile, 'utf8'))
+      check(
+        'project file has expected shape',
+        parsedProject.format === 'aidt-project' &&
+          (parsedProject.counts?.pages ?? 0) >= 1 &&
+          (parsedProject.counts?.blocks ?? 0) >= 1,
+        `format=${parsedProject.format} pages=${parsedProject.counts?.pages} blocks=${parsedProject.counts?.blocks}`,
+      )
+
+      const dbBeforeProject = await readDb()
+      const projectsBefore = dbBeforeProject?.rows?.projects ?? 0
+
+      const projectDoc = await send('DOM.getDocument', { depth: -1 })
+      const { nodeId: projectInputNodeId } = await send('DOM.querySelector', {
+        nodeId: projectDoc.root.nodeId,
+        selector: 'input[data-testid="project-file"]',
+      })
+      if (projectInputNodeId) {
+        await send('DOM.setFileInputFiles', {
+          files: [resolve(projectFile)],
+          nodeId: projectInputNodeId,
+        })
+        let projectImported = false
+        for (let i = 0; i < 50 && !projectImported; i++) {
+          await sleep(200)
+          projectImported = await evalJs(`/Project imported/i.test(document.body.innerText)`)
+        }
+        check(
+          'project import shows success toast',
+          projectImported === true,
+          String(projectImported),
+        )
+        const dbAfterProject = await readDb()
+        check(
+          'project import adds a project',
+          (dbAfterProject?.rows?.projects ?? 0) >= projectsBefore + 1,
+          `before=${projectsBefore} after=${dbAfterProject?.rows?.projects}`,
+        )
+      } else {
+        check(
+          'project file input present on Projects page',
+          false,
+          'querySelector returned no node',
+        )
+      }
+    }
+  }
+
   // 9) Phase 4 — editor, find & replace, export, knowledge ------------------
   await goto(currentWorkspacePath)
   const editorMounted = await waitFor(

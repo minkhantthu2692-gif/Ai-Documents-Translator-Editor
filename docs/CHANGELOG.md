@@ -304,6 +304,25 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   (rows together, one header fewer). `fixtures/table-continued.pdf` (new) is a page ending in
   a three-column table and the next opening with its orphaned row above three prose lines that
   must stay prose.
+- **UI Phase 4/4 — per-project backup file** (`src/db/projectFile.ts`; one button per project
+  on the Projects page). Where the whole-DB backup moves a device, an `aidt-project` JSON
+  file moves **one project** between devices: the project row, its pages, its blocks
+  (translated text, styles, geometry, table grids, figures, links and annotation blocks all
+  intact) and its project-scoped glossary terms. **Import is always additive** — every row is
+  re-identified (fresh ids, page and block wiring remapped onto the new project, rows owned
+  by the importing device), so a file can never overwrite local work and importing the same
+  file twice simply gives two copies. An imported project always lands in the active list
+  (archive state is not carried — a restored project you cannot find is one you think you
+  lost), keeps its translated progress verbatim, and warns when the referenced PDF was not
+  included (JSON carries no blobs; the user still has the file). Revisions, jobs, events, the
+  outbox, the translation cache and device-global glossary terms stay behind — device-local,
+  or already carried by the block rows. Untrusted files are validated whole, before any
+  write: format marker, schema version, string ids, every row scoped to the file's own
+  project, every block's page present in the file — a half-wired or foreign file is rejected
+  with the database untouched. UI: **Import project** beside **New project**, a **Download**
+  icon per project row/card, success/failure toasts plus bilingual events, and a plain
+  warning when the PDF is not part of the file. `src/db/projectFile.test.ts` (new, 7 tests)
+  covers scope, remap, additivity, the active-list guarantee and every rejection path.
 
 ### Security
 

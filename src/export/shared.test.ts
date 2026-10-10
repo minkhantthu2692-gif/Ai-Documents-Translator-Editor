@@ -20,6 +20,7 @@ import {
   round,
   slugify,
   tableGrid,
+  tableSpansFor,
 } from './shared'
 import type { ExportBlock, ExportDocument, ExportPage } from './types'
 
@@ -46,6 +47,7 @@ function block(overrides: Partial<ExportBlock> = {}): ExportBlock {
     links: [],
     figures: [],
     tableCells: null,
+    tableSpans: null,
     sourceText: 'Hello',
     translatedText: 'မင်္ဂလာပါ',
     characterCount: 10,
@@ -382,5 +384,67 @@ describe('tableGrid', () => {
 
   it('is null for a single column, which is not a table however it is split', () => {
     expect(tableGrid('one\ntwo\nthree')).toBeNull()
+  })
+})
+
+describe('tableSpansFor', () => {
+  const GRID = [
+    ['Region', 'First half 2026', ''],
+    ['North', '120', '150'],
+  ]
+  const SPANS = [
+    [1, 2, 0],
+    [1, 1, 1],
+  ]
+
+  it('hands back the spans for a grid of the shape they were measured on', () => {
+    expect(tableSpansFor(block({ tableSpans: SPANS }), GRID)).toEqual(SPANS)
+  })
+
+  it('is null when the table carries no spans, which is most of them', () => {
+    expect(tableSpansFor(block(), GRID)).toBeNull()
+  })
+
+  it('is null when the printed grid is no longer that shape', () => {
+    // A model is free to answer with a different number of columns or rows. A
+    // `colspan` measured on the source would push this row's cells into the
+    // next row's columns, so the merge is dropped and the table is simply
+    // drawn flat — still a table, and never one that is out of step.
+    expect(tableSpansFor(block({ tableSpans: SPANS }), [['Region', 'First half 2026']])).toBeNull()
+    expect(
+      tableSpansFor(block({ tableSpans: SPANS }), [...GRID, ['South', '90', '110']]),
+    ).toBeNull()
+  })
+
+  it('is null for rows that would not come out the same width once drawn', () => {
+    // The shapes match and the answer is still unusable: row zero draws two
+    // cells against row one's three, so the table has no columns in common.
+    expect(
+      tableSpansFor(
+        block({
+          tableSpans: [
+            [1, 2, 0],
+            [2, 1, 1],
+          ],
+        }),
+        GRID,
+      ),
+    ).toBeNull()
+  })
+
+  it('is null for a covered cell with nothing to its left', () => {
+    // Extraction cannot write this — a span is always recorded by the cell
+    // that starts it — so it means the data is not what it says it is.
+    expect(
+      tableSpansFor(
+        block({
+          tableSpans: [
+            [0, 2, 1],
+            [1, 1, 1],
+          ],
+        }),
+        GRID,
+      ),
+    ).toBeNull()
   })
 })

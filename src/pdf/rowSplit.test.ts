@@ -223,6 +223,9 @@ describe('tableForLines', () => {
         ['Name', 'Value'],
         ['Alpha', '12'],
       ],
+      // No runs, no geometry, and therefore nothing that could say a cell is
+      // wider than its column: the exporters are told the table is flat.
+      spans: null,
     })
   })
 
@@ -232,6 +235,132 @@ describe('tableForLines', () => {
 
   it('rejects text-form rows that disagree on how many columns there are', () => {
     expect(tableForLines([plain('Name    Value'), plain('Alpha   12   kg', 84)])).toBeNull()
+  })
+
+  it('reports no spans for a table where every cell is one column wide', () => {
+    expect(
+      tableForLines([
+        row(100, [
+          ['Region', 72, 35],
+          ['Q1', 260, 15],
+        ]),
+        row(84, [
+          ['North', 72, 30],
+          ['120', 260, 18],
+        ]),
+      ])?.spans,
+    ).toBeNull()
+  })
+
+  it('reads a cell drawn across a column as one merged cell', () => {
+    // The header's second cell begins inside column two and runs past column
+    // three's left edge — one show-text run wider than the column it starts
+    // in, with no other run on the row. That is all a merged cell ever looks
+    // like from here.
+    //
+    // Its row also holds *one* non-empty cell out of three, so this only gets
+    // past the fill rule because the merge counts for the two columns it
+    // covers: a header written across two of three columns is a row of the
+    // table, not the line of prose beside it.
+    const lines = [
+      row(100, [
+        ['Consolidated ', 72, 60],
+        ['results', 200, 80],
+      ]),
+      row(84, [
+        ['North', 72, 30],
+        ['120', 260, 18],
+        ['150', 430, 18],
+      ]),
+      row(68, [
+        ['South', 72, 32],
+        ['90', 260, 12],
+        ['110', 430, 18],
+      ]),
+    ]
+    expect(tableForLines(lines)).toEqual({
+      rows: [
+        ['Consolidated results', '', ''],
+        ['North', '120', '150'],
+        ['South', '90', '110'],
+      ],
+      // The merged cell keeps its text in the column it *starts* in and the
+      // column it covers is left at zero; the row stays three wide, because
+      // that is the rectangle the text form was built from.
+      spans: [
+        [2, 0, 1],
+        [1, 1, 1],
+        [1, 1, 1],
+      ],
+    })
+  })
+
+  it('draws a row flat when its merge would sit on a cell it still draws', () => {
+    const lines = [
+      // This run claims column two — its advance reaches past the boundary —
+      // and then column two turns up again on the same baseline holding `90`.
+      // Either it is overlapping text or it is a trailing space in the width;
+      // both are answered the same way: this row is read as three cells, which
+      // is what it was before spans existed. The *table* survives, which is
+      // what refusing the row wholesale would have cost.
+      row(100, [
+        ['Consolidated results', 72, 250],
+        ['90', 260, 12],
+        ['110', 430, 18],
+      ]),
+      row(84, [
+        ['North', 72, 30],
+        ['120', 260, 18],
+        ['150', 430, 18],
+      ]),
+      row(68, [
+        ['South', 72, 32],
+        ['90', 260, 12],
+        ['110', 430, 18],
+      ]),
+    ]
+    expect(tableForLines(lines)).toEqual({
+      rows: [
+        ['Consolidated results', '90', '110'],
+        ['North', '120', '150'],
+        ['South', '90', '110'],
+      ],
+      spans: null,
+    })
+  })
+
+  it('refuses a block whose rows are mostly merged', () => {
+    // Three rows out of five carry a merge, and each one is individually
+    // sound — the clusters still agree on both columns, every row is full
+    // enough. What makes this not a table is that *most* of it is merged: the
+    // shape of prose beside a table, whose rows are its sentences running
+    // across the reader's columns. Such a block keeps the reading it had
+    // before spans existed.
+    const lines = [
+      row(100, [
+        ['Region', 72, 35],
+        ['Consolidated results', 260, 180],
+      ]),
+      row(84, [
+        ['Quarter', 72, 35],
+        ['Regional breakdown', 260, 180],
+      ]),
+      row(68, [
+        ['Consolidated results', 72, 250],
+        ['120', 430, 18],
+      ]),
+      row(52, [
+        ['South', 72, 32],
+        ['90', 260, 12],
+        ['110', 430, 18],
+      ]),
+      row(36, [
+        ['East', 72, 30],
+        ['75', 260, 12],
+        ['80', 430, 18],
+      ]),
+    ]
+    expect(tableForLines(lines)).toBeNull()
   })
 })
 

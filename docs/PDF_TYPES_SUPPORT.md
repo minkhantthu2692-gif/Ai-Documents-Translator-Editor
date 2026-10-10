@@ -70,7 +70,7 @@ same kinds, text, `tableCells`, link anchors and boxes within 3 pt.
 | 3  | Mixed PDF (text + scanned pages/images) | 🔶 | Per-page classes + method selection ✅ (text / OCR / hybrid): hybrid keeps the text layer authoritative, OCRs the rest and drops blocks that overlap existing text (unit-tested); reading order across merged column lines ✅ |
 | 4  | Multi-Column PDF (2/3-col, newspaper, reading order) | ✅     | `complex` classification for ≥3 columns ✅ (item-level gutter detection); reading order ✅ — rows fused across a gutter are cut back into one line per column, columns are read left-to-right (2–4), and a title spanning the fold opens its own zone ahead of both columns |
 | 5  | PDF With Images (captions, diagrams, charts) | 🔶→⏳ | Images kept in the page render/background ✅; **image-anchored extraction ✅** — every painted image's rectangle is traced from the operator list, filtered against page furniture and anchored to the block it illustrates as `PageBlock.figures` (see below); **cropped and embedded in DOCX / EPUB / Markdown ✅** (phase 9b, see "How a figure reaches DOCX, EPUB and Markdown") |
-| 6  | PDF With Tables (simple/complex, merged cells, multi-page) | 🔶→⏳ | **Real table cells ✅** — a run of rows whose columns align becomes one `kind: 'table'` block carrying `tableCells` (rows × columns) as data, and HTML/EPUB draw a real `<table>`, DOCX a real `w:tbl`, Markdown a pipe table, JSON the grid (see below); table rows are explicitly exempt from the column split so merging cells stay one row; **merged cells and multi-page tables ❌**, and a gutter narrower than one em is not read as a column |
+| 6  | PDF With Tables (simple/complex, merged cells, multi-page) | 🔶→⏳ | **Real table cells ✅** — a run of rows whose columns align becomes one `kind: 'table'` block carrying `tableCells` (rows × columns) as data, and HTML/EPUB draw a real `<table>`, DOCX a real `w:tbl`, Markdown a pipe table, JSON the grid (see below); table rows are explicitly exempt from the column split so merging cells stay one row; **Merged cells ✅** — a cell drawn across a column boundary becomes `tableSpans` beside the grid, and HTML/EPUB emit `colspan`, DOCX `w:gridSpan` (see below); **multi-page tables ❌**, and a gutter narrower than one em is not read as a column |
 | 7  | Academic / Research PDF (footnotes, refs, citations, equations) | 🔶→⏳ | 2-column papers classified `text` ✅ and read in column order ✅; footnote regions ✅ (see below); heading hierarchy ✅ — every heading carries a 1–6 level from a document-wide ladder (see below); equations ❌ (see #23) |
 | 8  | Business / Report PDF (reports, invoices, financial) | 🔶 | Paragraph/table extraction ✅; invoice form layout understanding ❌ |
 | 9  | Forms / Structured PDF (fillable, checkboxes, signatures) | ✅ | Field detection/counted in probe ✅, password-style unlock flow ✅, **field labels translated ✅** (a widget's `/TU` and a dropdown's `/Opt` captions become `kind: 'form-field'` blocks — see below); form filling ❌ (out of scope) |
@@ -98,7 +98,7 @@ same kinds, text, `tableCells`, link anchors and boxes within 3 pt.
 | (a) Classification | `complex` class, complexity scoring, item-level column detection, wizard metadata | 4, 12, 22 classification ✅ |
 | (b) Extraction methods | Browser Tesseract OCR auto-runs per window (status lifecycle, confidence, cached recognition), hybrid merge with geometric dedup, run-OCR setting persisted per project, Python sidecar server (protocol v1, 20 tests) | 2, 3 extraction ✅ |
 | (b2) Sidecar wiring | `src/sidecar/sidecarClient.ts`: cached `GET /health` probe, `POST /ocr` with page/language/password, per-line confidence added to the server response, lazy render so a sidecar page never rasterises in the browser, automatic fall-back to browser Tesseract on any failure (22 client + 5 pipeline + 1 Python test) | 2 extraction ✅ with a native-OCR fast path |
-| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. `fixtures/complex.pdf` (3 columns + rotated watermark) now reads col 1 → col 2 → col 3 → watermark end-to-end. **Footnote regions ✅** — `src/pdf/footnotes.ts` marks them before any merging happens. **Heading hierarchy ✅** — `src/pdf/headings.ts` builds one document-wide ladder of heading font sizes during the probe and every page levels its headings against it; exporters render `h1`–`h6`, `HeadingLevel.HEADING_1–6` and ATX hashes. **Links ✅** — `src/pdf/links.ts` turns every external `/Link` rectangle into the words it covers and every exporter renders them as a real anchor (see below). **Code blocks ✅** — `src/pdf/codeBlocks.ts` calls a run of lines code when two independent readings agree: a monospaced face *and* statement punctuation; a monospaced face *and* nesting (which is what catches YAML and JSON, whose lines carry no punctuation to score); or punctuation alone across several lines with a brace somewhere. `structure.ts` gives it `kind: 'code'`, stamps `skipRule: 'code'` so the model never rewrites a program, and hands the indentation back — see below. **Table cells ✅** — `src/pdf/rowSplit.ts` reads a run of rows whose columns align as one `kind: 'table'` block with `tableCells` as data, and every format draws a real grid rather than tab-separated text — see below. **Figures ✅** — `src/pdf/imageOps.ts` rebuilds every painted image's rectangle from the operator list and `src/pdf/figures.ts` decides which of them are figures and which paragraph owns each one, recorded as `PageBlock.figures` — see below. **Form labels ✅** — `src/pdf/formFields.ts` reads the text a widget carries that the page never prints (its `/TU` tooltip and a choice field's `/Opt` captions) and makes one `kind: 'form-field'` block per described widget, hanging directly under its own box, so it reaches the model, the editor and every exporter like any other block — see below. **Annotation notes ✅** — `src/pdf/annotations.ts` reads the text an annotation carries that the page never prints (a sticky note's `/Contents`, the reason a passage was highlighted, a `/FreeText` callout's body, a stamp's legend) and makes one `kind: 'annotation'` block per note, filed directly under the passage it marks — see below. Remaining in this phase: nothing | 4 ✅, reading order for 3 / 7 / 12 ✅, footnotes for 7 / 11 / 14 ✅, heading hierarchy for 7 ✅, links for 19 / 25 ✅, code blocks for 13 / 24 ✅, table cells for 6 ✅, figures for 5 / 12 ✅, form labels for 9 ✅, annotation notes for 19 ✅ |
+| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. `fixtures/complex.pdf` (3 columns + rotated watermark) now reads col 1 → col 2 → col 3 → watermark end-to-end. **Footnote regions ✅** — `src/pdf/footnotes.ts` marks them before any merging happens. **Heading hierarchy ✅** — `src/pdf/headings.ts` builds one document-wide ladder of heading font sizes during the probe and every page levels its headings against it; exporters render `h1`–`h6`, `HeadingLevel.HEADING_1–6` and ATX hashes. **Links ✅** — `src/pdf/links.ts` turns every external `/Link` rectangle into the words it covers and every exporter renders them as a real anchor (see below). **Code blocks ✅** — `src/pdf/codeBlocks.ts` calls a run of lines code when two independent readings agree: a monospaced face *and* statement punctuation; a monospaced face *and* nesting (which is what catches YAML and JSON, whose lines carry no punctuation to score); or punctuation alone across several lines with a brace somewhere. `structure.ts` gives it `kind: 'code'`, stamps `skipRule: 'code'` so the model never rewrites a program, and hands the indentation back — see below. **Table cells ✅** — `src/pdf/rowSplit.ts` reads a run of rows whose columns align as one `kind: 'table'` block with `tableCells` as data, and every format draws a real grid rather than tab-separated text — see below. **Merged cells ✅** — the same file reads a cell drawn across a column boundary as a span (`tableSpans`), and HTML/EPUB emit `colspan` and DOCX `w:gridSpan` for it, on a printed grid of the shape the span was measured on — see below. **Figures ✅** — `src/pdf/imageOps.ts` rebuilds every painted image's rectangle from the operator list and `src/pdf/figures.ts` decides which of them are figures and which paragraph owns each one, recorded as `PageBlock.figures` — see below. **Form labels ✅** — `src/pdf/formFields.ts` reads the text a widget carries that the page never prints (its `/TU` tooltip and a choice field's `/Opt` captions) and makes one `kind: 'form-field'` block per described widget, hanging directly under its own box, so it reaches the model, the editor and every exporter like any other block — see below. **Annotation notes ✅** — `src/pdf/annotations.ts` reads the text an annotation carries that the page never prints (a sticky note's `/Contents`, the reason a passage was highlighted, a `/FreeText` callout's body, a stamp's legend) and makes one `kind: 'annotation'` block per note, filed directly under the passage it marks — see below. Remaining in this phase: nothing | 4 ✅, reading order for 3 / 7 / 12 ✅, footnotes for 7 / 11 / 14 ✅, heading hierarchy for 7 ✅, links for 19 / 25 ✅, code blocks for 13 / 24 ✅, table cells for 6 ✅, figures for 5 / 12 ✅, form labels for 9 ✅, annotation notes for 19 ✅ |
 | (d) Layout auto-adjust | **Translation-time auto-fit ✅** — `src/editor/layout.ts` re-measures a block the moment a translation lands and takes the largest size in `[6pt, originalFontSize]` whose wrapped text still fits the original bbox; never a size the reader pinned, and never below the floor — an unfittable block keeps the document's own size and is flagged rather than shrunk into illegibility. Runs on the bulk queue, on inline re-apply and on accept-suggestion, never on a person typing; `layout.autoFit` in Settings → General turns it off. **Reflow ✅** — `src/export/reflow.ts` pushes the blocks under one that outgrew its box down by exactly the growth, within their own column, stopping at the page edge; HTML emits `min-height` where it emitted `height`, so a box is a floor the translation may grow into | 1, 8, 10, 12 ✅ (translation-time layout + the absolute HTML/print export) |
 
 ### Why reading order needed two detectors
@@ -159,6 +159,64 @@ own positioned show-text operator — the shape a document processor writes —
 one row leaving a middle cell empty, and a paragraph on either side that has
 to stay a paragraph. Neither page can be reached by a test that constructs a
 line by hand.
+
+### Why a merged cell rides beside the grid, not inside it
+
+PDF content streams have no "this cell spans two columns" operator. A document
+processor draws the merge as one show-text run that starts inside the column it
+belongs to and runs past the next one's left edge, and geometry is the only
+witness — so `spansOf` reads exactly that: a run crossing a column boundary
+claims the boundary for the cell that starts it, and the covered column is left
+holding nothing. `fixtures/table-spans.pdf` is the fixture, and it is honest
+about what the file does *not* say: no operator anywhere records the merge.
+
+The encoding sits **beside** the cells rather than in them. A merged cell holds
+the number of columns it covers, the cells it covers hold `0`, an ordinary cell
+holds `1`, and the merged cell's text stays in the column it was drawn in. The
+row stays exactly as wide as it was, which is not cosmetic: `text` is built from
+that same rectangle — the model reads ` \t ` between cells and the translation
+cache keys on the exact string — so a table that gains a merge is byte-identical
+to the table it was before, for the model and for the cache alike.
+
+One refusal is per **row**, and costs the table nothing: the row is drawn flat —
+every cell its own column, which is the reading it had before spans existed —
+while the rows beside it keep their merges. It fires when a merge would cover a
+column another run **on the same row** already sits in, or when two merges claim
+one column: either way that is two texts in one cell, and run widths alone
+cannot see the first of them, because a run whose *advance* reaches past a
+boundary while the cell beginning exactly there is drawn beside it is just as
+likely to be a trailing space in the width or a highlight laid over the words.
+
+Two refusals are per **table**, because each says the whole block is not one:
+
+- more than half the rows merged. Rows that mostly cross their own boundaries
+  are prose whose sentences happen to span the reader's columns, which is the
+  one shape this detector exists to refuse;
+- the fill rule, which was already there: every row has to be at least half
+  filled, and now counts a merge for the columns it covers. The weighting is
+  what keeps that rule usable — a header written across two of three columns
+  holds one cell out of three, and on an unweighted count it would be read as
+  the line of prose beside the table.
+
+There are no vertical merges. `LineRun` is a rectangle on a single baseline, so
+nothing here can tell a cell two rows tall from two cells of the same width, and
+a guess in that direction would drop a row out of the table.
+
+`tableSpans` travels beside `tableCells` (page block → block row → export block)
+and a renderer applies it only to a printed grid of the shape it was measured
+on, through `tableSpansFor`. The grid a renderer draws comes from
+`printedText`, which the model wrote, and it may have a different number of
+columns than it was given: HTML and EPUB emit `colspan`, DOCX `w:gridSpan`, JSON
+the spans themselves, while Markdown — which has no merge in its grammar — prints
+the covered cell empty so the row keeps its columns. When the printed shape has
+moved, the table is drawn flat: a table without its merges is still a table.
+
+Reading order is the gate in front of all of this. It cuts a line at a column
+gutter whenever a run is wider than eight ems, because that is how it tells a
+cell from a span of prose, so a merged header *past* eight ems is cut in two
+before the table detector ever sees it and the table falls back to a paragraph.
+Short merges (`Total`, `First half 2026`) reach the detector; long ones do not,
+and that is a limit of the guard rather than of the spans.
 
 ### Why a snippet's indentation has to be measured back
 

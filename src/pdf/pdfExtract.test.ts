@@ -438,6 +438,9 @@ describe('table.pdf', () => {
       'South \t 90 \t 110',
       'East \t 75 \t 80',
     ])
+    // Nothing on this table straddles a column, so the exporters are told
+    // nothing rather than handed a row of ones.
+    expect(table?.tableSpans).toBeNull()
   })
 
   it('keeps the prose either side of a table out of it', async () => {
@@ -463,6 +466,46 @@ describe('table.pdf', () => {
       ['Gadget', '', 'clearance'],
       ['Gizmo', '80', 'backorder'],
     ])
+  })
+})
+
+describe('table-spans.pdf', () => {
+  it('reads a header drawn across two columns as one merged cell', async () => {
+    const doc = await open('table-spans.pdf')
+    const { blocks } = await extractAt(doc, 0)
+
+    const table = blocks.find((block) => block.kind === 'table')
+    expect(table?.tableCells).toEqual([
+      ['Region', 'First half 2026', ''],
+      ['North', '120', '150'],
+      ['South', '90', '110'],
+      ['East', '75', '80'],
+    ])
+    // The merge is read off the *source* geometry and kept beside the cells
+    // rather than inside them: the covered column holds no text of its own, the
+    // row stays three wide, and `text` is exactly what it was before spans
+    // existed — so the translation cache and the model see no change at all.
+    expect(table?.tableSpans).toEqual([
+      [1, 2, 0],
+      [1, 1, 1],
+      [1, 1, 1],
+      [1, 1, 1],
+    ])
+    expect(table?.text.split('\n')).toEqual([
+      'Region \t First half 2026 \t ',
+      'North \t 120 \t 150',
+      'South \t 90 \t 110',
+      'East \t 75 \t 80',
+    ])
+  })
+
+  it('keeps the prose either side of the table out of it', async () => {
+    const doc = await open('table-spans.pdf')
+    const { blocks } = await extractAt(doc, 0)
+
+    const prose = blocks.filter((block) => block.kind !== 'table').map((block) => block.text)
+    expect(prose.join('\n')).toContain('drawn across both figure columns')
+    expect(prose.join('\n')).toContain('spans both figure columns')
   })
 })
 

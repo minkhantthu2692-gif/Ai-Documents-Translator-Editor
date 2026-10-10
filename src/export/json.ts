@@ -53,6 +53,7 @@ function projectBlock(block: ExportBlock): BlockWithoutGeometry {
     headingLevel: block.headingLevel,
     links: block.links,
     tableCells: block.tableCells,
+    tableSpans: block.tableSpans,
     sourceText: block.sourceText,
     translatedText: block.translatedText,
     characterCount: block.characterCount,

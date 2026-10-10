@@ -50,6 +50,7 @@ function block(overrides: Partial<ExportBlock>): ExportBlock {
     links: [],
     figures: [],
     tableCells: null,
+    tableSpans: null,
     sourceText: 'The pipeline runs in four stages.',
     translatedText: 'စက်ကိရိယာသည် အဆင့်လေးဆင့်ဖြင့် လည်ပတ်သည်။',
     characterCount: 0,

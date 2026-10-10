@@ -288,6 +288,7 @@ function fieldBlock(
     placeholders: tokenized.placeholders,
     listMarker: null,
     tableCells: null,
+    tableSpans: null,
     headingLevel: null,
     links: [],
     figures: [],

@@ -34,6 +34,7 @@ import {
   pt,
   round,
   tableGrid,
+  tableSpansFor,
 } from './shared'
 import type { ExportBlock, ExportDocument, ExportOptions } from './types'
 
@@ -178,11 +179,22 @@ function printedLine(block: ExportBlock, options: HtmlOptions): string {
 function tableHtml(text: string, block: ExportBlock): string {
   const grid = tableGrid(text)
   if (!grid) return ''
+  // A cell that spans columns is drawn once with `colspan`; the cells it
+  // covers are not drawn at all. Applying both would push the row a column
+  // wide for every merge. `tableSpansFor` answers `null` when the printed
+  // grid is no longer the shape the spans were measured on — a model that
+  // answered with a different number of columns — and every cell then stands
+  // on its own, which is still a table, just an unmerged one.
+  const spans = tableSpansFor(block, grid)
   const rows = grid
-    .map(
-      (cells) =>
-        `<tr>${cells.map((cell) => `<td>${htmlText(cell, block.links)}</td>`).join('')}</tr>`,
-    )
+    .map((cells, row) => {
+      const drawn = cells.map((cell, column) => {
+        const span = spans ? spans[row][column] : 1
+        if (span === 0) return ''
+        return `<td${span > 1 ? ` colspan="${span}"` : ''}>${htmlText(cell, block.links)}</td>`
+      })
+      return `<tr>${drawn.join('')}</tr>`
+    })
     .join('')
   return `<table><tbody>${rows}</tbody></table>`
 }

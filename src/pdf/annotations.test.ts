@@ -31,6 +31,7 @@ function block(order: number, text: string, bbox: BBox, extra: Partial<PageBlock
     placeholders: [],
     listMarker: null,
     tableCells: null,
+    tableSpans: null,
     headingLevel: null,
     links: [],
     figures: [],

@@ -26,6 +26,7 @@ function block(overrides: Partial<ExportBlock>): ExportBlock {
     links: [],
     figures: [],
     tableCells: null,
+    tableSpans: null,
     sourceText: '',
     translatedText: '',
     characterCount: 0,
@@ -248,6 +249,43 @@ describe('buildJsonDocument', () => {
     for (const includeGeometry of [true, false]) {
       const parsed = parseJsonDocument(buildJsonDocument(doc, { pretty: false, includeGeometry }))
       expect(parsed.pages[0].blocks[0].tableCells).toEqual(tableCells)
+    }
+  })
+
+  it('carries the column spans beside the grid, and back unchanged', () => {
+    const tableCells = [
+      ['Region', 'First half 2026', ''],
+      ['North', '120', '150'],
+    ]
+    const tableSpans = [
+      [1, 2, 0],
+      [1, 1, 1],
+    ]
+    const doc: ExportDocument = {
+      ...makeDoc(),
+      pages: [
+        {
+          index: 0,
+          width: 612,
+          height: 792,
+          rotation: 0,
+          contentClass: 'text',
+          blocks: [
+            block({
+              id: 'tbl',
+              kind: 'table',
+              tableCells,
+              tableSpans,
+              sourceText: 'Region \t First half 2026 \t \nNorth \t 120 \t 150',
+            }),
+          ],
+        },
+      ],
+    }
+
+    for (const includeGeometry of [true, false]) {
+      const parsed = parseJsonDocument(buildJsonDocument(doc, { pretty: false, includeGeometry }))
+      expect(parsed.pages[0].blocks[0].tableSpans).toEqual(tableSpans)
     }
   })
 

@@ -32,6 +32,7 @@ function block(overrides: Partial<ExportBlock>): ExportBlock {
     links: [],
     figures: [],
     tableCells: null,
+    tableSpans: null,
     sourceText: '',
     translatedText: '',
     characterCount: 0,
@@ -551,6 +552,29 @@ describe('tables', () => {
       opts,
     )
     expect(out).toContain('| a\\|b | c |')
+  })
+
+  it('keeps every column of a merged row, because Markdown cannot merge them', () => {
+    // The grammar has no colspan: the covered cell still has to be *printed*,
+    // empty, or the row would come out one column short of its neighbours and
+    // every cell after it would land under the wrong heading.
+    const out = buildMarkdown(
+      tableDoc({
+        sourceText: 'Name \t First half 2026 \t \nAlpha \t \t 12',
+        translatedText: 'Name \t First half 2026 \t \nAlpha \t \t 12',
+        tableCells: [
+          ['Name', 'First half 2026', ''],
+          ['Alpha', '', '12'],
+        ],
+        tableSpans: [
+          [1, 2, 0],
+          [1, 1, 1],
+        ],
+      }),
+      opts,
+    )
+    expect(out).toContain('| Name | First half 2026 |  |')
+    expect(out).toContain('| Alpha |  | 12 |')
   })
 
   it('quotes the source above the translation as a table too', () => {

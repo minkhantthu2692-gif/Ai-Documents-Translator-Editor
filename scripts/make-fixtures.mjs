@@ -16,6 +16,9 @@
  *   fixtures/table.pdf       2 pages, two tables whose cells are each their
  *                            own positioned show-text operator — the shape a
  *                            real document uses — one row leaving a cell empty
+ *   fixtures/table-spans.pdf 1 page, one table whose header cell is drawn
+ *                            *across* two columns: no operator says so, only
+ *                            the run's width does
  *   fixtures/figure.pdf      2 pages: a captioned figure, an uncaptioned one,
  *                            a texture under type, a full-bleed wash, an icon
  *                            and a letterhead logo — five images, one of which
@@ -367,6 +370,65 @@ function buildTablePdf() {
     Title: 'Tables',
     Author: 'Finance Department',
     Subject: 'Two tables drawn cell by cell',
+    Creator: 'make-fixtures.mjs',
+    Producer: 'make-fixtures.mjs',
+    CreationDate: "D:20260115093000+06'30'",
+    ModDate: "D:20260320174500+06'30'",
+  })
+  return writer.render()
+}
+
+/**
+ * A one-page fixture whose header cell is drawn *across* two columns.
+ *
+ * PDF content streams have no "this cell spans two columns" operator: a
+ * document processor draws the merge as one show-text run that starts inside
+ * the second column and runs past the third's left edge. Geometry is the only
+ * witness, and that is precisely what `spansOf` reads.
+ *
+ * The run is kept short — under eight ems — for a reason that is not about
+ * this fixture at all. The reading-order pass cuts a line whose runs are spans
+ * of prose at the column gutter, and it tells the two apart by run width: a
+ * cell-sized run is a cell, a wide one is a clause. So a merged header only
+ * reaches the table detector when it is cell-sized itself, which is the common
+ * case (`First half 2026`, `Total`, `All regions`) but not the universal one.
+ *
+ * The three data rows are the control: same page, same columns, no merge —
+ * their spans must all come back as one.
+ */
+function buildTableSpansPdf() {
+  const writer = new PdfWriter()
+  const pagesNum = addPagesObject(writer)
+  const regular = writer.add(FONT_REGULAR)
+  const bold = writer.add(FONT_BOLD)
+  const resources = `/Font << /F1 ${regular} 0 R /F2 ${bold} 0 R >>`
+
+  const content = [
+    cell(72, 740, 14, 'F2', 'Half-year revenue'),
+    cell(72, 700, 11, 'F1', 'The header below is drawn across both figure columns.'),
+    cell(72, 684, 11, 'F1', 'No second operator draws the column it covers.'),
+    cell(72, 644, 11, 'F1', 'Region'),
+    cell(260, 644, 11, 'F1', 'First half 2026'),
+    cell(72, 628, 11, 'F1', 'North'),
+    cell(260, 628, 11, 'F1', '120'),
+    cell(300, 628, 11, 'F1', '150'),
+    cell(72, 612, 11, 'F1', 'South'),
+    cell(260, 612, 11, 'F1', '90'),
+    cell(300, 612, 11, 'F1', '110'),
+    cell(72, 596, 11, 'F1', 'East'),
+    cell(260, 596, 11, 'F1', '75'),
+    cell(300, 596, 11, 'F1', '80'),
+    cell(72, 548, 11, 'F1', 'The header cell spans both figure columns.'),
+  ].join('')
+
+  const kids = [
+    addPage(writer, pagesNum, resources, writer.addStream('', Buffer.from(content, 'latin1'))),
+  ]
+  finalizePages(writer, pagesNum, kids)
+  writer.setInfo({
+    Title: 'Table with a merged cell',
+    Author: 'Finance Department',
+    Subject: 'A header cell drawn across two columns',
     Creator: 'make-fixtures.mjs',
     Producer: 'make-fixtures.mjs',
     CreationDate: "D:20260115093000+06'30'",
@@ -1148,6 +1210,7 @@ const outputs = [
   ['complex.pdf', buildComplexPdf()],
   ['links.pdf', buildLinksPdf()],
   ['table.pdf', buildTablePdf()],
+  ['table-spans.pdf', buildTableSpansPdf()],
   ['figure.pdf', buildFigurePdf()],
   ['form.pdf', buildFormPdf()],
   ['annotations.pdf', buildAnnotationsPdf()],

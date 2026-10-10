@@ -42,6 +42,7 @@ import {
   listPrefix,
   pageBlocks,
   tableGrid,
+  tableSpansFor,
   textOf,
 } from './shared'
 import type { ExportBlock, ExportDocument } from './types'
@@ -218,15 +219,26 @@ const TABLE_BORDER = { style: BorderStyle.SINGLE, size: 2, color: 'BFBFBF' }
  */
 function blockTable(grid: string[][], block: ExportBlock, font: string): Table {
   const spacing = { line: lineUnits(block.lineHeight), lineRule: LineRuleType.AUTO }
+  // Word spells the horizontal merge `w:gridSpan`; `docx` names it after the
+  // property it writes — `columnSpan`. A merged cell is drawn once and the
+  // cells it covers are not drawn at all, or the row comes out a column wider
+  // than its neighbours. `tableSpansFor` answers `null` when the printed grid
+  // is no longer the shape the spans were measured on, and every cell then
+  // stands on its own.
+  const spans = tableSpansFor(block, grid)
   const rows = grid.map(
-    (cells) =>
+    (cells, rowIndex) =>
       new TableRow({
-        children: cells.map(
-          (cell) =>
-            new TableCell({
+        children: cells
+          .map((cell, column) => {
+            const span = spans ? spans[rowIndex][column] : 1
+            if (span === 0) return null
+            return new TableCell({
+              ...(span > 1 ? { columnSpan: span } : {}),
               children: [new Paragraph({ spacing, children: blockChildren(cell, block, font) })],
-            }),
-        ),
+            })
+          })
+          .filter((child): child is TableCell => child !== null),
       }),
   )
   return new Table({

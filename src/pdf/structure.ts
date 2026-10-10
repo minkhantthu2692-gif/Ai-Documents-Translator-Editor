@@ -104,6 +104,21 @@ export interface PageBlock {
    */
   tableCells: string[][] | null
   /**
+   * How many columns each cell of a `kind === 'table'` block covers, parallel
+   * to `tableCells` — `null` when nothing on the table spans anything.
+   *
+   * A merged cell holds the number of columns it covers, the cells it covers
+   * hold `0`, an ordinary cell holds `1`; the merged cell's text stays in the
+   * start column, where the PDF drew it. The grid stays a rectangle, because
+   * that is what `text` was built from and what the exporters lay out.
+   *
+   * Carried beside `tableCells` for the same reason: it describes the *source*
+   * geometry, while what a renderer prints comes back from the model and may
+   * no longer line up with it — so a renderer applies these only to a printed
+   * grid of the shape they were measured on.
+   */
+  tableSpans: number[][] | null
+  /**
    * 1..6 when `kind === 'heading'`, else null — the depth of the heading
    * inside the document's own ladder (`headings.ts`). A level means nothing on
    * its own, so exporters should render it relative to the other headings they
@@ -497,6 +512,8 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
     const grid = open.region === 'body' && !isFootnote && !isCode ? tableForLines(open.lines) : null
     const isTableRow = grid !== null
     const tableCells = grid ? grid.rows : null
+    /** Only set when a cell actually straddles a column: see `TableGrid.spans`. */
+    const tableSpans = grid ? grid.spans : null
     const isList =
       !isCode &&
       !isTableRow &&
@@ -561,6 +578,7 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
       listMarker: marker,
       /** Cells as data: `rows × columns`, rectangular, empty string for a gap. */
       tableCells,
+      tableSpans,
       headingLevel: null,
       links: [],
       figures: [],

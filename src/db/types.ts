@@ -163,6 +163,18 @@ export interface BlockRecord extends BaseRecord {
    */
   tableCells?: string[][] | null
   /**
+   * How many columns each cell covers, parallel to `tableCells` — a merged
+   * cell holds its span, the cells it covers hold `0`, an ordinary one holds
+   * `1`, and the whole thing is `null` when nothing on the table spans
+   * anything. Optional for the same reason `tableCells` is: a row written
+   * before this existed has none, and every reader must default it.
+   *
+   * It describes the *source* geometry only. What a renderer prints comes back
+   * from the model and may have a different shape, so an exporter applies
+   * these to a printed grid of the same shape or not at all.
+   */
+  tableSpans?: number[][] | null
+  /**
    * Figures anchored to this block — where the page painted a picture this
    * paragraph illustrates. Optional for the same reason `headingLevel`,
    * `links` and `tableCells` are: a row parsed before figures were traced has

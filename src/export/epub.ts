@@ -35,6 +35,7 @@ import {
   listPrefix,
   pageBlocks,
   tableGrid,
+  tableSpansFor,
   textOf,
 } from './shared'
 import type { ExportBlock, ExportDocument, ExportPage } from './types'
@@ -212,8 +213,19 @@ function tableMarkup(
   const dir = rtl ? ' dir="rtl"' : ''
   const safeLang = escapeHtml(lang)
   const cell = (text: string): string => applyLinks(text, block.links, linkHtml, escapeHtml)
+  // `colspan` only when the printed grid is still the shape the spans were
+  // measured on, and never for the cells a merge already covers — see
+  // `tableSpansFor` and `tableHtml`.
+  const spans = tableSpansFor(block, grid)
   const rows = grid
-    .map((row) => `<tr>${row.map((value) => `<td>${cell(value)}</td>`).join('')}</tr>`)
+    .map((row, rowIndex) => {
+      const drawn = row.map((value, column) => {
+        const span = spans ? spans[rowIndex][column] : 1
+        if (span === 0) return ''
+        return `<td${span > 1 ? ` colspan="${span}"` : ''}>${cell(value)}</td>`
+      })
+      return `<tr>${drawn.join('')}</tr>`
+    })
     .join('')
   return (
     `<table class="${escapeHtml(all.join(' '))}" xml:lang="${safeLang}" lang="${safeLang}"${dir}${style}>` +

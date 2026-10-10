@@ -44,6 +44,7 @@ function block(overrides: Partial<ExportBlock> = {}): ExportBlock {
     links: [],
     figures: [],
     tableCells: null,
+    tableSpans: null,
     sourceText: 'Source text',
     translatedText: words(4),
     characterCount: 11,

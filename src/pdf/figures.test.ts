@@ -34,6 +34,7 @@ function block(overrides: Partial<PageBlock>): PageBlock {
     placeholders: [],
     listMarker: null,
     tableCells: null,
+    tableSpans: null,
     headingLevel: null,
     links: [],
     figures: [],

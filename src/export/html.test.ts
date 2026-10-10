@@ -31,6 +31,7 @@ function block(overrides: Partial<ExportDocument['pages'][number]['blocks'][numb
     links: [],
     figures: [],
     tableCells: null,
+    tableSpans: null,
     sourceText: 'Hello world',
     translatedText: 'မြန်မာစာ စာသား',
     characterCount: 11,
@@ -610,6 +611,12 @@ describe('text the page never printed', () => {
 
 describe('tables', () => {
   const TABLE = 'Region \t Q1 \t Q2\nNorth \t 120 \t 150'
+  /** A table whose header was drawn across two of its three columns. */
+  const MERGED = 'Region \t First half 2026 \t \nNorth \t 120 \t 150'
+  const MERGED_CELLS = [
+    ['Region', 'First half 2026', ''],
+    ['North', '120', '150'],
+  ]
 
   function tableDoc(overrides: Partial<ExportBlock> = {}): ExportDocument {
     return doc({
@@ -643,6 +650,62 @@ describe('tables', () => {
     expect(html).toContain('<tr><td>Region</td><td>Q1</td><td>Q2</td></tr>')
     expect(html).toContain('<tr><td>North</td><td>120</td><td>150</td></tr>')
     expect(html).not.toContain('Region \t')
+  })
+
+  it('draws a merged cell once with a colspan and skips the columns it covers', () => {
+    const html = buildHtmlDocument(
+      tableDoc({
+        sourceText: MERGED,
+        translatedText: MERGED,
+        tableCells: MERGED_CELLS,
+        tableSpans: [
+          [1, 2, 0],
+          [1, 1, 1],
+        ],
+      }),
+      base,
+    )
+    expect(html).toContain('<tr><td>Region</td><td colspan="2">First half 2026</td></tr>')
+    expect(html).toContain('<tr><td>North</td><td>120</td><td>150</td></tr>')
+    // The covered cell is not drawn as an empty `<td>` beside the merge: that
+    // would put the row a column wide for every merged cell it has.
+    expect(html).not.toContain('<td colspan="2"></td>')
+  })
+
+  it('drops the merge when the model answered with a different shape of grid', () => {
+    const html = buildHtmlDocument(
+      tableDoc({
+        translatedText: 'Region \t First half 2026\nNorth \t 120',
+        tableCells: MERGED_CELLS,
+        tableSpans: [
+          [1, 2, 0],
+          [1, 1, 1],
+        ],
+      }),
+      base,
+    )
+    expect(html).not.toContain('colspan')
+    expect(html).toContain('<tr><td>Region</td><td>First half 2026</td></tr>')
+  })
+
+  it('merges whichever column of a bilingual page still has its shape', () => {
+    const html = buildHtmlDocument(
+      tableDoc({
+        sourceText: MERGED,
+        translatedText: 'Region \t First half\nNorth \t 120',
+        tableCells: MERGED_CELLS,
+        tableSpans: [
+          [1, 2, 0],
+          [1, 1, 1],
+        ],
+      }),
+      { ...base, layout: 'flow', includeOriginal: true },
+    )
+    // The source grid still matches what the spans were measured on; the
+    // target came back two columns wide and is drawn flat. Each cell is
+    // judged on its own grid, not on the block's.
+    expect(html).toContain('<td colspan="2">First half 2026</td>')
+    expect(html).toContain('<td>First half</td>')
   })
 
   it('never lets a table become a heading', () => {

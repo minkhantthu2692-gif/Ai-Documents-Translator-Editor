@@ -32,6 +32,7 @@ function block(partial: Partial<ExportBlock>): ExportBlock {
     links: [],
     figures: [],
     tableCells: null,
+    tableSpans: null,
     sourceText: '',
     translatedText: '',
     characterCount: 0,
@@ -378,6 +379,44 @@ describe('buildDocx tables', () => {
     expect(xml).toContain('<w:t xml:space="preserve">Name</w:t>')
     expect(xml).toContain('<w:t xml:space="preserve">Alpha</w:t>')
     expect(xml).not.toContain('Name \t Value')
+  })
+
+  it('merges cells with a gridSpan and writes no cell for the ones they cover', async () => {
+    const xml = await tableXml({
+      sourceText: 'Name \t First half 2026 \t \nAlpha \t \t 12',
+      translatedText: 'Name \t First half 2026 \t \nAlpha \t \t 12',
+      tableCells: [
+        ['Name', 'First half 2026', ''],
+        ['Alpha', '', '12'],
+      ],
+      tableSpans: [
+        [1, 2, 0],
+        [1, 1, 1],
+      ],
+    })
+    // Row one draws two cells against row two's three, and five in total
+    // rather than six: the covered column is not a cell of its own, or the
+    // row would come out wider than the one below it.
+    expect(xml).toContain('<w:gridSpan w:val="2"/>')
+    expect(xml.match(/<w:tc>/g) ?? []).toHaveLength(5)
+    expect(xml).toContain('<w:t xml:space="preserve">First half 2026</w:t>')
+    expect(xml).toContain('<w:t xml:space="preserve">12</w:t>')
+  })
+
+  it('drops the merge when the printed grid is no longer that shape', async () => {
+    const xml = await tableXml({
+      translatedText: 'Name \t First half 2026\nAlpha \t 12',
+      tableCells: [
+        ['Name', 'First half 2026', ''],
+        ['Alpha', '', '12'],
+      ],
+      tableSpans: [
+        [1, 2, 0],
+        [1, 1, 1],
+      ],
+    })
+    expect(xml).not.toContain('gridSpan')
+    expect(xml.match(/<w:tc>/g) ?? []).toHaveLength(4)
   })
 
   it('gives the table no outline level and no bullet', async () => {

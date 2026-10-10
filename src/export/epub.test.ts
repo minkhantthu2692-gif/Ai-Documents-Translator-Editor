@@ -32,6 +32,7 @@ function block(partial: Partial<ExportBlock>): ExportBlock {
     links: [],
     figures: [],
     tableCells: null,
+    tableSpans: null,
     sourceText: '',
     translatedText: '',
     characterCount: 0,
@@ -383,6 +384,17 @@ describe('buildEpub code blocks', () => {
 })
 
 describe('buildEpub tables', () => {
+  /** A table whose header was drawn across two of its three columns. */
+  const MERGED = 'Region \t First half 2026 \t \nNorth \t 120 \t 150'
+  const MERGED_CELLS = [
+    ['Region', 'First half 2026', ''],
+    ['North', '120', '150'],
+  ]
+  const MERGED_SPANS = [
+    [1, 2, 0],
+    [1, 1, 1],
+  ]
+
   async function tableChapter(overrides: Partial<ExportBlock> = {}) {
     const doc: ExportDocument = {
       ...fixtureDoc(),
@@ -412,6 +424,28 @@ describe('buildEpub tables', () => {
     expect(chapter).toContain('<tr><td>Name</td><td>Value</td></tr>')
     expect(chapter).toContain('<tr><td>Alpha</td><td>12</td></tr>')
     expectWellFormed(chapter, 'chap_1.xhtml')
+  })
+
+  it('merges a cell across the columns it covers and never draws them', async () => {
+    const chapter = await tableChapter({
+      sourceText: MERGED,
+      translatedText: MERGED,
+      tableCells: MERGED_CELLS,
+      tableSpans: MERGED_SPANS,
+    })
+    expect(chapter).toContain('<tr><td>Region</td><td colspan="2">First half 2026</td></tr>')
+    expect(chapter).toContain('<tr><td>North</td><td>120</td><td>150</td></tr>')
+    expectWellFormed(chapter, 'chap_1.xhtml')
+  })
+
+  it('drops the merge when the printed grid is no longer that shape', async () => {
+    const chapter = await tableChapter({
+      translatedText: 'Region \t First half 2026\nNorth \t 120',
+      tableCells: MERGED_CELLS,
+      tableSpans: MERGED_SPANS,
+    })
+    expect(chapter).not.toContain('colspan')
+    expect(chapter).toContain('<tr><td>Region</td><td>First half 2026</td></tr>')
   })
 
   it('carries the block classes onto the table so a source table stays grey', async () => {

@@ -115,6 +115,18 @@ export interface ExportBlock {
    * export emits it so a consumer can rebuild the table without re-parsing.
    */
   tableCells: string[][] | null
+  /**
+   * How many columns each cell of a `kind === 'table'` block covers, parallel
+   * to `tableCells` — `null` when nothing on the table spans anything.
+   *
+   * A merged cell holds the number of columns it covers, the cells it covers
+   * hold `0`, an ordinary cell holds `1`, and the merged cell's text sits in
+   * the start column. Like `tableCells` this is the **source** grid, which is
+   * why the renderers only apply it through `tableSpansFor`: they draw
+   * `printedText`, and a model that answered with a different shape of grid
+   * cannot borrow the merge the extractor measured on a different one.
+   */
+  tableSpans: number[][] | null
   sourceText: string
   translatedText: string
   characterCount: number

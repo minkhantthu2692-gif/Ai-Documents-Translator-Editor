@@ -252,6 +252,29 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   any drawn twice; the author (`/T`) and date (`/M`) are never prefixed, because a name is not
   for translating. `fixtures/annotations.pdf` (new) carries nine annotations on one page: four
   become blocks, five must produce none, and every printed line stays exactly where it was.
+- **Merged table cells** (phase (c) follow-up of `docs/PDF_TYPES_SUPPORT.md`, type 6 of 25):
+  PDF has no "this cell spans two columns" operator, so a merge is only ever geometry — one
+  show-text run that starts inside a column and runs past the next one's left edge. `spansOf`
+  in `src/pdf/rowSplit.ts` claims the crossed boundary for the cell that starts it and leaves
+  the covered column blank; the answer travels *beside* the grid as `tableSpans` (page block →
+  block row → export block), never inside it, so rows stay rectangular and `text` is
+  byte-identical — the model and the translation cache see no change at all. HTML and EPUB
+  emit `colspan`, DOCX `w:gridSpan`, JSON the spans; Markdown has no merge in its grammar, so
+  it prints the covered cell empty and the row keeps its columns. A renderer applies a span
+  only to a printed grid of the shape it was measured on (`tableSpansFor`): a model free to
+  answer with a different number of columns gets a flat table rather than one drawn a column
+  out of step. Ambiguity is answered at the smallest level that can answer it: a
+  merge covering a column another run on the same row already sits in draws *that
+  row* flat — every cell its own column, which is what it was before — while its
+  neighbours keep theirs; a block whose rows are *mostly* merged (the shape of
+  prose beside a table) and a row still under half filled once a merge counts for
+  the columns it covers each reject the block, exactly as they did before. No
+  vertical merges: `LineRun` is one rectangle on one baseline and cannot say a
+  cell two rows tall from two cells of the same width. `fixtures/table-spans.pdf`
+  (new) draws a header across both figure columns with no operator anywhere
+  recording the merge; a merged cell wider than eight ems is still cut at the
+  gutter by reading order before the detector sees it, which is a limit of that
+  guard rather than of the spans.
 
 ### Security
 

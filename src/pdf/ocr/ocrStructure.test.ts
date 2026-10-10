@@ -39,6 +39,7 @@ function block(order: number, x: number, y: number, w: number, h: number, text =
     placeholders: [],
     listMarker: null,
     tableCells: null,
+    tableSpans: null,
     headingLevel: null,
     links: [],
     figures: [],

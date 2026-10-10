@@ -1,0 +1,116 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [6 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Length 815 >>
+stream
+BT
+/F2 14 Tf
+1 0 0 1 72 740 Tm
+(Half-year revenue) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 72 700 Tm
+(The header below is drawn across both figure columns.) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 72 684 Tm
+(No second operator draws the column it covers.) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 72 644 Tm
+(Region) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 260 644 Tm
+(First half 2026) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 72 628 Tm
+(North) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 260 628 Tm
+(120) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 300 628 Tm
+(150) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 72 612 Tm
+(South) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 260 612 Tm
+(90) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 300 612 Tm
+(110) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 72 596 Tm
+(East) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 260 596 Tm
+(75) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 300 596 Tm
+(80) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 72 548 Tm
+(The header cell spans both figure columns.) Tj
+ET
+
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Title (Table with a merged cell) /Author (Finance Department) /Subject (A header cell drawn across two columns) /Creator (make-fixtures.mjs) /Producer (make-fixtures.mjs) /CreationDate (D:20260115093000+06'30') /ModDate (D:20260320174500+06'30') >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000218 00000 n 
+0000000320 00000 n 
+0000001186 00000 n 
+0000001322 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R /Info 7 0 R >>
+startxref
+1590
+%%EOF

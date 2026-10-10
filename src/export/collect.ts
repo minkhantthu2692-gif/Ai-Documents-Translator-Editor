@@ -74,6 +74,7 @@ export async function collectExportDocument(options: CollectOptions): Promise<Ex
         links: block.links ?? [],
         figures: block.figures ?? [],
         tableCells: block.tableCells ?? null,
+        tableSpans: block.tableSpans ?? null,
         sourceText: block.sourceText,
         translatedText: block.translatedText,
         characterCount: block.characterCount,

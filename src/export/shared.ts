@@ -160,6 +160,51 @@ export function tableGrid(text: string): string[][] | null {
 }
 
 /**
+ * `block.tableSpans` as it applies to `grid`, or `null` when the two do not
+ * line up and the merge must be left alone.
+ *
+ * The spans were measured on the *source* grid, and the grid a renderer draws
+ * is rebuilt from `printedText` — a string the model wrote. It is free to hand
+ * back a different number of rows or columns than it was given, and when it
+ * does, a `colspan` taken from the source would push one row's cells into
+ * another's columns and every row after it would be drawn a column out of
+ * step. So the merge is applied to a grid of the shape it was measured on, or
+ * not at all: a table without its merges is still a table, and a table whose
+ * rows do not line up is not one.
+ *
+ * The spans themselves are checked for the one thing that would not draw: a
+ * row that cannot be walked as a run of whole cells. A `0` with no cell before
+ * it, a span whose covered cells are not blank, a span reaching past the end of
+ * its row — extraction writes none of those, so each means the data is not what
+ * it says it is, and all three would draw a row out of step with its
+ * neighbours. Extraction *does* guarantee that a row which walks cleanly draws
+ * exactly as many columns as it holds, so one rectangle for the grid is the
+ * only thing left to confirm.
+ */
+export function tableSpansFor(block: ExportBlock, grid: string[][]): number[][] | null {
+  const spans = block.tableSpans
+  if (!spans || spans.length !== grid.length) return null
+  const width = grid[0]?.length
+  for (let index = 0; index < grid.length; index += 1) {
+    if (spans[index].length !== grid[index].length) return null
+    if (grid[index].length !== width) return null
+    // Walk the row the way a renderer walks it: one column for a cell of one,
+    // `span` columns for a cell of `span`, and the cells it covers must be
+    // right there, blank, waiting for it.
+    let column = 0
+    while (column < spans[index].length) {
+      const span = spans[index][column]
+      if (!Number.isInteger(span) || span < 1) return null
+      for (let covered = 1; covered < span; covered += 1) {
+        if (spans[index][column + covered] !== 0) return null
+      }
+      column += span
+    }
+  }
+  return spans
+}
+
+/**
  * Heading level a builder should actually emit for `block`.
  *
  * The extracted level counts *inside the document's own headings* (1..6) but

@@ -54,6 +54,22 @@ export interface CellSplit {
 export interface TableGrid {
   /** One array of cell strings per row, all the same length. */
   rows: string[][]
+  /**
+   * How many columns each cell covers, parallel to `rows` — `null` when no
+   * cell on the table spans anything and it is therefore nothing but noise.
+   *
+   * The encoding is the one every format below already speaks: a merged cell
+   * holds the number of columns it covers, the cells it covers hold `0`, and
+   * an ordinary cell holds `1`. Rows stay rectangular and the merged cell's
+   * text stays in the *start* column, because that is where it was drawn and
+   * because the model reads `rows` — a grid whose row lengths changed would
+   * stop being a rectangle the moment a renderer tried to lay it out.
+   *
+   * Only horizontal spans exist. A *vertical* merge would need the height of
+   * each cell, and `LineRun` is a rectangle on one baseline: nothing here can
+   * tell a cell two rows tall from two cells that happen to be the same width.
+   */
+  spans: number[][] | null
 }
 
 /**
@@ -150,7 +166,10 @@ export function tableForLines(lines: readonly GroupedLine[]): TableGrid | null {
   const width = Math.max(...grid.map((cells) => cells.length))
   if (width < 2) return null
   if (grid.some((cells) => cells.length !== width)) return null
-  return { rows: grid }
+  // Rows arriving as text carry no geometry, so there is nothing to read a
+  // merge out of: every cell is exactly one column wide and the exporters are
+  // told nothing, which is the same answer they had before spans existed.
+  return { rows: grid, spans: null }
 }
 
 /** Geometric half of `tableForLines`: cut positions that recur across rows. */
@@ -182,9 +201,12 @@ function alignedTable(lines: readonly GroupedLine[]): TableGrid | null {
   if (columns.length === 0) return null
 
   const edges = [-Infinity, ...columns, Infinity]
-  const rows = lines.map((line) => {
+  const width = columns.length + 1
+  const rows: string[][] = []
+  const spans: number[][] = []
+  for (const line of lines) {
     const ordered = runsInOrder(line)
-    return edges.slice(0, -1).map((left, index) => {
+    const cells = edges.slice(0, -1).map((left, index) => {
       const right = edges[index + 1]
       return ordered
         .filter((run) => run.x >= left && run.x < right)
@@ -193,7 +215,19 @@ function alignedTable(lines: readonly GroupedLine[]): TableGrid | null {
         .replace(/\s+/g, ' ')
         .trim()
     })
-  })
+    // A run that starts inside one column and ends inside a later one is the
+    // whole of what a *merged* cell looks like from here: one show-text run,
+    // drawn wider than the column it begins in. `spansOf` vouches for the rows
+    // it can read and refuses the ones it cannot — and a refused row is drawn
+    // exactly as it was before spans existed, every cell its own column.
+    // Refusing the *table* would cost far more than a merge is worth: one row
+    // whose runs overlap (a trailing space in the width, a highlight over the
+    // text) leaves a table that is still a table, not a paragraph of tabs.
+    const row = spansOf(ordered, columns) ?? Array.from({ length: width }, () => 1)
+    rows.push(cells)
+    spans.push(row)
+  }
+
   // A row has to be at least half filled to belong to this grid.
   //
   // Every line here has a boundary of its own — that is why it merged into the
@@ -202,11 +236,86 @@ function alignedTable(lines: readonly GroupedLine[]): TableGrid | null {
   // the rows get padded), but a row with one cell filled out of three had a
   // wide gap somewhere over on the left and is a line of prose that happened
   // to sit beside a table, not a row of it.
+  //
+  // A merged cell counts for the columns it covers, or a table whose header
+  // reads `Consolidated results` across all three would fail here for having
+  // one cell out of three — which is how every such table was lost before.
   const filledRequired = Math.ceil((columns.length + 1) / 2)
-  if (rows.some((cells) => cells.filter((cell) => cell.length > 0).length < filledRequired)) {
-    return null
+  for (let index = 0; index < rows.length; index += 1) {
+    const filled = rows[index].reduce(
+      (sum, cell, column) => sum + (cell.length > 0 ? spans[index][column] : 0),
+      0,
+    )
+    if (filled < filledRequired) return null
   }
-  return { rows }
+
+  // And a merge has to be the exception, not the rule. A run of lines whose
+  // rows *mostly* cross their own boundaries is a block of prose beside a
+  // table — the reader's columns are its sentences — and promoting it would
+  // hand the model a grid whose cells are clauses. Half the rows is the line:
+  // a table may carry merged headers, a paragraph is nothing but them.
+  const mergedRows = spans.filter((row) => row.some((span) => span > 1)).length
+  if (mergedRows * 2 > lines.length) return null
+
+  return { rows, spans: spans.some((row) => row.some((span) => span > 1)) ? spans : null }
+}
+
+/**
+ * How wide each cell of one row is, in columns, or `null` when the row does
+ * not describe cells this grid could hold.
+ *
+ * A cell that begins before a column boundary and ends past it covers the
+ * columns it crosses, and that is the only signal a PDF gives for a merge: the
+ * cell is drawn as one run which simply starts further left and runs further
+ * right than the column it sits in. Everything else on the row is one column
+ * wide.
+ *
+ * Two shapes are refused rather than guessed at, because a wrong guess puts
+ * text in a cell it does not belong to — and a refusal costs far less than
+ * it looks: the caller draws *this row* flat, which is the reading it had
+ * before spans existed, and leaves every other row's merge alone.
+ *
+ *  - two merges claiming the same column — two texts on one baseline;
+ *  - a merge covering a column that another run on the row already sits in.
+ *    That is the same lie one step removed, and the one the width test cannot
+ *    catch on its own: a run whose *advance* reaches past a boundary — a
+ *    trailing space, a highlight laid over the words — while the cell that
+ *    begins exactly there is drawn beside it.
+ *
+ * A run *inside* the cell it merges is ordinary — a merged header drawn as
+ * `Quarter` and `Results` a word space apart is one cell, not an overlap.
+ */
+function spansOf(ordered: readonly LineRun[], columns: readonly number[]): number[] | null {
+  const width = columns.length + 1
+  const spans = Array.from({ length: width }, () => 1)
+  const claimed = new Set<number>()
+  const bucketOf = (run: LineRun): number => columns.filter((at) => run.x >= at).length
+
+  for (const run of ordered) {
+    const start = bucketOf(run)
+    // A boundary strictly inside the run: `>= left` is the next column's, so
+    // only what the run actually straddles counts.
+    const crossed = columns.filter((at) => at > run.x && at < run.x + run.w).length
+    if (crossed === 0) continue
+    // The span cannot run off the end of the grid: `start` counts the
+    // boundaries the run begins at or before, every boundary it crosses sits
+    // at or after that index, and `columns` is sorted — so the last column it
+    // can reach is the last one there is. What is worth refusing is a second
+    // merge landing in a column this one already took.
+    if (claimed.has(start)) return null
+    for (let index = start + 1; index <= start + crossed; index += 1) {
+      if (claimed.has(index)) return null
+      claimed.add(index)
+    }
+    spans[start] = crossed + 1
+    for (let index = start + 1; index <= start + crossed; index += 1) spans[index] = 0
+  }
+  if (claimed.size === 0) return spans
+
+  for (const run of ordered) {
+    if (claimed.has(bucketOf(run))) return null
+  }
+  return spans
 }
 
 /**

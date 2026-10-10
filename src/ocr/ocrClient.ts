@@ -19,6 +19,14 @@
 
 import workerUrl from 'tesseract.js/dist/worker.min.js?url'
 import { cacheRepo } from '@/db/repo-cache'
+import {
+  mapBlocksBack,
+  recognizeWithOrientation,
+  rotateImage,
+  type OcrImageSize,
+  type RecognitionData,
+  type RecognizeOne,
+} from './orientation'
 import type { OcrPageData } from './ocrTypes'
 
 /** App language code → tesseract traineddata code. */
@@ -73,9 +81,20 @@ interface TesseractWorkerLike {
   reinitialize(langs: string | string[], oem?: number, config?: unknown): Promise<unknown>
   recognize(
     image: Blob | OffscreenCanvas | string,
-    options?: { rectangle?: { left: number; top: number; width: number; height: number } },
+    options?: {
+      rectangle?: { left: number; top: number; width: number; height: number }
+      rotateAuto?: boolean
+    },
     output?: Record<string, boolean>,
-  ): Promise<{ data: { text?: string; confidence?: number; blocks?: OcrPageData['blocks'] } }>
+  ): Promise<{
+    data: {
+      text?: string
+      confidence?: number
+      blocks?: OcrPageData['blocks']
+      /** tesseract.js's `rotateAuto` correction, radians (0 when not deskewed). */
+      rotateRadians?: number
+    }
+  }>
   terminate(): Promise<unknown>
 }
 
@@ -152,6 +171,21 @@ export interface OcrOptions {
   /** Sub-region of the image (an image region inside a mixed page). */
   rectangle?: { left: number; top: number; width: number; height: number }
   onProgress?: (progress: number) => void
+  /**
+   * Orientation-by-trial (scan OSD): a first pass that reads poorly is
+   * re-recognised with the raster turned 90/180/270, best confidence wins,
+   * and every run deskews through tesseract's `rotateAuto`. Mutually exclusive
+   * with `rectangle` (rotating would invalidate the region), which disables
+   * trials and deskew exactly as if `osd` were absent.
+   */
+  osd?: boolean
+  /**
+   * Pixel size of the image, required for `osd`'s box mapping: trial and
+   * deskew frames are inverted back into this frame, so line boxes reach the
+   * caller where the pixels actually are. Without it boxes stay as the winning
+   * frame reported them.
+   */
+  imageSize?: OcrImageSize
 }
 
 export interface OcrResult {
@@ -166,7 +200,11 @@ export interface OcrResult {
   blocks: OcrPageData | null
   langs: string[]
   ms: number
+  /** Degrees the source was turned by to read it (`osd` only; absent = 0). */
+  orientation?: number
 }
+
+const RECOGNITION_OUTPUT = { text: true, blocks: true, hocr: false, tsv: false, pdf: false }
 
 /** Runs recognition on an image, loading any missing language first. */
 export async function recognizeOcr(
@@ -176,18 +214,52 @@ export async function recognizeOcr(
   const wanted = normalise(options.langs ?? ['en'])
   const started = Date.now()
   const active = await ensureOcrWorker(wanted.length > 0 ? wanted : ['eng'], options.onProgress)
-  const result = await active.recognize(
+  const orientationEnabled = Boolean(options.osd) && !options.rectangle
+
+  const recognizeOne: RecognizeOne = async (source, rotateAuto) => {
+    const settings: {
+      rectangle?: { left: number; top: number; width: number; height: number }
+      rotateAuto?: boolean
+    } = {}
+    if (options.rectangle) settings.rectangle = options.rectangle
+    if (rotateAuto) settings.rotateAuto = true
+    const result = await active.recognize(
+      source,
+      Object.keys(settings).length > 0 ? settings : undefined,
+      RECOGNITION_OUTPUT,
+    )
+    const text = result.data.text ?? ''
+    const data: RecognitionData = {
+      text: text.trim(),
+      confidence: Math.max(0, Math.min(100, Math.round(result.data.confidence ?? 0))),
+      blocks: result.data.blocks ? { blocks: result.data.blocks } : null,
+      skewRadians: result.data.rotateRadians ?? 0,
+    }
+    return data
+  }
+
+  const attempt = await recognizeWithOrientation(
     image,
-    options.rectangle ? { rectangle: options.rectangle } : undefined,
-    { text: true, blocks: true, hocr: false, tsv: false, pdf: false },
+    recognizeOne,
+    orientationEnabled ? rotateImage : null,
   )
-  const text = result.data.text ?? ''
+
+  let blocks = attempt.blocks
+  if (
+    orientationEnabled &&
+    options.imageSize &&
+    (attempt.orientation !== 0 || attempt.skewRadians !== 0)
+  ) {
+    blocks = mapBlocksBack(blocks, options.imageSize, attempt.orientation, attempt.skewRadians)
+  }
+
   return {
-    text: text.trim(),
-    confidence: Math.max(0, Math.min(100, Math.round(result.data.confidence ?? 0))),
-    blocks: result.data.blocks ? { blocks: result.data.blocks } : null,
+    text: attempt.text,
+    confidence: attempt.confidence,
+    blocks,
     langs: wanted,
     ms: Date.now() - started,
+    ...(attempt.orientation !== 0 ? { orientation: attempt.orientation } : {}),
   }
 }
 

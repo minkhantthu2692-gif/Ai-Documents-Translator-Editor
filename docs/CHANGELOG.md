@@ -374,6 +374,32 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   concatenate back to the input byte-for-byte, the invariant every escaper leans on
   (16 lexer tests in `highlight.test.ts`; one test per exporter). Matrix type 24 moves
   🔶→⏳ to ✅.
+- **Phase (e) — OSD for rotated scans (type 2's last open item)**. Tesseract's own
+  orientation channel is unreachable through tesseract.js v7: the `osd` dump field
+  stays empty on every page-segmentation mode tried, so `src/ocr/orientation.ts`
+  decides orientation by *trial*. The page is recognised as rendered first (with
+  tesseract.js's `rotateAuto`, which deskews — confidence 41→88 on a 2°-skewed
+  fixture, exact angle reported); a first pass under 50 is re-recognised with the
+  raster turned 90/180/270 on a fresh canvas using integer quarter-turn matrices
+  — the turn that reaches the bar stops the search, the best attempt ships, and a
+  pass that cannot turn (no `OffscreenCanvas`, a sub-region `rectangle`)
+  degrades to today's behaviour instead of failing the page. The measurements
+  behind the threshold are pinned from `scripts/osd-probe.mjs`, now committed as
+  the reproducible evidence: upright 72, 90°-clockwise 72 (tesseract reads a
+  top-to-bottom vertical line, so a clockwise turn needs no trial),
+  counter-clockwise and upside-down 15 → quarter-turn trials lift them (the
+  180° trial reads 74). Boxes come back in whichever frame was recognised, so
+  `mapBoxBack` inverts both transforms — trial rotation and deskew, about the
+  frame's centre, centres mapping to centres across the swap — and the caller
+  always sees line boxes in the original render frame, the contract
+  `ocrStructure` leans on; the pipeline passes the rendered pixel size to make
+  that inversion exact and counts orientation fixes into the OCR summary log.
+  The OCR cache key gains `#osd`, so a page re-selected after a failure
+  re-recognises with trials instead of finding its own pre-OSD garbage. The
+  tests are policy and frame round trips in `orientation.test.ts` (asserted
+  against the real matrix, not a re-derivation) plus wiring tests through the
+  real `recognizeOcr` seam. Matrix type 2 moves to OSD ✅, with the
+  synthetic-fixture caveat carried in the limitations.
 
 ### Security
 

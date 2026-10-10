@@ -140,9 +140,14 @@ export async function runWindowOcr(options: WindowOcrOptions): Promise<Map<numbe
 
   let succeeded = 0
   let confidenceSum = 0
+  let orientationFixes = 0
 
   const lang = tesseractCodeFor(options.sourceLang) ?? options.sourceLang
-  const cacheKeyOf = (page: PageRecord): string => `${options.fileId}#${page.index}#${lang}`
+  // `#osd` marks results taken with orientation trials: a page whose first
+  // (pre-OSD) reading was the confidence-15 garbage of a rotated scan must not
+  // satisfy this cache when the page is re-selected, or the fix could never
+  // reach exactly the pages it exists for.
+  const cacheKeyOf = (page: PageRecord): string => `${options.fileId}#${page.index}#${lang}#osd`
 
   /**
    * The local sidecar re-opens the PDF itself, so it needs no browser render —
@@ -182,9 +187,19 @@ export async function runWindowOcr(options: WindowOcrOptions): Promise<Map<numbe
           analysisClient.render(options.fileId, page.index, OCR_RENDER_SCALE, 'thumbnail', {
             signal: options.signal,
           }),
-        { langs: [options.sourceLang] },
+        {
+          langs: [options.sourceLang],
+          // Scan OSD: the rendered frame's size lets trial/deskew boxes be
+          // mapped back to where these very pixels live.
+          osd: true,
+          imageSize: {
+            width: size.width * OCR_RENDER_SCALE,
+            height: size.height * OCR_RENDER_SCALE,
+          },
+        },
         throughSidecar(page),
       )
+      if (recognition.orientation) orientationFixes += 1
       const content = ocrToBlocks(recognition.blocks, {
         pageIndex: page.index,
         pageWidth: size.width,
@@ -229,7 +244,7 @@ export async function runWindowOcr(options: WindowOcrOptions): Promise<Map<numbe
       severity: succeeded === selected.length ? 'success' : 'warning',
       messageMy: `OCR ပြီးဆုံးပြီ (စာမျက်နှာ ${succeeded}/${selected.length} ခု)`,
       messageEn: `OCR finished (${succeeded}/${selected.length} pages)`,
-      technicalDetail: `mean confidence ${(confidenceSum / succeeded).toFixed(1)}% · engine sidecar=${sidecarPages} browser=${succeeded - sidecarPages}`,
+      technicalDetail: `mean confidence ${(confidenceSum / succeeded).toFixed(1)}% · engine sidecar=${sidecarPages} browser=${succeeded - sidecarPages}${orientationFixes > 0 ? ` · orientation-corrected ${orientationFixes}` : ''}`,
       projectId: options.projectId,
     })
   }

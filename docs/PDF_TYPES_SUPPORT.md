@@ -66,7 +66,7 @@ same kinds, text, `tableCells`, link anchors and boxes within 3 pt.
 | #  | Type                                    | Status | Notes |
 | -- | --------------------------------------- | ------ | ----- |
 | 1  | Text-Based PDF                          | ✅     | Text layer → lines → blocks with headings, lists, styles, fonts, special characters; classified `text` |
-| 2  | Scanned PDF (image-only, rotated, low-res, OCR) | ✅ | Classification `scanned` + auto-OCR inside the parse window (browser Tesseract: `queued→running→done`, confidence + text blocks persisted, E2E-verified); local sidecar OCR ✅ preferred automatically when running; pre-flight warns and offers OCR; rotated scans still need OSD ❌ |
+| 2  | Scanned PDF (image-only, rotated, low-res, OCR) | ✅ | Classification `scanned` + auto-OCR inside the parse window (browser Tesseract: `queued→running→done`, confidence + text blocks persisted, E2E-verified); local sidecar OCR ✅ preferred automatically when running; pre-flight warns and offers OCR; **OSD ✅** — a first pass under confidence 50 is re-recognised with the raster turned 90/180/270 (best confidence wins, the first turn ≥ 50 stops the search) and every run deskews through `rotateAuto`, line boxes mapped back into the render frame; synthetic fixtures only (`scripts/osd-probe.mjs`), real scans unreviewed |
 | 3  | Mixed PDF (text + scanned pages/images) | 🔶 | Per-page classes + method selection ✅ (text / OCR / hybrid): hybrid keeps the text layer authoritative, OCRs the rest and drops blocks that overlap existing text (unit-tested); reading order across merged column lines ✅ |
 | 4  | Multi-Column PDF (2/3-col, newspaper, reading order) | ✅     | `complex` classification for ≥3 columns ✅ (item-level gutter detection); reading order ✅ — rows fused across a gutter are cut back into one line per column, columns are read left-to-right (2–4), and a title spanning the fold opens its own zone ahead of both columns |
 | 5  | PDF With Images (captions, diagrams, charts) | 🔶→⏳ | Images kept in the page render/background ✅; **image-anchored extraction ✅** — every painted image's rectangle is traced from the operator list, filtered against page furniture and anchored to the block it illustrates as `PageBlock.figures` (see below); **cropped and embedded in DOCX / EPUB / Markdown ✅** (phase 9b, see "How a figure reaches DOCX, EPUB and Markdown") |
@@ -830,4 +830,21 @@ with the rows together and one header fewer. And `tableCells` records cell
 boxes, so DOCX columns are equal-width and HTML divides the block's own width;
 the PDF's real column widths are not available. Markdown is the one format
 that must promote row 0 to the header, because its grammar has no table
-without one; HTML, EPUB and DOCX make no such claim about the document._
+without one; HTML, EPUB and DOCX make no such claim about the document. Scan
+OSD (type 2) is decided by trial, not detection: tesseract.js v7 never
+populates its `osd` output whatever page-segmentation mode asks, so a page
+reading under confidence 50 is re-recognised with the raster turned 90/180/270
+and the best reading ships — the first turn reaching the bar stops the search,
+and every run deskews through tesseract's `rotateAuto`, with line boxes mapped
+back into the render frame (quarter-turns invert to the pixel, a deskew through
+the centre it turned about). The threshold and the flow are exercised against
+synthetic fixtures only — a hand-drawn font rotated and skewed by
+`scripts/osd-probe.mjs` — so no real rotated scan has been through them, and a
+garbled page whose first pass happens to score 50 or better ships unturned; a
+noisy-but-upright scan below the bar pays up to three extra recognitions, which
+costs time and never quality. The turn is drawn on a canvas (exact
+quarter-turn matrices, but resampled through `drawImage` rather than the
+source's own pixels). Pages already marked `done` keep their pre-OSD reading:
+the cache key gained `#osd`, so only a page re-selected after a failure picks
+the trials up. Script detection does not run — the script follows from the
+source language the reader picked anyway._

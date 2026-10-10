@@ -17,7 +17,7 @@ import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppDatabase, setDb } from '@/db/db'
 import { cacheRepo } from '@/db/repo-cache'
-import { recognizeCached, terminateOcr, type OcrResult } from './ocrClient'
+import { recognizeCached, recognizeOcr, terminateOcr, type OcrResult } from './ocrClient'
 
 const recognizeMock = vi.hoisted(() => vi.fn())
 
@@ -152,5 +152,118 @@ describe('recognizeCached with an alternative recogniser', () => {
     expect(result.text).toBe('from the browser')
     expect(recognizeMock).toHaveBeenCalledTimes(1)
     expect(recognizeMock.mock.calls[0]?.[0]).toBe('already-rendered')
+  })
+})
+
+/**
+ * `osd` — orientation by trial through the real `recognizeOcr` seam. jsdom
+ * ships no `OffscreenCanvas`, so the canvas is a stand-in: enough for
+ * `rotateImage` to produce the swapped-dimension raster whose shape tells the
+ * mocked worker which frame it is being handed. The trial policy itself and
+ * the box maths live in `orientation.test.ts`; what is pinned here is the
+ * wiring — deskew flag on, trials off when they cannot run, boxes landing back
+ * in the caller's frame.
+ */
+describe('osd orientation through recognizeOcr', () => {
+  class FakeOffscreenCanvas {
+    width: number
+    height: number
+    constructor(width: number, height: number) {
+      this.width = width
+      this.height = height
+    }
+    getContext() {
+      return {
+        imageSmoothingEnabled: false,
+        setTransform: () => undefined,
+        drawImage: () => undefined,
+      }
+    }
+  }
+
+  /** A line box in the 90°-turned frame of a 400×100 raster — the raw shape
+   * tesseract hands back: an array of blocks, not a page wrapper. */
+  function turnedBlocks() {
+    return [
+      {
+        paragraphs: [
+          { lines: [{ text: 'line', confidence: 80, bbox: { x0: 10, y0: 20, x1: 60, y1: 30 } }] },
+        ],
+      },
+    ]
+  }
+
+  afterEach(async () => {
+    vi.unstubAllGlobals()
+    await terminateOcr()
+    vi.clearAllMocks()
+  })
+
+  it('a poor first pass runs a quarter-turn trial and maps boxes back', async () => {
+    vi.stubGlobal('OffscreenCanvas', FakeOffscreenCanvas)
+    recognizeMock.mockImplementation(async (image: FakeOffscreenCanvas) =>
+      image.width < image.height
+        ? {
+            data: {
+              text: 'upright after trial',
+              confidence: 81,
+              blocks: turnedBlocks(),
+              rotateRadians: 0,
+            },
+          }
+        : { data: { text: 'garbled', confidence: 15, blocks: null, rotateRadians: 0 } },
+    )
+
+    const result = await recognizeOcr(
+      new FakeOffscreenCanvas(400, 100) as unknown as OffscreenCanvas,
+      {
+        langs: ['en'],
+        osd: true,
+        imageSize: { width: 400, height: 100 },
+      },
+    )
+
+    expect(result.text).toBe('upright after trial')
+    expect(result.orientation).toBe(90)
+    // First pass poor → trial at 90° reads well → the search stops there.
+    expect(recognizeMock).toHaveBeenCalledTimes(2)
+    expect(recognizeMock.mock.calls[0]?.[1]).toEqual({ rotateAuto: true })
+    expect(recognizeMock.mock.calls[1]?.[0]).toMatchObject({ width: 100, height: 400 })
+    // The trial frame's box, inverted back into the 400×100 input frame
+    // (quarter-turns carry a hair of sin π/2 drift, so to 6 decimals).
+    const mappedLine = result.blocks?.blocks?.[0]?.paragraphs[0].lines[0]
+    expect(mappedLine?.bbox?.x0).toBeCloseTo(20, 6)
+    expect(mappedLine?.bbox?.y0).toBeCloseTo(40, 6)
+    expect(mappedLine?.bbox?.x1).toBeCloseTo(30, 6)
+    expect(mappedLine?.bbox?.y1).toBeCloseTo(90, 6)
+  })
+
+  it('without an OffscreenCanvas it still deskews once and never fails', async () => {
+    // jsdom default: `OffscreenCanvas` does not exist, so `rotateImage`
+    // resolves null before touching anything.
+    recognizeMock.mockResolvedValue({ data: { text: 'skewed but upright', confidence: 41 } })
+
+    const result = await recognizeOcr('render', { langs: ['en'], osd: true })
+
+    expect(result.text).toBe('skewed but upright')
+    expect(result.orientation).toBeUndefined()
+    expect(recognizeMock).toHaveBeenCalledTimes(1)
+    expect(recognizeMock.mock.calls[0]?.[1]).toEqual({ rotateAuto: true })
+  })
+
+  it('a rectangle region opts out of trials and deskew entirely', async () => {
+    recognizeMock.mockResolvedValue({ data: { text: 'region', confidence: 15 } })
+
+    await recognizeOcr('render', {
+      langs: ['en'],
+      osd: true,
+      rectangle: { left: 0, top: 0, width: 100, height: 50 },
+      imageSize: { width: 400, height: 100 },
+    })
+
+    expect(recognizeMock).toHaveBeenCalledTimes(1)
+    expect(recognizeMock.mock.calls[0]?.[1]).toEqual({
+      rectangle: { left: 0, top: 0, width: 100, height: 50 },
+    })
   })
 })

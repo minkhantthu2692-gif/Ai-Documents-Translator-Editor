@@ -593,6 +593,169 @@ describe('tables', () => {
   })
 })
 
+describe('tables continued over a page break', () => {
+  const opts = { title: 'Sample', includeOriginal: false, includePageHeadings: false }
+
+  const ABOVE: Partial<ExportBlock> = {
+    id: 'above',
+    kind: 'table',
+    sourceText: 'Name \t Value\nAlpha \t 12',
+    translatedText: 'Name \t Value\nAlpha \t 12',
+    tableCells: [
+      ['Name', 'Value'],
+      ['Alpha', '12'],
+    ],
+  }
+  const OVER: Partial<ExportBlock> = {
+    id: 'over',
+    kind: 'table',
+    tableContinuation: true,
+    sourceText: 'Beta \t 34',
+    translatedText: 'Beta \t 34',
+    tableCells: [['Beta', '34']],
+  }
+
+  function continuedDoc(
+    above: Partial<ExportBlock> = {},
+    over: Partial<ExportBlock> = {},
+    onPageTwo: Array<Partial<ExportBlock>> = [],
+  ): ExportDocument {
+    return {
+      ...makeDoc(),
+      pages: [
+        {
+          index: 0,
+          width: 612,
+          height: 792,
+          rotation: 0,
+          contentClass: 'text',
+          blocks: [block({ order: 0, ...ABOVE, ...above })],
+        },
+        {
+          index: 1,
+          width: 612,
+          height: 792,
+          rotation: 0,
+          contentClass: 'text',
+          blocks: [
+            block({ order: 0, ...OVER, ...over }),
+            ...onPageTwo.map((b, i) => block({ order: i + 1, ...b })),
+          ],
+        },
+      ],
+    }
+  }
+
+  it('appends the rows the break moved up to the table they were cut from', () => {
+    const out = buildMarkdown(continuedDoc(), opts)
+    // One table, one header, one separator — the continuation's first row is
+    // data, and promoting it would put a reading in the header's place.
+    expect(out).toContain('| Name | Value |\n| --- | --- |\n| Alpha | 12 |\n| Beta | 34 |')
+    expect(out.match(/\| --- \|/g)).toHaveLength(1)
+  })
+
+  it('keeps the page marker, printed after the rows the break moved up', () => {
+    // A heading cannot sit inside a table, so the `## Page 2` marker lands
+    // just after the joined rows — where the rest of that page begins.
+    const out = buildMarkdown(continuedDoc({}, {}, [{ sourceText: 'After the table.' }]), {
+      ...opts,
+      includePageHeadings: true,
+    })
+    expect(out).toContain('| Beta | 34 |\n\n## Page 2\n\nAfter the table.')
+  })
+
+  it('joins both halves when the source is quoted above the translation', () => {
+    const out = buildMarkdown(
+      continuedDoc(
+        { sourceText: 'Name \t Value\nAlpha \t 12', translatedText: 'Ner \t Taya\nAlpha \t 12' },
+        { sourceText: 'Beta \t 34', translatedText: 'Bet \t 34' },
+      ),
+      { ...opts, includeOriginal: true },
+    )
+    // The quoted rows extend the quoted table (still one blockquote, still
+    // one `> | --- |`), and the translations extend theirs.
+    expect(out).toContain('> | Name | Value |\n> | --- | --- |\n> | Alpha | 12 |\n> | Beta | 34 |')
+    expect(out.match(/>\s\| --- \|/g)).toHaveLength(1)
+    expect(out).toContain('| Ner | Taya |\n| --- | --- |\n| Alpha | 12 |\n| Bet | 34 |')
+  })
+
+  it('prints a running head between the halves without breaking the join', () => {
+    // A running head is margin text printed where it was on its page, not
+    // content between the table and its continuation — so it must not take
+    // the join away, and it prints after the rows the break moved up.
+    const out = buildMarkdown(
+      continuedDoc({}, { order: 1 }, [
+        {
+          region: 'header',
+          order: 0,
+          sourceText: 'Annual Report',
+          translatedText: 'Annual Report',
+        },
+      ]),
+      opts,
+    )
+    expect(out).toContain('| Alpha | 12 |\n| Beta | 34 |\n\nAnnual Report')
+  })
+
+  it('pads a continuation row the model answered with fewer cells', () => {
+    // Alignment, not cutting: a row one cell short would pull every cell
+    // after it out of line under the header, and cutting cells is data loss.
+    const out = buildMarkdown(
+      continuedDoc({
+        sourceText: 'Name \t Value \t Qty\nAlpha \t 12 \t 7',
+        translatedText: 'Name \t Value \t Qty\nAlpha \t 12 \t 7',
+        tableCells: [
+          ['Name', 'Value', 'Qty'],
+          ['Alpha', '12', '7'],
+        ],
+      }),
+      opts,
+    )
+    expect(out).toContain('| Alpha | 12 | 7 |\n| Beta | 34 |  |')
+  })
+
+  it('still promotes the first row when nothing above it continues', () => {
+    // The mark is what makes a continuation a continuation; without a table
+    // to join, a table is a table and Markdown wants its header.
+    const out = buildMarkdown(continuedDoc({}, { tableContinuation: false }), opts)
+    // Two tables, two headers: each stands alone with a separator of its own.
+    expect(out.match(/\| --- \|/g)).toHaveLength(2)
+    expect(out).toContain('| Name | Value |\n| --- | --- |\n| Alpha | 12 |')
+    expect(out).toContain('| Beta | 34 |\n| --- | --- |')
+  })
+
+  it('leaves a lone continuation standing when the part above is prose', () => {
+    // Nothing to join onto: the rows print as their own table rather than
+    // being appended to a paragraph, which would make no sense at all.
+    const out = buildMarkdown(
+      {
+        ...makeDoc(),
+        pages: [
+          {
+            index: 0,
+            width: 612,
+            height: 792,
+            rotation: 0,
+            contentClass: 'text',
+            blocks: [block({ order: 0, sourceText: 'Some prose.', translatedText: 'Some prose.' })],
+          },
+          {
+            index: 1,
+            width: 612,
+            height: 792,
+            rotation: 0,
+            contentClass: 'text',
+            blocks: [block({ order: 0, ...OVER })],
+          },
+        ],
+      },
+      opts,
+    )
+    expect(out).toContain('Some prose.\n\n| Beta | 34 |')
+    expect(out.match(/\| --- \|/g)).toHaveLength(1)
+  })
+})
+
 describe('buildMarkdown figures', () => {
   const opts = { title: 'Sample', includeOriginal: false, includePageHeadings: false }
   const ART = [{ key: 'fig#0', bytes: new Uint8Array([1]), dataUrl: 'data:image/png;base64,AQ==' }]

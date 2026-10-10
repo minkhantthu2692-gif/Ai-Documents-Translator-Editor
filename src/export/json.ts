@@ -54,6 +54,7 @@ function projectBlock(block: ExportBlock): BlockWithoutGeometry {
     links: block.links,
     tableCells: block.tableCells,
     tableSpans: block.tableSpans,
+    tableContinuation: block.tableContinuation,
     sourceText: block.sourceText,
     translatedText: block.translatedText,
     characterCount: block.characterCount,

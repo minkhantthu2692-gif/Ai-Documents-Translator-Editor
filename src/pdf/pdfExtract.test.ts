@@ -16,6 +16,7 @@ import {
   type PDFDocumentProxy,
 } from 'pdfjs-dist'
 import {
+  continuationHintFor,
   extractPage,
   needsSidecarFallback,
   parsePdfDate,
@@ -506,6 +507,155 @@ describe('table-spans.pdf', () => {
     const prose = blocks.filter((block) => block.kind !== 'table').map((block) => block.text)
     expect(prose.join('\n')).toContain('drawn across both figure columns')
     expect(prose.join('\n')).toContain('spans both figure columns')
+  })
+})
+
+describe('table-continued.pdf', () => {
+  const extract = async (
+    doc: PDFDocumentProxy,
+    pageIndex: number,
+    options: { continuation?: { width: number; left: number } | null } = {},
+  ) => {
+    const page = await doc.getPage(pageIndex + 1)
+    return extractPage(page, {
+      pageIndex,
+      ctx: { sourceLang: 'en', targetLang: 'my' },
+      headerTexts: [],
+      footerTexts: [],
+      ...options,
+    })
+  }
+
+  it('ends page one with the table running off the foot of the sheet', async () => {
+    const doc = await open('table-continued.pdf')
+    const page = await extract(doc, 0)
+
+    const table = page.blocks.find((block) => block.kind === 'table')
+    expect(table?.tableCells?.[0]).toEqual(['Region', 'Q1', 'Q2'])
+    expect(table?.tableCells?.length).toBeGreaterThan(10)
+    // Nothing follows it: the table is the last thing the page has to say,
+    // which is what a table cut by a page break looks like from its own side.
+    const shown = page.blocks.filter((block) => block.text.trim().length > 0)
+    expect(shown[shown.length - 1].kind).toBe('table')
+    // And it ran down past the middle of the page, so it was flowing towards
+    // the break rather than ending in a section of its own.
+    expect(continuationHintFor(page)).toEqual({ width: 3, left: 72 })
+  })
+
+  it('reads the leftover row as a paragraph when no table vouches for it', async () => {
+    // What the page looks like when it is read on its own — one line with
+    // two wide gaps in it, which is exactly what a line of prose with two
+    // long word spaces would be. The row is flattened and its cells are gone.
+    const doc = await open('table-continued.pdf')
+    const { blocks } = await extract(doc, 1)
+
+    expect(blocks[0].kind).toBe('paragraph')
+    expect(blocks[0].text).toBe('West 200 210')
+  })
+
+  it('reads the leftover row as the row it is when the table vouches for it', async () => {
+    const doc = await open('table-continued.pdf')
+    const hint = continuationHintFor(await extract(doc, 0))
+    const { blocks } = await extract(doc, 1, { continuation: hint })
+
+    expect(blocks[0].kind).toBe('table')
+    expect(blocks[0].tableCells).toEqual([['West', '200', '210']])
+    // The text form is what the model sees, and it is the grid's — the cells
+    // are back in it whether or not the page below the row is prose.
+    expect(blocks[0].text).toBe('West \t 200 \t 210')
+    expect(blocks[0].tableSpans).toBeNull()
+    // The prose underneath is a block of its own: the evidence is spent on
+    // the first body block and nowhere else.
+    expect(blocks[1].kind).toBe('paragraph')
+  })
+})
+
+describe('continuationHintFor', () => {
+  function block(order: number, extra: Partial<PageBlock> = {}): PageBlock {
+    return {
+      id: `b${order}`,
+      kind: 'paragraph',
+      region: 'body',
+      order,
+      text: 'text',
+      bbox: { x: 72, y: 100, w: 200, h: 11 },
+      lines: [],
+      alignment: 'left',
+      skipRule: null,
+      placeholders: [],
+      listMarker: null,
+      tableCells: null,
+      tableSpans: null,
+      headingLevel: null,
+      links: [],
+      figures: [],
+      lineSpacing: 1.4,
+      fontFamily: 'Helvetica',
+      fontSize: 11,
+      bold: false,
+      italic: false,
+      color: '#000000',
+      ...extra,
+    }
+  }
+
+  const page = (blocks: PageBlock[], height = 792): ExtractedPage => ({
+    pageIndex: 0,
+    width: 612,
+    height,
+    rotation: 0,
+    charCount: 100,
+    lineCount: 10,
+    blocks,
+  })
+
+  const table = (order: number, extra: Partial<PageBlock> = {}): PageBlock =>
+    block(order, {
+      kind: 'table',
+      text: 'Region \t Q1 \t Q2',
+      bbox: { x: 72, y: 121, w: 376, h: 569 },
+      tableCells: [
+        ['Region', 'Q1', 'Q2'],
+        ['North', '120', '150'],
+      ],
+      ...extra,
+    })
+
+  it('is nothing for a document that has not a first page', () => {
+    expect(continuationHintFor(null)).toBeNull()
+    expect(continuationHintFor(undefined)).toBeNull()
+  })
+
+  it('is nothing for a page that ends with prose', () => {
+    expect(continuationHintFor(page([table(0), block(1)]))).toBeNull()
+  })
+
+  it('is nothing for a table that stopped in the top third of the page', () => {
+    // A table that ends high with the rest of the sheet blank ended because
+    // the section did, and the table on the next page is very likely another
+    // one: the evidence is about a table flowing *towards* the break.
+    const short = table(0, { bbox: { x: 72, y: 121, w: 376, h: 200 } })
+    expect(continuationHintFor(page([short]))).toBeNull()
+  })
+
+  it('is nothing for a one-column table, which cannot be continued as one', () => {
+    const single = table(0, { tableCells: [['Only'], ['Column']] })
+    expect(continuationHintFor(page([single]))).toBeNull()
+  })
+
+  it('looks past the margins and past blocks no reader is shown', () => {
+    // A running head above and a page label below do not change what the page
+    // ended with, and neither does a block whose text is empty — the hint is
+    // about the last thing a reader would see.
+    const hint = continuationHintFor(
+      page([
+        block(0, { region: 'header' }),
+        table(1),
+        block(2, { text: '   ' }),
+        block(3, { region: 'footer' }),
+      ]),
+    )
+    expect(hint).toEqual({ width: 3, left: 72 })
   })
 })
 

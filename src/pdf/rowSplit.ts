@@ -6,7 +6,7 @@
  * a table, and the reading-order pass wants to know which lines it must leave
  * alone. Both live in modules that would otherwise have to import each other.
  *
- * ### Two questions, two answers
+ * ### Two questions, two answers — and the page break between them
  *
  * **"Is this run of lines a table?"** (`tableForLines`) is asked once a block
  * exists and answered off geometry: pdf.js emits one text item per show-text
@@ -33,6 +33,13 @@
  * The two disagree on purpose, and `structure.test.ts` /
  * `readingOrder.test.ts` between them pin both halves.
  *
+ * A third input, `TableContinuation`, exists for the one shape neither can
+ * reach alone: a table cut by a page break can leave the next page with a
+ * single row, and one row has nothing to recur against. The row is then judged
+ * against the *table it came from* — same number of cells, same left edge —
+ * rather than against itself. It is offered, never assumed: `tableForLines`
+ * still answers `null` for every line that does not measure out that way.
+ *
  * ### Why the old block-level test had to go
  *
  * It split `line.text` on `/\s{2,}|\t/`. `groupItemsIntoLines` collapses every
@@ -48,6 +55,23 @@ import type { GroupedLine, LineRun } from './lineGrouping'
 export interface CellSplit {
   isTable: boolean
   cells: string[]
+}
+
+/**
+ * The table the previous page ended with, in the one form the next page needs.
+ *
+ * A page break cuts a table in the middle of a run of rows, and the rows that
+ * land on the next page are judged on their own: one leftover row has no second
+ * row to agree with, so `tableForLines` reads it as a long word space and the
+ * page opens with a paragraph of cell text. The previous table is the evidence
+ * that such a row is a row — this carries just enough of it to check that the
+ * lines at the top of the next page are cut the way *that* table was cut.
+ */
+export interface TableContinuation {
+  /** Cells per row that table had. */
+  width: number
+  /** x its left edge started at — every row began there. */
+  left: number
 }
 
 /** A block's table, as the rectangular grid the exporters render. */
@@ -154,7 +178,18 @@ export function rowCells(line: GroupedLine): string[] | null {
  * for alignment, so they fall back to agreeing on a column count, which is the
  * weaker claim the legacy test already made.
  */
-export function tableForLines(lines: readonly GroupedLine[]): TableGrid | null {
+export function tableForLines(
+  lines: readonly GroupedLine[],
+  continuation?: TableContinuation | null,
+): TableGrid | null {
+  const detected = detectedTable(lines)
+  if (detected) return detected
+  if (!continuation) return null
+  return continuedTable(lines, continuation)
+}
+
+/** `tableForLines`'s own reading: aligned columns, or the text form of them. */
+function detectedTable(lines: readonly GroupedLine[]): TableGrid | null {
   if (lines.length < 2) return null
   if (lines.every((line) => line.runs && line.runs.length > 0)) {
     return alignedTable(lines)
@@ -170,6 +205,52 @@ export function tableForLines(lines: readonly GroupedLine[]): TableGrid | null {
   // merge out of: every cell is exactly one column wide and the exporters are
   // told nothing, which is the same answer they had before spans existed.
   return { rows: grid, spans: null }
+}
+
+/**
+ * The lines at the top of a page read as rows of the table the page before it
+ * ended with — the only reading the recurrence test cannot reach.
+ *
+ * `detectedTable` asks rows to *agree* with each other, which a table with one
+ * row left on the page has no way to do. Here every line is asked to agree with
+ * the **previous table** instead: cut into as many cells as that table had, at
+ * a left edge that table started from, out of runs that are cells rather than
+ * clauses. Every line has to pass, so a paragraph that merely begins flush with
+ * the table's margin stays the paragraph it is — the eight-ems run width and
+ * the required cell count are what stop prose wearing the table's clothes, and
+ * a line that fails costs exactly what it did before: the page opens with the
+ * text it opened with.
+ *
+ * No merge is read here. One row is one row: a span is a *recurring* cut
+ * position the alignment clusters produce, and inventing one from a single line
+ * would be a guess about geometry nothing observed.
+ */
+function continuedTable(
+  lines: readonly GroupedLine[],
+  continuation: TableContinuation,
+): TableGrid | null {
+  if (lines.length === 0) return null
+  const rows: string[][] = []
+  for (const line of lines) {
+    const cells = continuedRow(line, continuation)
+    if (cells === null) return null
+    rows.push(cells)
+  }
+  return { rows, spans: null }
+}
+
+/** One line as a row of the previous table, or `null` when it is not one. */
+function continuedRow(line: GroupedLine, continuation: TableContinuation): string[] | null {
+  const ordered = runsInOrder(line)
+  if (ordered.length < 2) return null
+  // Every row of that table began where its first column began. A row whose
+  // first cell is empty starts further right and cannot be told from a new
+  // table's row, so it is left alone rather than guessed at.
+  const tolerance = Math.max(4, line.style.fontSize * 0.5)
+  if (Math.abs(ordered[0].x - continuation.left) > tolerance) return null
+  if (!cellSizedRuns(line)) return null
+  const cells = rowCells(line)
+  return cells !== null && cells.length === continuation.width ? cells : null
 }
 
 /** Geometric half of `tableForLines`: cut positions that recur across rows. */

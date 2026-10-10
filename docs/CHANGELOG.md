@@ -275,6 +275,35 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   recording the merge; a merged cell wider than eight ems is still cut at the
   gutter by reading order before the detector sees it, which is a limit of that
   guard rather than of the spans.
+- **Multi-page tables** (phase (c) follow-up of `docs/PDF_TYPES_SUPPORT.md`, type 6 of 25):
+  a table that runs off the foot of a page arrives as two halves, and the orphaned row on the
+  next page is usually a *single* line — the shape `tableForLines` refuses by rule — so it
+  degraded to the paragraph it looked like (`West 200 210`); even when it did read as a table,
+  Markdown promoted its first row to a header it did not have and DOCX emitted a second `w:tbl`
+  with a seam where the page broke. Two readings join it. The **hint**:
+  `continuationHintFor` hands the page just parsed's last body table — at least two cells wide,
+  its bottom past 55% of the page — the `{width, left}` the row above was printed at, and
+  `tableForLines` consults it only after ordinary detection has already failed, only when every
+  line splits into exactly that many cell-sized runs starting at that left edge; such a block
+  gets `spans: null` (one line proves no merge) and the hint is offered only to the page's
+  first *body* block, a running head above it not being content. The **mark**:
+  `markTableContinuations` runs in `collect.ts` at export — the one moment every page is in
+  order at once — when consecutive pages *end* and *begin* with same-width tables past the
+  middle of the page, which is the discrimination the shape of the evidence allows and the
+  reason a wrong join cannot easily be: it would put another table's rows under this table's
+  header. With the mark set, DOCX holds its table open and appends the next page's rows — one
+  `w:tbl`, the page break spent on the join (Word paginates a tall table itself), `Page N`
+  printed *after* the joined rows because a heading cannot sit inside a table — Markdown
+  appends to the part that already has its header without promoting, pads a short row rather
+  than cutting cells, and keeps quoted source rows in the quoted half; JSON carries
+  `tableContinuation` beside the grid. HTML, EPUB, plain text and the delimited formats build
+  tables row by row with no page in sight, so nothing there changes. A miss costs exactly the
+  two tables every format gave before this. Known gaps: the hint travels within a parse window
+  only — a continuation first read in another window is not rescued back — and two same-width
+  tables either side of a break are indistinguishable from one, which lands the join mildly
+  (rows together, one header fewer). `fixtures/table-continued.pdf` (new) is a page ending in
+  a three-column table and the next opening with its orphaned row above three prose lines that
+  must stay prose.
 
 ### Security
 

@@ -289,6 +289,43 @@ describe('buildJsonDocument', () => {
     }
   })
 
+  it('carries the continuation flag beside the grid, and back unchanged', () => {
+    const doc: ExportDocument = {
+      ...makeDoc(),
+      pages: [
+        {
+          index: 0,
+          width: 612,
+          height: 792,
+          rotation: 0,
+          contentClass: 'text',
+          blocks: [
+            block({
+              id: 'over',
+              kind: 'table',
+              tableContinuation: true,
+              tableCells: [['West', '200', '210']],
+              sourceText: 'West \t 200 \t 210',
+              translatedText: 'West \t 200 \t 210',
+            }),
+          ],
+        },
+      ],
+    }
+
+    for (const includeGeometry of [true, false]) {
+      const parsed = parseJsonDocument(buildJsonDocument(doc, { pretty: false, includeGeometry }))
+      expect(parsed.pages[0].blocks[0].tableContinuation).toBe(true)
+    }
+  })
+
+  it('writes no continuation flag for a table that stands alone', () => {
+    const parsed = parseJsonDocument(
+      buildJsonDocument(makeDoc(), { pretty: false, includeGeometry: true }),
+    )
+    expect(parsed.pages[0].blocks[0].tableContinuation).toBeUndefined()
+  })
+
   it('writes null rather than omitting a block with no cells', () => {
     const parsed = parseJsonDocument(
       buildJsonDocument(makeDoc(), { pretty: false, includeGeometry: true }),

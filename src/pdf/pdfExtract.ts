@@ -46,6 +46,7 @@ import {
   type StructureOptions,
 } from './structure'
 import { lineId } from './stableId'
+import type { TableContinuation } from './rowSplit'
 import type { SkipContext } from './skipRules'
 import {
   addFont,
@@ -607,6 +608,13 @@ export interface ExtractPageOptions {
   headingSizes?: readonly number[]
   /** Convert Zawgyi-encoded Myanmar lines to Unicode first. */
   convertZawgyi?: boolean
+  /**
+   * The table the previous page ended with (see `continuationHintFor`) — the
+   * evidence a single row at the top of this page is the rest of that table
+   * rather than a line of prose. Absent for the first page of a document and
+   * for any page whose predecessor could not be read.
+   */
+  continuation?: TableContinuation | null
 }
 
 export interface ExtractedPage {
@@ -645,6 +653,49 @@ export function needsSidecarFallback(page: ExtractedPage): boolean {
 }
 
 /**
+ * The table a page ended with, in the form the next page can be read against.
+ *
+ * A page break through a table is not visible on either side of it: the rows
+ * above the break are an ordinary table, and the rows below — when there is
+ * only one of them — are an ordinary paragraph. Passing what the *previous*
+ * page left behind to the next page's extraction is what connects the two, and
+ * this is the whole of what crosses: how many cells a row had and where the row
+ * started, which is all the next page needs to recognise its own top.
+ *
+ * Three guards keep the evidence honest, and all three are about the page it
+ * came from rather than the one it is going to:
+ *
+ *  - the last body block has to *be* a table — prose under the table means the
+ *    table ended before the break and its last row has already been read;
+ *  - it has to have run down past the middle of the page, so a table that stops
+ *    in the top third with the rest of the sheet blank (a section end) does not
+ *    speak for the next page's table, which is very likely a different one;
+ *  - it has to carry at least two columns, since one column is not a table and
+ *    could not be continued as one.
+ *
+ * Returns `null` for every page where none of that holds, which is the signal
+ * the next page is read exactly as it would have been read alone.
+ */
+export function continuationHintFor(
+  page: ExtractedPage | null | undefined,
+): TableContinuation | null {
+  if (!page) return null
+  // Reading order, not array position: the passes after the block builder can
+  // insert blocks, and what a renderer shows last is the block with the
+  // highest `order` that carries text.
+  let last: PageBlock | null = null
+  for (const block of page.blocks) {
+    if (block.region !== 'body' || block.text.trim().length === 0) continue
+    if (last === null || block.order > last.order) last = block
+  }
+  if (last === null || last.kind !== 'table' || last.tableCells === null) return null
+  const columns = last.tableCells[0]?.length ?? 0
+  if (columns < 2) return null
+  if (last.bbox.y + last.bbox.h < page.height * 0.55) return null
+  return { width: columns, left: last.bbox.x }
+}
+
+/**
  * The shared tail of extraction: runs → lines → ordered blocks → links →
  * figures.
  *
@@ -666,6 +717,7 @@ export function assemblePage(
     headerTexts: new Set(options.headerTexts ?? []),
     footerTexts: new Set(options.footerTexts ?? []),
     headingSizes: options.headingSizes ?? [],
+    continuation: options.continuation ?? null,
   }
 
   let lines = groupItemsIntoLines(source.items, {

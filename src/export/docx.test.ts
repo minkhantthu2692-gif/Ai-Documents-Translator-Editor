@@ -432,6 +432,123 @@ describe('buildDocx tables', () => {
   })
 })
 
+describe('buildDocx tables continued over a page break', () => {
+  const ABOVE: Partial<ExportBlock> = {
+    id: 'above',
+    order: 0,
+    kind: 'table',
+    sourceText: 'Name \t Value\nAlpha \t 12',
+    translatedText: 'Name \t Value\nAlpha \t 12',
+    tableCells: [
+      ['Name', 'Value'],
+      ['Alpha', '12'],
+    ],
+  }
+  const OVER: Partial<ExportBlock> = {
+    id: 'over',
+    order: 0,
+    kind: 'table',
+    tableContinuation: true,
+    sourceText: 'Beta \t 34',
+    translatedText: 'Beta \t 34',
+    tableCells: [['Beta', '34']],
+  }
+
+  async function continuedXml(
+    above: Partial<ExportBlock> = {},
+    over: Partial<ExportBlock> = {},
+    docxOpts: Partial<DocxOptions> = {},
+  ): Promise<string> {
+    const doc: ExportDocument = {
+      ...fixtureDoc(),
+      pages: [
+        page(0, [block({ order: 0, ...ABOVE, ...above })]),
+        page(1, [block({ ...OVER, ...over })]),
+      ],
+    }
+    return zipText(await buildDocx(doc, options(docxOpts)), 'word/document.xml')
+  }
+
+  it('joins the halves into a single Word table, rows in reading order', async () => {
+    const xml = await continuedXml()
+    // One `w:tbl` where two would butt up and show a seam at the break, and
+    // six cells — three rows of two — because the join added the row the
+    // break moved to page two instead of a second table.
+    expect(xml.match(/<w:tbl>/g) ?? []).toHaveLength(1)
+    expect(xml.match(/<w:tc>/g) ?? []).toHaveLength(6)
+    expect(xml).toContain('<w:t xml:space="preserve">Alpha</w:t>')
+    expect(xml).toContain('<w:t xml:space="preserve">Beta</w:t>')
+    expect(xml.indexOf('Beta')).toBeGreaterThan(xml.indexOf('Alpha'))
+  })
+
+  it('spends the page break on the join and forces none after it', async () => {
+    // The break's job — keep what follows it off the page it broke — is done
+    // by the join itself: Word paginates a w:tbl taller than a page all by
+    // itself, and a break here would push the rest of the document a page
+    // further on than the source had it.
+    const xml = await continuedXml({}, {}, { pageBreaks: true })
+    expect(xml).not.toContain('w:type="page"')
+    expect(xml.match(/<w:tbl>/g) ?? []).toHaveLength(1)
+  })
+
+  it('keeps the break when the next page does not continue the table', async () => {
+    const xml = await continuedXml({}, { tableContinuation: false }, { pageBreaks: true })
+    expect(xml.match(/w:type="page"/g) ?? []).toHaveLength(1)
+    expect(xml.match(/<w:tbl>/g) ?? []).toHaveLength(2)
+  })
+
+  it('prints the page marker after the joined rows, not before them', async () => {
+    // `Page 2` cannot sit inside a table; it waits for the join and lands just
+    // after it, where that page's own content begins.
+    const xml = await continuedXml({}, {}, { pageHeadings: true })
+    expect(xml.match(/<w:tbl>/g) ?? []).toHaveLength(1)
+    expect(xml).toContain('Page 2')
+    expect(xml.indexOf('Page 2')).toBeGreaterThan(xml.indexOf('Beta'))
+  })
+
+  it('pads a continuation row the model answered with fewer columns', async () => {
+    // The column count is what Word reconciles the table against; a row that
+    // disagrees is what makes it offer to repair the file.
+    const xml = await continuedXml({
+      sourceText: 'Name \t Value \t Qty\nAlpha \t 12 \t 7',
+      translatedText: 'Name \t Value \t Qty\nAlpha \t 12 \t 7',
+      tableCells: [
+        ['Name', 'Value', 'Qty'],
+        ['Alpha', '12', '7'],
+      ],
+    })
+    expect(xml.match(/<w:tbl>/g) ?? []).toHaveLength(1)
+    expect(xml.match(/<w:tc>/g) ?? []).toHaveLength(9)
+    expect(xml).toContain('<w:t xml:space="preserve">Qty</w:t>')
+  })
+
+  it('joins both halves of a bilingual export into one table per column', async () => {
+    const xml = await continuedXml(
+      { translatedText: 'Ner \t Taya\nAlpha \t 12' },
+      { translatedText: 'Bet \t 34' },
+      { includeOriginal: true },
+    )
+    // Two tables — the quoted source and the translation — each carrying both
+    // halves of its column, not four tables that butt up against each other.
+    expect(xml.match(/<w:tbl>/g) ?? []).toHaveLength(2)
+    expect(xml.match(/<w:tc>/g) ?? []).toHaveLength(12)
+  })
+
+  it('does not join a block the model answered with prose for a half', async () => {
+    // The halves no longer match shape-for-shape, so the join stands down:
+    // two tables — still every row, in order — and the sentence printed after
+    // the table its own text belongs to, never before it.
+    const xml = await continuedXml(
+      { translatedText: 'The figures continued below.' },
+      {},
+      { includeOriginal: true },
+    )
+    expect(xml.match(/<w:tbl>/g) ?? []).toHaveLength(2)
+    expect(xml).toContain('The figures continued below.')
+    expect(xml.indexOf('The figures continued below.')).toBeGreaterThan(xml.indexOf('Alpha'))
+  })
+})
+
 describe('buildDocx figures', () => {
   const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
   const ART = [{ key: 'cap#0', bytes: PNG, dataUrl: 'data:image/png;base64,iVBORw0KG==' }]

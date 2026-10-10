@@ -19,6 +19,9 @@
  *   fixtures/table-spans.pdf 1 page, one table whose header cell is drawn
  *                            *across* two columns: no operator says so, only
  *                            the run's width does
+ *   fixtures/table-continued.pdf 2 pages, one table cut by the page break:
+ *                            page 1 ends with it running off the foot, page 2
+ *                            opens with the single row the break left behind
  *   fixtures/figure.pdf      2 pages: a captioned figure, an uncaptioned one,
  *                            a texture under type, a full-bleed wash, an icon
  *                            and a letterhead logo — five images, one of which
@@ -429,6 +432,85 @@ function buildTableSpansPdf() {
     Title: 'Table with a merged cell',
     Author: 'Finance Department',
     Subject: 'A header cell drawn across two columns',
+    Creator: 'make-fixtures.mjs',
+    Producer: 'make-fixtures.mjs',
+    CreationDate: "D:20260115093000+06'30'",
+    ModDate: "D:20260320174500+06'30'",
+  })
+  return writer.render()
+}
+
+/**
+ * A two-page fixture whose table is cut by a page break.
+ *
+ * Page 1 ends with the table running off the foot of the sheet — nothing
+ * follows it, which is what a table cut by a break looks like from its own
+ * side — and page 2 opens with the single row the break left behind.
+ *
+ * That row is the shape neither detector can reach on its own. One line
+ * cannot agree with *itself* about where its columns are, so the recurrence
+ * test has nothing to recur and reads `West 200 210` as a paragraph. What it
+ * can be read against is the table it came from: three cells, starting at the
+ * same x that table started at.
+ *
+ * Page 2 carries three lines of prose well below the row for a reason about
+ * the fixture rather than the pipeline: block grouping sizes its gap test
+ * against the page's own median leading, and a page whose only two blocks are
+ * separated by one gap would take that gap *as* the median and fuse them. The
+ * prose makes the leading small and the 40pt above it unmistakable.
+ */
+function buildTableContinuationPdf() {
+  const writer = new PdfWriter()
+  const pagesNum = addPagesObject(writer)
+  const regular = writer.add(FONT_REGULAR)
+  const bold = writer.add(FONT_BOLD)
+  const resources = `/Font << /F1 ${regular} 0 R /F2 ${bold} 0 R >>`
+
+  const page1 = [
+    cell(72, 740, 14, 'F2', 'Revenue by region'),
+    cell(72, 700, 11, 'F1', 'The table below runs off the foot of this page.'),
+    cell(72, 660, 11, 'F1', 'Region'),
+    cell(260, 660, 11, 'F1', 'Q1'),
+    cell(430, 660, 11, 'F1', 'Q2'),
+  ]
+  const names = ['North', 'South', 'East', 'Central', 'Coast', 'Valley', 'Upland', 'Delta']
+  for (let index = 0; index < 31; index += 1) {
+    const y = 642 - index * 18
+    page1.push(
+      cell(72, y, 11, 'F1', names[index % names.length]),
+      cell(260, y, 11, 'F1', `${120 + index}`),
+      cell(430, y, 11, 'F1', `${150 + index}`),
+    )
+  }
+
+  const page2 = [
+    cell(72, 740, 11, 'F1', 'West'),
+    cell(260, 740, 11, 'F1', '200'),
+    cell(430, 740, 11, 'F1', '210'),
+    cell(72, 700, 11, 'F1', 'The row above is the last of the table that began overleaf.'),
+    cell(72, 684, 11, 'F1', 'Three lines of prose stand below it, so it is a block of its own.'),
+    cell(72, 668, 11, 'F1', 'Nothing here repeats the columns that row was cut from.'),
+  ]
+
+  const kids = [
+    addPage(
+      writer,
+      pagesNum,
+      resources,
+      writer.addStream('', Buffer.from(page1.join(''), 'latin1')),
+    ),
+    addPage(
+      writer,
+      pagesNum,
+      resources,
+      writer.addStream('', Buffer.from(page2.join(''), 'latin1')),
+    ),
+  ]
+  finalizePages(writer, pagesNum, kids)
+  writer.setInfo({
+    Title: 'Table continued over a page break',
+    Author: 'Finance Department',
+    Subject: 'One row left on the page after the break',
     Creator: 'make-fixtures.mjs',
     Producer: 'make-fixtures.mjs',
     CreationDate: "D:20260115093000+06'30'",
@@ -1211,6 +1293,7 @@ const outputs = [
   ['links.pdf', buildLinksPdf()],
   ['table.pdf', buildTablePdf()],
   ['table-spans.pdf', buildTableSpansPdf()],
+  ['table-continued.pdf', buildTableContinuationPdf()],
   ['figure.pdf', buildFigurePdf()],
   ['form.pdf', buildFormPdf()],
   ['annotations.pdf', buildAnnotationsPdf()],

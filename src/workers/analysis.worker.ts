@@ -31,6 +31,7 @@ import type { ReasonCode } from '@/core/reasonCodes'
 import { PDF_DOCUMENT_PARAMS } from '@/pdf/pdfAssets'
 import {
   assemblePage,
+  continuationHintFor,
   extractPage,
   needsSidecarFallback,
   probeDocument,
@@ -38,6 +39,7 @@ import {
   type ExtractedPage,
   type ExtractPageOptions,
 } from '@/pdf/pdfExtract'
+import type { TableContinuation } from '@/pdf/rowSplit'
 import {
   isRenderCancelled,
   renderPage,
@@ -309,7 +311,7 @@ async function recoverWithSidecar(
   open: OpenDoc,
   retries: FailedPage[],
   pages: Array<ExtractedPage | null>,
-  pageOptions: (pageIndex: number) => ExtractPageOptions,
+  pageOptions: (pageIndex: number, continuation: TableContinuation | null) => ExtractPageOptions,
   signal: AbortSignal,
 ): Promise<void> {
   if (retries.length === 0 || !open.bytes) return
@@ -347,7 +349,11 @@ async function recoverWithSidecar(
       pages[retry.position] = assemblePage(
         retry.pageIndex,
         { ...entry.source, annotations, placements },
-        pageOptions(retry.pageIndex),
+        // The page before this one is settled by now — every earlier retry has
+        // been reassembled — so its table, if it ended with one, still speaks
+        // for the top of this page even though the engines disagreed about how
+        // to read it.
+        pageOptions(retry.pageIndex, continuationHintFor(pages[retry.position - 1])),
       )
       continue
     }
@@ -370,19 +376,28 @@ async function handleExtract(request: ExtractRequest): Promise<void> {
   }
   const controller = new AbortController()
   aborts.set(request.id, controller)
-  const pageOptions = (pageIndex: number): ExtractPageOptions => ({
+  const pageOptions = (
+    pageIndex: number,
+    continuation: TableContinuation | null = null,
+  ): ExtractPageOptions => ({
     pageIndex,
     ...(request.ctx ? { ctx: request.ctx } : {}),
     ...(request.headerTexts ? { headerTexts: request.headerTexts } : {}),
     ...(request.footerTexts ? { footerTexts: request.footerTexts } : {}),
     ...(request.headingSizes ? { headingSizes: request.headingSizes } : {}),
     ...(request.convertZawgyi !== undefined ? { convertZawgyi: request.convertZawgyi } : {}),
+    ...(continuation ? { continuation } : {}),
   })
 
   try {
     const total = request.pageIndexes.length
     const pages: Array<ExtractedPage | null> = new Array(total).fill(null)
     const retries: FailedPage[] = []
+    // The page before the one being read, so a table that ends at the break
+    // can vouch for the top of the next one. Windows are read in order, so the
+    // predecessor is always in hand — except after a page that produced
+    // nothing, where the evidence ends with it.
+    let previous: ExtractedPage | null = null
 
     for (let position = 0; position < total; position += 1) {
       if (controller.signal.aborted) throw new DOMException('aborted', 'AbortError')
@@ -396,7 +411,7 @@ async function handleExtract(request: ExtractRequest): Promise<void> {
         // unreadable page must not take the window with it — the pages after
         // it are unaffected by its contents.
         page = await open.doc.getPage(pageIndex + 1)
-        extracted = await extractPage(page, pageOptions(pageIndex))
+        extracted = await extractPage(page, pageOptions(pageIndex, continuationHintFor(previous)))
       } catch (error) {
         if (isAbortError(error)) throw error
         failure = error
@@ -411,6 +426,7 @@ async function handleExtract(request: ExtractRequest): Promise<void> {
       } else {
         pages[position] = extracted
       }
+      previous = extracted
 
       post({
         kind: 'progress',

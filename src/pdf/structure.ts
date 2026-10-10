@@ -26,7 +26,7 @@ import {
   looksLikeCodeBlock,
   looksLikeCodeLine,
 } from './codeBlocks'
-import { rowCells, tableForLines } from './rowSplit'
+import { rowCells, tableForLines, type TableContinuation } from './rowSplit'
 import { blockId, type BBox } from './stableId'
 
 export type BlockKind =
@@ -168,6 +168,13 @@ export interface StructureOptions {
    * context (OCR, a unit test) does.
    */
   headingSizes?: readonly number[]
+  /**
+   * The table the previous page ended with, when this page's first body block
+   * may be the rest of it — see `TableContinuation`. Offered to the block
+   * builder for that one block only: the evidence is about the top of *this*
+   * page, and a table further down is a table of its own.
+   */
+  continuation?: TableContinuation | null
 }
 
 /** Fraction of the page height used for the header / footer bands. */
@@ -497,6 +504,11 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
 
   // --- materialise ---------------------------------------------------------
   const result: PageBlock[] = []
+  // The evidence a previous page's table left behind is about the top of *this*
+  // page, so it is spent on the first body block and nowhere else: whatever
+  // opens the body is what a cut table would leave, and a block further down is
+  // a table of its own however many cells it has.
+  let bodySeen = false
   for (const open of blocks) {
     const first = open.lines[0]
     const bbox = mergedBBox(open.lines)
@@ -506,10 +518,15 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
     // of `|` like a table, and both readings would wreck the indentation the
     // block is about to get back from its own geometry.
     const isCode = open.region === 'body' && !isFootnote && looksLikeCodeBlock(open.lines)
+    const opensBody = open.region === 'body' && !bodySeen
+    if (open.region === 'body') bodySeen = true
     // A table is *aligned columns across rows*, so it can only be judged once
     // the whole run is here. One line with a wide gap is a long word space; the
     // same gap recurring at the same x on three lines is a column.
-    const grid = open.region === 'body' && !isFootnote && !isCode ? tableForLines(open.lines) : null
+    const grid =
+      open.region === 'body' && !isFootnote && !isCode
+        ? tableForLines(open.lines, opensBody ? options.continuation : null)
+        : null
     const isTableRow = grid !== null
     const tableCells = grid ? grid.rows : null
     /** Only set when a cell actually straddles a column: see `TableGrid.spans`. */

@@ -23,6 +23,7 @@ import {
   looksLikeTableRow,
   rowCells,
   tableForLines,
+  type TableContinuation,
 } from './rowSplit'
 import type { GroupedLine, LineRun, LineStyle } from './lineGrouping'
 import { lineId, type BBox } from './stableId'
@@ -361,6 +362,152 @@ describe('tableForLines', () => {
       ]),
     ]
     expect(tableForLines(lines)).toBeNull()
+  })
+
+  describe('with the table the previous page ended with', () => {
+    // One row on a page of its own cannot agree with anything: two cells in
+    // one line are a long word space however wide, because columns are a
+    // *recurring* cut and a single line recurs over nothing. The previous
+    // table is the missing recurrence, and each of these cases pins one of
+    // the conditions it has to satisfy before its vote counts.
+    const THREE: TableContinuation = { width: 3, left: 72 }
+
+    it('reads one line as one row of the table the page before had', () => {
+      expect(
+        tableForLines(
+          [
+            row(100, [
+              ['West', 72, 30],
+              ['200', 260, 18],
+              ['210', 430, 18],
+            ]),
+          ],
+          THREE,
+        ),
+      ).toEqual({ rows: [['West', '200', '210']], spans: null })
+    })
+
+    it('reads every line that is cut the way that table was cut', () => {
+      // Two rows, each sound on its own — nothing here is a guess about
+      // geometry, only the recurrence the page break took away has been
+      // borrowed from the page before it.
+      expect(
+        tableForLines(
+          [
+            row(100, [
+              ['West', 72, 30],
+              ['200', 260, 18],
+              ['210', 430, 18],
+            ]),
+            row(84, [
+              ['Total', 72, 30],
+              ['320', 260, 18],
+              ['330', 430, 18],
+            ]),
+          ],
+          THREE,
+        ),
+      ).toEqual({
+        rows: [
+          ['West', '200', '210'],
+          ['Total', '320', '330'],
+        ],
+        spans: null,
+      })
+    })
+
+    it('reads nothing without the previous table to read it against', () => {
+      expect(
+        tableForLines([
+          row(100, [
+            ['West', 72, 30],
+            ['200', 260, 18],
+            ['210', 430, 18],
+          ]),
+        ]),
+      ).toBeNull()
+    })
+
+    it('refuses a line cut into a different number of cells', () => {
+      // Two cells where the table had three is a different table's row, or a
+      // line whose middle cell was never drawn — and padding the difference
+      // would put text in a column it does not belong to.
+      expect(
+        tableForLines(
+          [
+            row(100, [
+              ['West', 72, 30],
+              ['210', 430, 18],
+            ]),
+          ],
+          THREE,
+        ),
+      ).toBeNull()
+    })
+
+    it('refuses a line that does not start where the table started', () => {
+      // A row further right belongs to a table of its own, indented under a
+      // heading or set in another column: the previous table's vote is about
+      // *this* margin and no other.
+      expect(
+        tableForLines(
+          [
+            row(100, [
+              ['West', 120, 30],
+              ['200', 260, 18],
+              ['210', 430, 18],
+            ]),
+          ],
+          THREE,
+        ),
+      ).toBeNull()
+    })
+
+    it('refuses a line whose runs are spans of prose rather than cells', () => {
+      // Cut into the right number of cells, at the right margin — and still a
+      // sentence, because a run this wide carries a clause. Width is what
+      // keeps the reading-order pass and this one agreeing on what a cell is.
+      expect(
+        tableForLines(
+          [
+            row(100, [
+              ['Revenue rose through the quarter and then fell back', 72, 250],
+              ['120', 430, 18],
+            ]),
+          ],
+          { width: 2, left: 72 },
+        ),
+      ).toBeNull()
+    })
+
+    it('refuses a line with no geometry to read cells from', () => {
+      // Hand-built fixtures and OCR lines carry no runs, so there is nothing
+      // to measure a margin or a cell width against.
+      expect(tableForLines([plain('West 200 210')], THREE)).toBeNull()
+    })
+
+    it('leaves the ordinary reading to decide when there are enough rows', () => {
+      // Two agreeing rows are already a table; the previous table is asked
+      // only when that reading has failed, and its answer cannot overrule it.
+      const lines = [
+        row(100, [
+          ['North', 72, 30],
+          ['120', 260, 18],
+          ['150', 430, 18],
+        ]),
+        row(84, [
+          ['South', 72, 32],
+          ['90', 260, 12],
+          ['110', 430, 18],
+        ]),
+      ]
+      const detected = tableForLines(lines)
+      expect(detected?.rows).toEqual([
+        ['North', '120', '150'],
+        ['South', '90', '110'],
+      ])
+      expect(tableForLines(lines, { width: 2, left: 72 })).toEqual(detected)
+    })
   })
 })
 

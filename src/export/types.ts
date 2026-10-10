@@ -127,6 +127,21 @@ export interface ExportBlock {
    * cannot borrow the merge the extractor measured on a different one.
    */
   tableSpans: number[][] | null
+  /**
+   * This `kind === 'table'` block is the rest of the table the *previous*
+   * page ended with, rather than a table of its own.
+   *
+   * It is a mark, not a measurement: extraction cannot see across a page
+   * break (windows are read one page at a time, and a lazy scroll reads them
+   * out of order), so the two halves are recognised here — in the one place
+   * that has the whole document in order — and the renderers below act on it.
+   * What it changes is *presentation only*, because the rows themselves are
+   * already right: Markdown stops promoting the first continuation row to the
+   * header its grammar demands, and Word appends the rows to the table above
+   * instead of starting a second one. Absent (or false) means the block opens
+   * its own table.
+   */
+  tableContinuation?: boolean
   sourceText: string
   translatedText: string
   characterCount: number

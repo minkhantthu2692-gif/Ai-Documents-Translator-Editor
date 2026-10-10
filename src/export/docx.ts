@@ -205,7 +205,20 @@ function blockChildren(
 const TABLE_BORDER = { style: BorderStyle.SINGLE, size: 2, color: 'BFBFBF' }
 
 /**
- * One grid as a real Word table.
+ * One grid for one rendered column (source, then target in a bilingual
+ * export), held as *rows* rather than as a built `Table` so the rows of a page
+ * that continues over a break can still join it. See `buildChildren`.
+ */
+interface TablePart {
+  grid: string[][]
+  /** Measured on `grid` as it was printed, or `null`; see `tableSpansFor`. */
+  spans: number[][] | null
+  /** The block these rows were printed from — line spacing and links live here. */
+  block: ExportBlock
+}
+
+/**
+ * One grid as the rows of a real Word table, widened to `columns`.
  *
  * Every cell is a `TableCell` — the first row included. Which row (if any) is
  * the header is not something the extractor knows and Word does not require
@@ -216,31 +229,58 @@ const TABLE_BORDER = { style: BorderStyle.SINGLE, size: 2, color: 'BFBFBF' }
  * the PDF's own column widths are not available here — and equal columns are
  * the honest guess: right for the many tables that are evenly ruled, readable
  * for the rest. HTML at least has the block's width to divide up.
+ *
+ * Word spells the horizontal merge `w:gridSpan`; `docx` names it after the
+ * property it writes — `columnSpan`. A merged cell is drawn once and the
+ * cells it covers are not drawn at all, or the row comes out a column wider
+ * than its neighbours. `tableSpansFor` answers `null` when the printed grid
+ * is no longer the shape the spans were measured on, and every cell then
+ * stands on its own.
+ *
+ * `columns` is the width the *whole* table settled on (see `tableOf`); a grid
+ * narrower than it is padded at the end with empty cells, so rows printed from
+ * different halves of the same table still offer the same column count —
+ * which is the one thing Word checks before deciding the file needs repair.
  */
-function blockTable(grid: string[][], block: ExportBlock, font: string): Table {
-  const spacing = { line: lineUnits(block.lineHeight), lineRule: LineRuleType.AUTO }
-  // Word spells the horizontal merge `w:gridSpan`; `docx` names it after the
-  // property it writes — `columnSpan`. A merged cell is drawn once and the
-  // cells it covers are not drawn at all, or the row comes out a column wider
-  // than its neighbours. `tableSpansFor` answers `null` when the printed grid
-  // is no longer the shape the spans were measured on, and every cell then
-  // stands on its own.
-  const spans = tableSpansFor(block, grid)
-  const rows = grid.map(
-    (cells, rowIndex) =>
-      new TableRow({
-        children: cells
-          .map((cell, column) => {
-            const span = spans ? spans[rowIndex][column] : 1
-            if (span === 0) return null
-            return new TableCell({
-              ...(span > 1 ? { columnSpan: span } : {}),
-              children: [new Paragraph({ spacing, children: blockChildren(cell, block, font) })],
-            })
-          })
-          .filter((child): child is TableCell => child !== null),
-      }),
-  )
+function tableRows(part: TablePart, columns: number, font: string): TableRow[] {
+  const spacing = { line: lineUnits(part.block.lineHeight), lineRule: LineRuleType.AUTO }
+  const spans = part.spans
+  return part.grid.map((cells, rowIndex) => {
+    const drawn = cells
+      .map((cell, column) => {
+        const span = spans ? (spans[rowIndex][column] ?? 1) : 1
+        if (span === 0) return null
+        return new TableCell({
+          ...(span > 1 ? { columnSpan: span } : {}),
+          children: [new Paragraph({ spacing, children: blockChildren(cell, part.block, font) })],
+        })
+      })
+      .filter((child): child is TableCell => child !== null)
+    const padding = Array.from(
+      { length: Math.max(0, columns - cells.length) },
+      () =>
+        new TableCell({
+          children: [new Paragraph({ spacing, children: [new TextRun({ text: '', font })] })],
+        }),
+    )
+    return new TableRow({ children: [...drawn, ...padding] })
+  })
+}
+
+/**
+ * Every grid held open for one column, as a single Word table.
+ *
+ * A table cut by a page break is still one table — Word paginates a `w:tbl`
+ * that is taller than a page all by itself — so the two halves are joined
+ * here rather than emitted as two tables that butt up against each other and
+ * show a seam where the break was. The widest grid sets the column count.
+ */
+function tableOf(parts: TablePart[], font: string): Table {
+  let columns = 0
+  for (const part of parts) {
+    for (const cells of part.grid) columns = Math.max(columns, cells.length)
+  }
+  const rows = parts.flatMap((part) => tableRows(part, columns, font))
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
     borders: {
@@ -253,6 +293,16 @@ function blockTable(grid: string[][], block: ExportBlock, font: string): Table {
     },
     rows,
   })
+}
+
+/** One grid as an open part, spans measured on the grid exactly as printed. */
+function tablePartOf(grid: string[][], block: ExportBlock): TablePart {
+  return { grid, spans: tableSpansFor(block, grid), block }
+}
+
+/** True when a block child is a table waiting for the rest of its rows. */
+function isTablePart(part: Paragraph | TablePart): part is TablePart {
+  return 'grid' in part
 }
 
 /** One paragraph: alignment, RTL direction, line spacing, one run per stretch. */
@@ -277,15 +327,19 @@ function blockParagraph(
  * list marker), then — with `includeOriginal` — the translation on its own
  * paragraph. Blocks whose text is empty contribute nothing.
  *
- * A `kind === 'table'` block contributes `Table`s instead of paragraphs; see
- * `blockTable`.
+ * A `kind === 'table'` block contributes open `TablePart`s instead of
+ * paragraphs — rows without a `Table` around them yet, so `buildChildren` can
+ * decide whether these rows continue the table above a page break or start a
+ * new one. An entry whose text has no cells left in it stays a paragraph (see
+ * the branch below), and a block that mixes the two is never a continuation of
+ * anything: every entry has to be tabular for the rows to be joined.
  *
  * Exactly one paragraph per block can carry an outline level, and it is the
  * one holding the translation: in a bilingual export the source sits beside
  * it, and a reader navigating by heading wants to land on what the document
  * was turned into, not on the text they already had.
  */
-function blockParagraphs(block: ExportBlock, options: DocxOptions): Array<Paragraph | Table> {
+function blockParagraphs(block: ExportBlock, options: DocxOptions): Array<Paragraph | TablePart> {
   const { source, target, primary } = textOf(block, options.includeOriginal)
   const entries: Array<{ text: string; source: boolean }> = []
   if (options.includeOriginal) {
@@ -308,7 +362,7 @@ function blockParagraphs(block: ExportBlock, options: DocxOptions): Array<Paragr
       return entries.map((entry, index) => {
         const grid = grids[index]
         return grid
-          ? blockTable(grid, block, options.font)
+          ? tablePartOf(grid, block)
           : blockParagraph(entry.text, block, options.font, null)
       })
     }
@@ -407,7 +461,19 @@ function pageSizeOf(
   return { page: { size: { width, height } } }
 }
 
-/** Title heading, page headings, page breaks and every block, in order. */
+/**
+ * Title heading, page headings, page breaks and every block, in order.
+ *
+ * Tables are built *lazily*: a `Table` is not made until the block that ends
+ * it is known, because a table cut by a page break is still one table and the
+ * rows on the far side of the break arrive a page later. While a table is
+ * open, everything else — the `Page N` marker, a running head, a footer — is
+ * *deferred* rather than flushed, and lands just after the joined table when
+ * it closes. Those are markers printed where they were on their page, and a
+ * reader is better served by one unseamed table with the marker a few rows
+ * late than by two tables with a seam where the page broke (see
+ * `ExportBlock.tableContinuation`).
+ */
 function buildChildren(doc: ExportDocument, options: DocxOptions): Array<Paragraph | Table> {
   const children: Array<Paragraph | Table> = []
   if (options.titleHeading && options.title.trim().length > 0) {
@@ -421,14 +487,57 @@ function buildChildren(doc: ExportDocument, options: DocxOptions): Array<Paragra
   let pagesEmitted = 0
   const art = figureArtMap(options.figures)
   const maxFigureWidthPt = options.maxFigureWidthPt ?? figureColumnWidth(doc)
+  /** Rows held open, one list per rendered column (source, then target). */
+  let open: TablePart[][] | null = null
+  /** Markers waiting for the open table to close, in the order they arrived. */
+  let deferred: Array<Paragraph | Table> = []
+  const toChild = (part: Paragraph | TablePart): Paragraph | Table =>
+    isTablePart(part) ? tableOf([part], options.font) : part
+  const emit = (item: Paragraph | Table): void => {
+    if (open !== null) deferred.push(item)
+    else children.push(item)
+  }
+  const flush = (): void => {
+    if (open === null) return
+    for (const parts of open) {
+      if (parts.length > 0) children.push(tableOf(parts, options.font))
+    }
+    open = null
+    children.push(...deferred)
+    deferred = []
+  }
+  /** True when `parts` are the next rows of the table held open. */
+  const joinsOpen = (block: ExportBlock, parts: Array<Paragraph | TablePart>): boolean =>
+    block.kind === 'table' &&
+    block.tableContinuation === true &&
+    open !== null &&
+    parts.length === open.length &&
+    parts.every(isTablePart)
   for (const page of contentPages(doc)) {
     const blocks = pageBlocks(page)
     if (blocks.length === 0) continue
+    // Does this page open with the rest of the table still held open? The
+    // first *body* block is what the mark was set on: a running head prints
+    // above it but is not content between the two halves.
+    const firstBody = blocks.find((block) => block.region === 'body')
+    const continues =
+      open !== null &&
+      firstBody !== undefined &&
+      firstBody.kind === 'table' &&
+      firstBody.tableContinuation === true
     if (options.pageBreaks && pagesEmitted > 0) {
-      children.push(new Paragraph({ children: [new PageBreak()] }))
+      if (!continues) {
+        // A table the break did *not* cut ends here, and the break follows it.
+        flush()
+        children.push(new Paragraph({ children: [new PageBreak()] }))
+      }
+      // Otherwise the break is spent on the join itself: Word breaks a `w:tbl`
+      // taller than a page all by itself, and forcing one after the table
+      // would push everything that follows it a page further on than the
+      // source had it.
     }
     if (options.pageHeadings) {
-      children.push(
+      emit(
         new Paragraph({
           heading: HeadingLevel.HEADING_2,
           children: [new TextRun({ text: `Page ${page.index + 1}`, font: options.font })],
@@ -437,12 +546,49 @@ function buildChildren(doc: ExportDocument, options: DocxOptions): Array<Paragra
     }
     for (const block of blocks) {
       const figures = blockFigures(block, maxFigureWidthPt, art)
-      children.push(...figures.before)
-      children.push(...blockParagraphs(block, options))
-      children.push(...figures.after)
+      if (figures.before.length > 0) {
+        // Artwork closes the table: a picture between two halves of one is a
+        // reason to draw them as the two blocks they are.
+        flush()
+        for (const figure of figures.before) emit(figure)
+      }
+      const parts = blockParagraphs(block, options)
+      if (joinsOpen(block, parts)) {
+        const target = open ?? []
+        parts.forEach((part, index) => {
+          if (isTablePart(part)) target[index].push(part)
+        })
+      } else if (block.region !== 'body') {
+        // A running head or a page footer: not content between a table and its
+        // continuation, so it waits rather than closing the table.
+        for (const part of parts) emit(toChild(part))
+      } else {
+        flush()
+        if (parts.length > 0 && isTablePart(parts[0])) {
+          // Rows first: a table starts *open* so the rows waiting on the next
+          // page can join it, and anything this block contributes after its
+          // table (a bilingual export where the model answered a table with
+          // one sentence) waits with the markers — which lands it after the
+          // table, where it was. An entry ahead of the table cannot wait, so
+          // the table would not be opened at all; that order cannot arise
+          // from `blockParagraphs` for a table block, and the fallback keeps
+          // its rows correct if it ever does.
+          open = parts.map((part) => (isTablePart(part) ? [part] : []))
+          for (const part of parts) {
+            if (!isTablePart(part)) emit(toChild(part))
+          }
+        } else {
+          for (const part of parts) emit(toChild(part))
+        }
+      }
+      if (figures.after.length > 0) {
+        flush()
+        for (const figure of figures.after) emit(figure)
+      }
     }
     pagesEmitted += 1
   }
+  flush()
   return children
 }
 

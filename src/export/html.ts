@@ -223,11 +223,25 @@ function blockHtml(block: ExportBlock, options: HtmlOptions, classes: string[]):
   const tag = level === null || block.kind === 'code' || table ? 'div' : `h${level}`
 
   return (
-    `<${tag} class="${classes.join(' ')}${block.kind === 'code' ? ' code' : ''}${
-      block.kind === 'form-field' ? ' form-field' : ''
-    }${table ? ' has-table' : ''}${flagged}"` +
-    ` data-block-id="${escapeHtml(block.id)}"${dir} style="${style}">${content}</${tag}>`
+    `<${tag} class="${classes.join(' ')}${faceClass(block)}${table ? ' has-table' : ''}${
+      flagged
+    }"` + ` data-block-id="${escapeHtml(block.id)}"${dir} style="${style}">${content}</${tag}>`
   )
+}
+
+/**
+ * The class that says *what kind of text this is* rather than where it sits —
+ * every one of these kinds is drawn by the same `div`/`p`/`hN` tag, so the
+ * class is the only handle a stylesheet (or a reader) gets on them.
+ *
+ * A code snippet keeps its line breaks, a form label and an annotation note
+ * are text the page never printed, and a table is a grid the rules below draw.
+ */
+function faceClass(block: ExportBlock): string {
+  if (block.kind === 'code') return ' code'
+  if (block.kind === 'form-field') return ' form-field'
+  if (block.kind === 'annotation') return ' annotation'
+  return ''
 }
 
 function absolutePage(
@@ -271,11 +285,13 @@ function flowPage(page: ExportDocument['pages'][number], options: HtmlOptions): 
     const tag = level === null ? 'p' : `h${level}`
     // Code is never a heading, and it carries the `code` class so the flow
     // stylesheet can set the monospace face — the flow layout puts no inline
-    // `font-family` on these elements at all.
+    // `font-family` on these elements at all. The same class carries a form
+    // label and an annotation note: in this layout nothing else marks text the
+    // page never printed, so without it they would read as the document's own.
     const isCode = block.kind === 'code'
     const openTag = isCode ? `<p` : `<${tag}`
     const closeTag = isCode ? `p` : tag
-    const codeClass = isCode ? ' code' : ''
+    const face = faceClass(block)
 
     // A table draws cells. `<p>` cannot contain a `<table>`, so the wrapper is
     // a `<div>` wearing the same `.src`/`.tgt` classes the flow stylesheet
@@ -321,7 +337,7 @@ function flowPage(page: ExportDocument['pages'][number], options: HtmlOptions): 
             source,
             block.links,
           )}</p>` +
-          `${openTag} class="tgt${codeClass}" data-block-id="${escapeHtml(block.id)}" dir="${
+          `${openTag} class="tgt${face}" data-block-id="${escapeHtml(block.id)}" dir="${
             block.direction === 'rtl' ? 'rtl' : 'ltr'
           }">${htmlText(target, block.links)}</${closeTag}>` +
           `</div>`,
@@ -331,7 +347,7 @@ function flowPage(page: ExportDocument['pages'][number], options: HtmlOptions): 
       if (text.trim().length === 0) continue
       const marker = listPrefix(block, text)
       rows.push(
-        `${openTag} class="tgt${codeClass}" data-block-id="${escapeHtml(block.id)}"` +
+        `${openTag} class="tgt${face}" data-block-id="${escapeHtml(block.id)}"` +
           ` dir="${block.direction === 'rtl' ? 'rtl' : 'ltr'}">` +
           `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${htmlText(
             text,
@@ -419,6 +435,14 @@ ${print ? '.page { border: none; }' : ''}
    the guarantee that a print stylesheet which resets colour does not put them
    back among the labels they describe. */
 .form-field {
+  font-style: italic;
+  color: #6b7280;
+}
+/* An annotation note — a sticky note, a highlight's reason, a stamp's legend
+   (src/pdf/annotations.ts) — is text the page never printed either, and it is
+   the one a reader is most likely to mistake for the document's own: it sits
+   right under the passage it marks. Same second voice as a form label. */
+.annotation {
   font-style: italic;
   color: #6b7280;
 }

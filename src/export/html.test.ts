@@ -563,6 +563,51 @@ describe('code blocks', () => {
   })
 })
 
+describe('text the page never printed', () => {
+  function noteDoc(kind: 'form-field' | 'annotation'): ExportDocument {
+    return doc({
+      pages: [
+        {
+          index: 0,
+          width: 612,
+          height: 792,
+          rotation: 0,
+          contentClass: 'text',
+          blocks: [block({ kind, italic: true, color: '#6b7280' })],
+        },
+      ],
+    })
+  }
+
+  it('gives a note its own class and its own rule in both layouts', () => {
+    const absolute = buildHtmlDocument(noteDoc('annotation'), base)
+    expect(absolute).toContain('class="block annotation"')
+    expect(absolute).toContain('.annotation {')
+    expect(absolute).toContain('font-style: italic;')
+
+    const flow = buildHtmlDocument(noteDoc('annotation'), {
+      ...base,
+      layout: 'flow',
+      includeOriginal: true,
+      bilingual: 'side-by-side',
+    })
+    expect(flow).toContain('class="tgt annotation"')
+  })
+
+  it('keeps a note from being mistaken for a form label', () => {
+    // The two are different pieces of text arriving at the same pass, and a
+    // stylesheet that could reach only one of them would drop the other back
+    // into the document's own voice — which is exactly what the flowing layout
+    // did for both before they shared one class builder with `code`.
+    const flow = { ...base, layout: 'flow' as const }
+    expect(buildHtmlDocument(noteDoc('annotation'), base)).not.toContain('block form-field')
+    expect(buildHtmlDocument(noteDoc('annotation'), flow)).toContain('class="tgt annotation"')
+    expect(buildHtmlDocument(noteDoc('form-field'), base)).toContain('class="block form-field"')
+    expect(buildHtmlDocument(noteDoc('form-field'), base)).not.toContain('block annotation')
+    expect(buildHtmlDocument(noteDoc('form-field'), flow)).toContain('class="tgt form-field"')
+  })
+})
+
 describe('tables', () => {
   const TABLE = 'Region \t Q1 \t Q2\nNorth \t 120 \t 150'
 

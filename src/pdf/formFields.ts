@@ -177,8 +177,11 @@ function overlap(a: number, aSize: number, b: number, bSize: number): number {
  * `y` alone is routinely a whole column away, and a widget belongs to its own
  * column's row. When nothing shares the row at all the widget is in a gap, and
  * the first block that starts below it is where it would have been written.
+ *
+ * Exported for `annotations.ts`, which files a note with no block under it by
+ * exactly this rule.
  */
-function insertIndex(blocks: readonly PageBlock[], widget: BBox): number {
+export function insertIndex(blocks: readonly PageBlock[], widget: BBox): number {
   if (blocks.length === 0) return 0
   const midY = widget.y + widget.h / 2
 

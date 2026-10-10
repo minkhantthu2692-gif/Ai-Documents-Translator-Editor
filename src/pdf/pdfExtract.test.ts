@@ -23,6 +23,7 @@ import {
   readDocumentInfo,
   type ExtractedPage,
 } from './pdfExtract'
+import type { PageBlock } from './structure'
 
 const fixture = (name: string): Uint8Array =>
   new Uint8Array(readFileSync(fileURLToPath(new URL(`../../fixtures/${name}`, import.meta.url))))
@@ -613,6 +614,106 @@ describe('form.pdf', () => {
     // post`, `By email`), which is what the form's author did here anyway.
     // A push button with no `/TU` has nothing to say either.
     expect(described).toHaveLength(6)
+  })
+})
+
+describe('annotations.pdf', () => {
+  // A reviewed page keeps its marginalia in the annotation dictionary rather
+  // than in the content stream, and nothing before this pass could reach it:
+  // not grouping, not reading order, not links, not figures, not form labels.
+  const notesOn = async (doc: PDFDocumentProxy) => {
+    const { blocks } = await extractAt(doc, 0)
+    return blocks.filter((block) => block.kind === 'annotation')
+  }
+
+  it('counts every annotation in the probe, speaking or not', async () => {
+    const doc = await open('annotations.pdf')
+    const probe = await probeDocument(doc)
+    expect(probe.summary.annotations).toBe(9)
+  })
+
+  it('turns the four notes that say something into blocks', async () => {
+    const doc = await open('annotations.pdf')
+    // Annotation order: the highlight's reason, the sticky note, the callout,
+    // the stamp. The other five annotations on the page produce nothing.
+    expect((await notesOn(doc)).map((block) => block.text)).toEqual([
+      'Please confirm this figure against the ledger before filing.',
+      'Check this figure with the finance team.',
+      'Updated for the 2026 reporting cycle.',
+      'Approved by the audit committee.',
+    ])
+  })
+
+  it('files the highlight right under the passage it marks, in that column', async () => {
+    const doc = await open('annotations.pdf')
+    const { blocks } = await extractAt(doc, 0)
+    const passage = blocks.find((block) => block.text.startsWith('Revenue rose')) as PageBlock
+    const note = blocks.find((block) => block.text.startsWith('Please confirm')) as PageBlock
+    // Immediately after, not somewhere later in the page's order: the note is
+    // *about* that passage and nothing else.
+    expect(blocks.indexOf(note)).toBe(blocks.indexOf(passage) + 1)
+    expect(note.bbox.x).toBe(passage.bbox.x)
+    expect(note.bbox.w).toBe(passage.bbox.w)
+    expect(note.bbox.y).toBeCloseTo(passage.bbox.y + passage.bbox.h, 4)
+    // The one thing set deliberately: this text was never printed.
+    expect(note.italic).toBe(true)
+    expect(note.color).toBe('#6b7280')
+    expect(note.fontSize).toBe(passage.fontSize)
+  })
+
+  it('hangs the callout and the stamp in the empty space they were drawn in', async () => {
+    const doc = await open('annotations.pdf')
+    const { blocks } = await extractAt(doc, 0)
+    const callout = blocks.find((block) => block.text.startsWith('Updated for')) as PageBlock
+    const stamp = blocks.find((block) => block.text.startsWith('Approved by')) as PageBlock
+    // The callout's rectangle is `[72 545 400 575]`: 792 − 575 = 217, +30.
+    expect(callout.bbox).toEqual({ x: 72, y: 247, w: 328, h: 13.5 })
+    // The stamp's legend is longer than the 130 pt box, so it is cut to the
+    // room that is left — 612 − 430 − 12 — and wraps inside it rather than
+    // running off the right edge of the page.
+    expect(stamp.bbox.x).toBe(430)
+    expect(stamp.bbox.w).toBe(170)
+    expect(stamp.lines.map((line) => line.text)).toEqual(['Approved by the audit', 'committee.'])
+    expect(stamp.bbox.x + stamp.bbox.w).toBeLessThanOrEqual(612)
+  })
+
+  it('says nothing for a link, a hidden note, a popup or an empty one', async () => {
+    const doc = await open('annotations.pdf')
+    const { blocks } = await extractAt(doc, 0)
+    const all = blocks.map((block) => block.text).join('\n')
+
+    // A link that also carries `/Contents` stays a link: `links.ts` owns it.
+    expect(all).not.toContain('The note must not become a note.')
+    // `/F 2`: shown to nobody, announced to nobody.
+    expect(all).not.toContain('Hidden note that must not appear.')
+    // A popup repeats its parent's words at another rectangle, so only the
+    // subtype keeps the note from being printed twice.
+    expect(all.split('Please confirm this figure against the ledger before filing.')).toHaveLength(
+      2,
+    )
+    // A note with nothing in it is not a block with nothing in it.
+    expect(blocks.some((block) => block.text.trim().length === 0)).toBe(false)
+
+    // The widget's `/TU` is still a form label, and only a form label: the two
+    // passes take one annotation each rather than both taking both.
+    expect(
+      blocks.filter((block) => block.kind === 'form-field').map((block) => block.text),
+    ).toEqual(['Name of the reviewer'])
+  })
+
+  it('leaves every printed line exactly where it was', async () => {
+    const doc = await open('annotations.pdf')
+    const { blocks } = await extractAt(doc, 0)
+    expect(blocks.filter((block) => block.kind === 'paragraph').map((block) => block.text)).toEqual(
+      [
+        'Annual Report 2026',
+        'Revenue rose twelve percent against the same quarter.\nOperating costs were held flat for the third period.',
+        'Deferred income is recognised on delivery.\nThe audit committee met twice in the period.',
+        'Notes are attached to the relevant paragraph.\nEvery figure is reconciled to the ledger.',
+        'Page 1 of 1',
+      ],
+    )
+    expect(blocks.map((block) => block.order)).toEqual(blocks.map((_, index) => index))
   })
 })
 

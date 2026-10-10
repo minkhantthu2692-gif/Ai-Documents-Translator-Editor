@@ -39,6 +39,7 @@ export type BlockKind =
   | 'shape'
   | 'code'
   | 'form-field'
+  | 'annotation'
 export type BlockRegion = 'body' | 'header' | 'footer'
 export type BlockAlignment = 'left' | 'center' | 'right' | 'justified'
 

@@ -73,6 +73,9 @@ function makeBatch(
  *   body are translated in one request and the model knows which section it is
  *   working on;
  * - a `caption` binds **backward**: it joins the figure/table it labels;
+ * - an `annotation` binds **backward** for the same reason: the note is filed
+ *   directly under the passage it marks, and one request that sees both
+ *   translates the second in the light of the first;
  * - consecutive `table` rows and `list` items form one run.
  *
  * Everything else is its own unit. Reading order is never changed.
@@ -88,6 +91,7 @@ export function buildUnits(lines: BatchLine[]): BatchLine[][] {
       previous !== undefined &&
       (headingOpen ||
         line.kind === 'caption' ||
+        line.kind === 'annotation' ||
         (line.kind === previous[previous.length - 1].kind && RUN_KINDS.includes(line.kind)))
 
     if (joinsPrevious) previous.push(line)

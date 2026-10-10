@@ -157,6 +157,17 @@ describe('buildUnits — where a batch is allowed to end', () => {
     expect(buildUnits(lines(4))).toHaveLength(4)
     expect(buildUnits([])).toEqual([])
   })
+
+  it('keeps a note with the passage it marks instead of opening a batch', () => {
+    // The note is filed directly under that passage, so one request that sees
+    // both translates the second in the light of the first — and it must not
+    // drift onto the paragraph *after* it, which has nothing to do with it.
+    const units = buildUnits(structured(['paragraph', 'annotation', 'paragraph']))
+    expect(units.map((unit) => unit.map((line) => line.kind))).toEqual([
+      ['paragraph', 'annotation'],
+      ['paragraph'],
+    ])
+  })
 })
 
 describe('structure-aware packing', () => {

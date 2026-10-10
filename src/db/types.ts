@@ -96,6 +96,7 @@ export type BlockKind =
   | 'shape'
   | 'code'
   | 'form-field'
+  | 'annotation'
 export type BlockStatus = 'pending' | 'translated' | 'edited' | 'locked' | 'skipped'
 
 export interface BlockRecord extends BaseRecord {

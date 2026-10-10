@@ -20,6 +20,9 @@
  *                            a texture under type, a full-bleed wash, an icon
  *                            and a letterhead logo — five images, one of which
  *                            should survive the figure pass
+ *   fixtures/annotations.pdf 1 page, nine annotations: a highlight's reason,
+ *                            a sticky note, a callout body, a stamp legend —
+ *                            and five that must produce no text at all
  *
  * Everything is written by hand (xref offsets computed exactly) so the script
  * only depends on node:crypto for MD5. Content is ASCII so a latin-1 stream
@@ -1024,6 +1027,118 @@ function buildFormPdf() {
   return writer.render()
 }
 
+/**
+ * One page of ordinary text carrying nine annotations: four that say
+ * something, five that must not produce a word.
+ *
+ * The four that count are the shapes review markup actually arrives in — a
+ * `/Highlight` whose `/Contents` explains why the passage was marked, a
+ * sticky `/Text` note parked in the right margin, a `/FreeText` callout whose
+ * body only exists in its appearance stream, and a `/Stamp` legend. The five
+ * that must not are the traps: a `/Link` carrying `/Contents` (it is a link,
+ * `links.ts` owns it), a hidden `/Text` behind `/F 2`, a `/Popup` that repeats
+ * its parent's words verbatim at a different rectangle, a widget with a `/TU`
+ * (it is a form label, `formFields.ts` owns it), and a note whose `/Contents`
+ * is nothing but spaces.
+ *
+ * The rectangles are chosen so each case is decided by something different:
+ * the highlight lies straight over the paragraph it marks, the stamp sits in
+ * empty space to the right of every column, the callout sits in the gap
+ * between two paragraphs, and the sticky note is in a margin no block reaches.
+ */
+function buildAnnotationsPdf() {
+  const writer = new PdfWriter()
+  const pagesNum = addPagesObject(writer)
+  const regular = writer.add(FONT_REGULAR)
+  const bold = writer.add(FONT_BOLD)
+  const helv = writer.add(
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
+  )
+  const resources = `/Font << /F1 ${regular} 0 R /F2 ${bold} 0 R >>`
+  /** A one-command appearance stream, for the two annotations drawn by one. */
+  const ap = () => writer.addStream('', Buffer.from('q Q'))
+  const say = (font, size, x, y, body) =>
+    `BT\n/${font} ${size} Tf\n0 0 0 rg\n${x} ${y} Td (${escape(body)}) Tj\nET\n`
+
+  // A widget: `/TU` reaches the translator through `formFields.ts`.
+  const reviewerField = writer.add(
+    `<< /Type /Annot /Subtype /Widget /FT /Tx /F 4 /Rect [72 430 240 446] ` +
+      `/T (reviewer) /TU (Name of the reviewer) >>`,
+  )
+
+  const annots = [
+    // The reason a passage was marked, over the first body line.
+    writer.add(
+      `<< /Type /Annot /Subtype /Highlight /F 4 /Rect [70 655 350 669] ` +
+        `/QuadPoints [70 655 70 669 350 669 350 655] ` +
+        `/Contents (Please confirm this figure against the ledger before filing.) >>`,
+    ),
+    // A sticky note in the right margin, where no block of text reaches.
+    writer.add(
+      `<< /Type /Annot /Subtype /Text /Name /Comment /F 4 /Rect [560 620 576 636] ` +
+        `/Contents (Check this figure with the finance team.) >>`,
+    ),
+    // A callout: body drawn by its appearance stream, never by an operator.
+    writer.add(
+      `<< /Type /Annot /Subtype /FreeText /F 4 /Rect [72 545 400 575] ` +
+        `/DA (/Helv 12 Tf 0 0 0 rg) /AP << /N ${ap()} 0 R >> ` +
+        `/Contents (Updated for the 2026 reporting cycle.) >>`,
+    ),
+    // A stamp, whose legend is wider than the box it is stamped into.
+    writer.add(
+      `<< /Type /Annot /Subtype /Stamp /Name /Approved /F 4 /Rect [430 500 560 520] ` +
+        `/AP << /N ${ap()} 0 R >> /Contents (Approved by the audit committee.) >>`,
+    ),
+    // A link that also carries `/Contents`: it stays a link.
+    writer.add(
+      `<< /Type /Annot /Subtype /Link /F 4 /Rect [72 533 200 545] /Border [0 0 0] ` +
+        `/Contents (The note must not become a note.) ` +
+        `/A << /S /URI /URI (https://example.org/audit) >> >>`,
+    ),
+    // Hidden: shown to nobody, announced to nobody.
+    writer.add(
+      `<< /Type /Annot /Subtype /Text /Name /Note /F 2 /Rect [72 460 88 476] ` +
+        `/Contents (Hidden note that must not appear.) >>`,
+    ),
+    // The popup that displays the highlight's own words at another rectangle.
+    writer.add(
+      `<< /Type /Annot /Subtype /Popup /F 4 /Rect [70 560 260 640] ` +
+        `/Contents (Please confirm this figure against the ledger before filing.) >>`,
+    ),
+    // A widget: `/TU` reaches the translator through `formFields.ts`.
+    reviewerField,
+    // Nothing to say.
+    writer.add(
+      `<< /Type /Annot /Subtype /Text /Name /Note /F 4 /Rect [300 430 316 446] ` +
+        `/Contents (   ) >>`,
+    ),
+  ]
+
+  const content = Buffer.from(
+    say('F2', 9, 72, 770, 'Annual Report 2026') +
+      say('F1', 9, 72, 60, 'Page 1 of 1') +
+      say('F2', 16, 72, 690, 'Quarterly Results') +
+      say('F1', 10, 72, 660, 'Revenue rose twelve percent against the same quarter.') +
+      say('F1', 10, 72, 646, 'Operating costs were held flat for the third period.') +
+      say('F1', 10, 72, 610, 'Deferred income is recognised on delivery.') +
+      say('F1', 10, 72, 596, 'The audit committee met twice in the period.') +
+      say('F1', 10, 72, 536, 'Notes are attached to the relevant paragraph.') +
+      say('F1', 10, 72, 522, 'Every figure is reconciled to the ledger.'),
+    'latin1',
+  )
+  const page = addPage(writer, pagesNum, resources, writer.addStream('', content), annots)
+  finalizePages(writer, pagesNum, [page])
+
+  // The catalog is object 1 and is written before anything it references, so
+  // the AcroForm dictionary is patched in once the field exists.
+  writer.replaceBody(
+    1,
+    `<< /Type /Catalog /Pages ${pagesNum} 0 R /AcroForm << /Fields [${reviewerField} 0 R] ` +
+      `/DR << /Font << /Helv ${helv} 0 R >> >> /DA (/Helv 10 Tf 0 g) /NeedAppearances true >> >>`,
+  )
+  return writer.render()
+}
+
 mkdirSync(OUT, { recursive: true })
 const outputs = [
   ['text-300p.pdf', buildTextPdf(300)],
@@ -1035,6 +1150,7 @@ const outputs = [
   ['table.pdf', buildTablePdf()],
   ['figure.pdf', buildFigurePdf()],
   ['form.pdf', buildFormPdf()],
+  ['annotations.pdf', buildAnnotationsPdf()],
 ]
 for (const [name, buffer] of outputs) {
   writeFileSync(join(OUT, name), buffer)

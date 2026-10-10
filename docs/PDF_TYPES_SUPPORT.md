@@ -83,7 +83,7 @@ same kinds, text, `tableCells`, link anchors and boxes within 3 pt.
 | 16 | Large PDF (hundreds/thousands of pages) | ✅     | 300-page fixture: worker-side probe/parse, main thread stays responsive, resumable queue, progress UI, chunked translation |
 | 17 | Unicode / Multilingual (Burmese, CJK, Arabic, Devanagari, Cyrillic) | 🔶→⏳ | Language detection + Zawgyi/Unicode handling ✅, Myanmar rendering ✅; OCR validated for English end-to-end, other scripts need their tesseract traineddata (mya available, untested) |
 | 18 | RTL PDF (Arabic, Hebrew, mixed) | 🔶     | RTL line ordering in grouping ✅; bidi/visual-order edge cases ❌ |
-| 19 | PDF With Annotations (comments, highlights, stamps, links) | 🔶→⏳ | Annotation/link counting in probe ✅; `/Annots` `/Link` rectangles now become anchored `<a>` / `[text](url)` / docx `ExternalHyperlink` ✅ (external only — see below); comments, highlights and stamps still carry no text of their own ❌ |
+| 19 | PDF With Annotations (comments, highlights, stamps, links) | 🔶→✅ | Annotation/link counting in probe ✅; `/Annots` `/Link` rectangles now become anchored `<a>` / `[text](url)` / docx `ExternalHyperlink` ✅ (external only — see below); a note's own words — a sticky note's message, the reason a passage was highlighted, a `/FreeText` callout's body, a stamp's legend — become one `kind: 'annotation'` block each ✅ (see below); the annotation's **author** (`/T`) and date (`/M`) stay out of it ❌ — a name is not for translating |
 | 20 | Damaged / Invalid PDF | 🔶     | Load/probe failures surface as actionable errors ✅; partial repair ❌ |
 | 21 | PDF With Embedded Fonts (subset/custom/fallback) | ✅     | Font inventory (embedded/standard/other) in metadata ✅, subset-prefix cleaning ✅, Myanmar fallback stack in export ✅ |
 | 22 | PDF With Complex Layout (text boxes, overlap, sidebars, watermarks) | ⏳→✅   | `complex` class + scoring ✅ (this phase); column/sidebar reading order ✅; text-box + overlap repair in phase c |
@@ -98,7 +98,7 @@ same kinds, text, `tableCells`, link anchors and boxes within 3 pt.
 | (a) Classification | `complex` class, complexity scoring, item-level column detection, wizard metadata | 4, 12, 22 classification ✅ |
 | (b) Extraction methods | Browser Tesseract OCR auto-runs per window (status lifecycle, confidence, cached recognition), hybrid merge with geometric dedup, run-OCR setting persisted per project, Python sidecar server (protocol v1, 20 tests) | 2, 3 extraction ✅ |
 | (b2) Sidecar wiring | `src/sidecar/sidecarClient.ts`: cached `GET /health` probe, `POST /ocr` with page/language/password, per-line confidence added to the server response, lazy render so a sidecar page never rasterises in the browser, automatic fall-back to browser Tesseract on any failure (22 client + 5 pipeline + 1 Python test) | 2 extraction ✅ with a native-OCR fast path |
-| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. `fixtures/complex.pdf` (3 columns + rotated watermark) now reads col 1 → col 2 → col 3 → watermark end-to-end. **Footnote regions ✅** — `src/pdf/footnotes.ts` marks them before any merging happens. **Heading hierarchy ✅** — `src/pdf/headings.ts` builds one document-wide ladder of heading font sizes during the probe and every page levels its headings against it; exporters render `h1`–`h6`, `HeadingLevel.HEADING_1–6` and ATX hashes. **Links ✅** — `src/pdf/links.ts` turns every external `/Link` rectangle into the words it covers and every exporter renders them as a real anchor (see below). **Code blocks ✅** — `src/pdf/codeBlocks.ts` calls a run of lines code when two independent readings agree: a monospaced face *and* statement punctuation; a monospaced face *and* nesting (which is what catches YAML and JSON, whose lines carry no punctuation to score); or punctuation alone across several lines with a brace somewhere. `structure.ts` gives it `kind: 'code'`, stamps `skipRule: 'code'` so the model never rewrites a program, and hands the indentation back — see below. **Table cells ✅** — `src/pdf/rowSplit.ts` reads a run of rows whose columns align as one `kind: 'table'` block with `tableCells` as data, and every format draws a real grid rather than tab-separated text — see below. **Figures ✅** — `src/pdf/imageOps.ts` rebuilds every painted image's rectangle from the operator list and `src/pdf/figures.ts` decides which of them are figures and which paragraph owns each one, recorded as `PageBlock.figures` — see below. **Form labels ✅** — `src/pdf/formFields.ts` reads the text a widget carries that the page never prints (its `/TU` tooltip and a choice field's `/Opt` captions) and makes one `kind: 'form-field'` block per described widget, hanging directly under its own box, so it reaches the model, the editor and every exporter like any other block — see below. Remaining in this phase: nothing | 4 ✅, reading order for 3 / 7 / 12 ✅, footnotes for 7 / 11 / 14 ✅, heading hierarchy for 7 ✅, links for 19 / 25 ✅, code blocks for 13 / 24 ✅, table cells for 6 ✅, figures for 5 / 12 ✅, form labels for 9 ✅ |
+| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. `fixtures/complex.pdf` (3 columns + rotated watermark) now reads col 1 → col 2 → col 3 → watermark end-to-end. **Footnote regions ✅** — `src/pdf/footnotes.ts` marks them before any merging happens. **Heading hierarchy ✅** — `src/pdf/headings.ts` builds one document-wide ladder of heading font sizes during the probe and every page levels its headings against it; exporters render `h1`–`h6`, `HeadingLevel.HEADING_1–6` and ATX hashes. **Links ✅** — `src/pdf/links.ts` turns every external `/Link` rectangle into the words it covers and every exporter renders them as a real anchor (see below). **Code blocks ✅** — `src/pdf/codeBlocks.ts` calls a run of lines code when two independent readings agree: a monospaced face *and* statement punctuation; a monospaced face *and* nesting (which is what catches YAML and JSON, whose lines carry no punctuation to score); or punctuation alone across several lines with a brace somewhere. `structure.ts` gives it `kind: 'code'`, stamps `skipRule: 'code'` so the model never rewrites a program, and hands the indentation back — see below. **Table cells ✅** — `src/pdf/rowSplit.ts` reads a run of rows whose columns align as one `kind: 'table'` block with `tableCells` as data, and every format draws a real grid rather than tab-separated text — see below. **Figures ✅** — `src/pdf/imageOps.ts` rebuilds every painted image's rectangle from the operator list and `src/pdf/figures.ts` decides which of them are figures and which paragraph owns each one, recorded as `PageBlock.figures` — see below. **Form labels ✅** — `src/pdf/formFields.ts` reads the text a widget carries that the page never prints (its `/TU` tooltip and a choice field's `/Opt` captions) and makes one `kind: 'form-field'` block per described widget, hanging directly under its own box, so it reaches the model, the editor and every exporter like any other block — see below. **Annotation notes ✅** — `src/pdf/annotations.ts` reads the text an annotation carries that the page never prints (a sticky note's `/Contents`, the reason a passage was highlighted, a `/FreeText` callout's body, a stamp's legend) and makes one `kind: 'annotation'` block per note, filed directly under the passage it marks — see below. Remaining in this phase: nothing | 4 ✅, reading order for 3 / 7 / 12 ✅, footnotes for 7 / 11 / 14 ✅, heading hierarchy for 7 ✅, links for 19 / 25 ✅, code blocks for 13 / 24 ✅, table cells for 6 ✅, figures for 5 / 12 ✅, form labels for 9 ✅, annotation notes for 19 ✅ |
 | (d) Layout auto-adjust | **Translation-time auto-fit ✅** — `src/editor/layout.ts` re-measures a block the moment a translation lands and takes the largest size in `[6pt, originalFontSize]` whose wrapped text still fits the original bbox; never a size the reader pinned, and never below the floor — an unfittable block keeps the document's own size and is flagged rather than shrunk into illegibility. Runs on the bulk queue, on inline re-apply and on accept-suggestion, never on a person typing; `layout.autoFit` in Settings → General turns it off. **Reflow ✅** — `src/export/reflow.ts` pushes the blocks under one that outgrew its box down by exactly the growth, within their own column, stopping at the page edge; HTML emits `min-height` where it emitted `height`, so a box is a floor the translation may grow into | 1, 8, 10, 12 ✅ (translation-time layout + the absolute HTML/print export) |
 
 ### Why reading order needed two detectors
@@ -528,6 +528,69 @@ fixed rows and are unaffected.
 field, a date field, a combo box with four options, a checkbox, a hidden field, a
 two-option radio group, a push button and a signature across two pages — ten
 widgets the probe counts, six blocks that come out.
+
+### Why an annotation's note is a block of its own
+
+A reviewed PDF keeps its marginalia in the annotation dictionary rather than in
+the content stream. The words you can **see** — a heading, a paragraph, a table
+cell — are show-text operators; they were never at risk. The words an annotation
+carries are not operators at all:
+
+- `/Contents` is the note itself: a sticky note's message, the reason a passage
+  was highlighted, what the reviewer wrote on the callout;
+- a `/FreeText` callout's body is drawn by its *appearance* stream, so a reader
+  that only walks operators sees an empty box where the text was;
+- a stamp's legend is written the same way.
+
+`src/pdf/annotations.ts` reads all three off the annotations pdf.js already hands
+`assemblePage` and makes **one `kind: 'annotation'` block per note**. It runs
+**last of all** — after links, figures and field labels — because a note is
+*about* a block: it has to be handed the finished list to find it.
+
+- **It is filed under the passage it marks.** A highlight's rectangle lies
+  straight over the words it annotates, so the note goes immediately *after* that
+  block, at that block's own depth — filed by position instead it would land
+  between two lines of the very paragraph it is about, in a gap two points high.
+  The block has to cover 30% of the rectangle to count, the same bargain
+  `links.ts` makes when it files an anchor, so a margin note that grazes a
+  paragraph's corner is beside that paragraph rather than about it. A note with
+  no block under it — a sticky note in the margin, a stamp in the corner — hangs
+  under its own rectangle exactly as a form label hangs under its widget, and
+  takes the reading-order slot `insertIndex` gives it.
+- **It takes the column it sits in.** A note that follows a block is given that
+  block's `x` and `w`, so it reads as a remark under the passage instead of a
+  paragraph of its own starting wherever the icon happened to be.
+- **Wrapping is what an overflow costs, not what every note pays.** The width is
+  narrowed only when the sentence will not fit the column or would run past the
+  right edge of the page, and then on word boundaries. Both the width and the
+  break points are estimates — no measurer exists this early — and they are set
+  a shade *generous*, so a line comes back a little short rather than a
+  character wide: an extra line costs points of empty space, a line too long
+  costs an overlap.
+- **Italic and grey, in a class of its own** (`.annotation`), so a stylesheet can
+  reach a note without reaching a form label, and the other way round.
+- **It obeys the same rules as printed text**: `classifyLine` and
+  `tokenizePlaceholders` run on it, so a note that is already Burmese, an address
+  or a formula is handled as it would have been if it had been printed, and
+  `buildUnits` binds it **backward** with the passage it marks — the way a
+  caption binds to its figure, so one request translates both.
+- **Five annotations on the fixture say nothing**: a `/Link` (that is
+  `links.ts`), a `/Widget` (that is `formFields.ts`), a `/Popup` — which repeats
+  its parent's `/Contents` at a *different* rectangle, so only the subtype keeps
+  the note from being printed twice — an annotation behind `/F 2` hidden, and one
+  whose `/Contents` is blank.
+
+Two limits worth stating. The note's **author** (`/T`) and **date** (`/M`) are
+deliberately not prefixed: a name is not for translating, and a date that went
+through the model is a date nobody can check. And a note whose words live *only*
+in its appearance stream, with nothing in `/Contents`, has nothing to say here
+either — parsing appearance streams is out of reach of this pass, as it is of
+every other pass in the pipeline.
+
+`fixtures/annotations.pdf` (generated by `scripts/make-fixtures.mjs`) carries
+nine annotations on one page — the four that speak and the five traps above. The
+probe counts all nine; four blocks come out; every printed line stays exactly
+where it was.
 
 ### Why a grown block is pushed instead of clipped
 

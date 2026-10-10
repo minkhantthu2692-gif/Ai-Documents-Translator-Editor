@@ -27,6 +27,7 @@ import { classifyPage, coverageOf, emptyTally, type ContentTally } from './pageC
 import { analyzeLayout, itemBoxesOf, type LayoutComplexity } from './layoutComplexity'
 import { headingTiers } from './headings'
 import { anchorFigures } from './figures'
+import { annotationNotes, attachAnnotationNotes } from './annotations'
 import { attachFieldLabels, fieldLabels } from './formFields'
 import { attachLinks, linkAnchors, linksFromAnnotations } from './links'
 import { traceImagePlacements, type ImagePlacement } from './imageOps'
@@ -202,9 +203,10 @@ export async function readDocumentInfo(doc: PDFDocumentProxy): Promise<PdfDocume
  * The subset of a pdf.js annotation the structure pass actually reads.
  *
  * `/Link` rectangles are read by `links.ts`; `/Widget` fields by
- * `formFields.ts`. Everything else on a pdf.js annotation is ignored — the
- * object is passed through whole rather than narrowed so that a future reader
- * does not have to widen this list first.
+ * `formFields.ts`; every other annotation's `/Contents` by `annotations.ts`.
+ * Everything else on a pdf.js annotation is ignored — the object is passed
+ * through whole rather than narrowed so that a future reader does not have to
+ * widen this list first.
  */
 export interface AnnotationLike {
   subtype?: string
@@ -217,6 +219,14 @@ export interface AnnotationLike {
   options?: ReadonlyArray<{ exportValue?: string; displayValue?: string } | null> | null
   /** `/F` hidden bit — a field shown and announced to nobody. */
   hidden?: boolean
+  /** `/Contents` — what a note says: a sticky note, a highlight's reason, a stamp's legend. */
+  contents?: string
+  /** pdf.js's own parse of `/Contents`: `{ str, dir }`. */
+  contentsObj?: { str?: string; dir?: string } | null
+  /** `/F` — the annotation flags; 0x02 is "hidden". */
+  annotationFlags?: number
+  /** `/QuadPoints` — eight numbers per quad, for markup drawn without a `/Rect`. */
+  quadPoints?: number[]
   url?: string
   unsafeUrl?: string
   rect?: number[]
@@ -701,6 +711,20 @@ export function assemblePage(
     pageHeight: source.height,
     ctx: options.ctx,
   })
+  // A note's own words come last of all — after the widget's, because a note
+  // is *about* a block, so it has to be handed the list already linked,
+  // anchored and labelled in order to find the block it belongs to. Nothing
+  // above can have merged or paired against text that was never printed.
+  const withNotes = attachAnnotationNotes(
+    withFields,
+    annotationNotes(source.annotations, source.height),
+    {
+      pageIndex,
+      pageWidth: source.width,
+      pageHeight: source.height,
+      ctx: options.ctx,
+    },
+  )
   return {
     pageIndex,
     width: source.width,
@@ -711,7 +735,7 @@ export function assemblePage(
     // fallback has to be able to compare the two.
     charCount: itemCount(source.items),
     lineCount: lines.length,
-    blocks: withFields,
+    blocks: withNotes,
   }
 }
 

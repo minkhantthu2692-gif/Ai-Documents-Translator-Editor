@@ -405,7 +405,12 @@ describe('buildEpub code blocks', () => {
   it('emits a <pre> so the line breaks do not collapse into spaces', async () => {
     const chapter = await codeChapter()
     expect(chapter).toContain('<pre class="block"')
-    expect(chapter).toContain('>if (a) {\n  b = 2;\n}</pre>')
+    // The snippet arrives token by token (see export/highlight.ts), so the
+    // text is read back out of the spans: `if` and `2` are painted, and the
+    // newlines still sit literally inside the runs the way they printed.
+    expect(chapter).toContain(
+      '<span class="tok-k">if</span> (a) {\n  b = <span class="tok-n">2</span>;\n}',
+    )
     expectWellFormed(chapter, 'chap_1.xhtml')
   })
 
@@ -414,20 +419,49 @@ describe('buildEpub code blocks', () => {
     expect(chapter).toContain('font-family: &quot;Courier New&quot;')
   })
 
+  it('ships the token palette in the chapter stylesheet', async () => {
+    const doc: ExportDocument = {
+      ...fixtureDoc(),
+      pages: [
+        page(0, [
+          block({
+            id: 'snippet',
+            kind: 'code',
+            status: 'skipped',
+            skipRule: 'code',
+            fontFamily: 'Courier',
+            sourceText: 'const a = 1;',
+          }),
+        ]),
+      ],
+    }
+    const zip = await JSZip.loadAsync(await buildEpub(doc, epubOptions()))
+    const css = await zipText(zip, 'OEBPS/css/main.css')
+    expect(css).toContain('.tok-k { color: #0000FF; }')
+    expect(css).toContain('.tok-c { color: #008000; }')
+    expect(css).toContain('.tok-s { color: #A31515; }')
+  })
+
   it('leaves a URL inside the snippet as data rather than an anchor', async () => {
     const chapter = await codeChapter({
       sourceText: 'fetch("https://example.com")',
       links: [{ text: 'https://example.com', url: 'https://example.com' }],
     })
-    expect(chapter).toContain('>fetch(&quot;https://example.com&quot;)</pre>')
+    // The URL paints as a string token — and still opens nothing.
+    expect(chapter).toContain(
+      '<span class="tok-f">fetch</span>(<span class="tok-s">&quot;https://example.com&quot;</span>)</pre>',
+    )
     expect(chapter).not.toContain('<a href=')
     expectWellFormed(chapter, 'chap_1.xhtml')
   })
 
   it('does not prefix the document bullet into the program', async () => {
     const chapter = await codeChapter({ sourceText: 'const a = 1;', listMarker: '•' })
-    expect(chapter).toContain('>const a = 1;</pre>')
+    expect(chapter).toContain(
+      '<span class="tok-k">const</span> a = <span class="tok-n">1</span>;</pre>',
+    )
     expect(chapter).not.toContain('•const')
+    expect(chapter).not.toContain('•<span')
   })
 })
 

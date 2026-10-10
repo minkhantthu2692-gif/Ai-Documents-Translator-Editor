@@ -23,6 +23,7 @@ import { directionOf } from '@/lib/text'
 import type { LinkRef } from '@/pdf/links'
 import { figureAlt, figureArtMap, figureGoesBefore, figureKey, figureSize } from './figureArt'
 import type { FigureArt } from './figureArt'
+import { highlightHtml, tokenCssRules } from './highlight'
 import {
   DEFAULT_FONT_STACK,
   applyLinks,
@@ -190,8 +191,10 @@ function paragraph(
   // `<pre>` is literal text: the newlines inside are the only line breaks there
   // are, so a program keeps its shape instead of being flattened onto one line
   // by XHTML's whitespace collapsing — and a URL inside it stays data, so no
-  // anchors are woven in.
-  const inner = preformatted ? escapeHtml(text) : applyLinks(text, links, wrap, escapeHtml)
+  // anchors are woven in. What it does get is the syntax colouring: the tokens
+  // are re-derived from the text (see `highlight.ts`) and each painted span
+  // keeps the literal's own font and spacing.
+  const inner = preformatted ? highlightHtml(text) : applyLinks(text, links, wrap, escapeHtml)
   return `<${tag} class="${escapeHtml(all.join(' '))}" xml:lang="${safeLang}" lang="${safeLang}"${dir}${style}>${inner}</${tag}>`
 }
 
@@ -485,6 +488,7 @@ function mainCss(options: EpubOptions): string {
     `  font-family: ${bodyStack};`,
     '  line-height: 1.7;',
     '}',
+    tokenCssRules(),
     '.block.rtl {',
     '  direction: rtl;',
     '}',

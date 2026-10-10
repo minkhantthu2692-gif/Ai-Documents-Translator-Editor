@@ -353,6 +353,16 @@ describe('buildDocx code blocks', () => {
     expect(xml).not.toContain('if (a) {\n')
   })
 
+  it('paints each token of the snippet in its palette colour', async () => {
+    const snippet = 'const n = 42 // tally'
+    const xml = await codeXml({ sourceText: snippet, translatedText: snippet })
+    expect(xml).toContain('w:val="0000FF"') // `const` — keyword
+    expect(xml).toContain('w:val="098658"') // `42` — number
+    expect(xml).toContain('w:val="008000"') // `// tally` — comment
+    // The font the snippet already wore is untouched by the palette.
+    expect(xml).toContain('w:ascii="Courier New"')
+  })
+
   it('gives the snippet no outline level and no bullet', async () => {
     const xml = await codeXml({ headingLevel: 1, listMarker: '1.' }, { titleHeading: false })
     expect(xml).not.toContain('Heading1')

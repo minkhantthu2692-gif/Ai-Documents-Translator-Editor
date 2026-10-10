@@ -20,6 +20,7 @@
 import { textMeasurer, type TextMeasurer } from '@/editor/autofit'
 import { directionOf } from '@/lib/text'
 import type { LinkRef } from '@/pdf/links'
+import { highlightHtml, tokenCssRules } from './highlight'
 import { reflowBlocks } from './reflow'
 import {
   applyLinks,
@@ -138,6 +139,21 @@ function htmlText(text: string, links: readonly LinkRef[]): string {
 }
 
 /**
+ * The printed text of a block: the code colouring when it is a snippet, the
+ * anchor pass otherwise.
+ *
+ * A snippet whose annotation links survived keeps them instead of being
+ * highlighted: `htmlText` matches the anchor against the whole text, and
+ * weaving the match through token spans would put an `<a>` inside a `<span>`
+ * chain built from a different segmentation. The rare annotated snippet stays
+ * uncoloured rather than losing its link.
+ */
+function blockInner(block: ExportBlock, text: string): string {
+  if (block.kind === 'code' && block.links.length === 0) return highlightHtml(text)
+  return htmlText(text, block.links)
+}
+
+/**
  * The text `blockHtml` is about to print for a block.
  *
  * Deliberately not `textOf(...).primary`: `includeOriginal` falls back to the
@@ -215,10 +231,7 @@ function blockHtml(block: ExportBlock, options: HtmlOptions, classes: string[]):
   const marker = table ? '' : listPrefix(block, text)
   const content =
     table ||
-    `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${htmlText(
-      text,
-      block.links,
-    )}`
+    `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${blockInner(block, text)}`
   const dir = block.direction === 'rtl' ? ' dir="rtl"' : ''
   const style =
     options.layout === 'absolute'
@@ -351,13 +364,13 @@ function flowPage(page: ExportDocument['pages'][number], options: HtmlOptions): 
           `<p class="src" data-block-id="${escapeHtml(block.id)}"${
             sourceIsRtl ? ' dir="rtl"' : ''
           }">` +
-          `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${htmlText(
+          `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${blockInner(
+            block,
             source,
-            block.links,
           )}</p>` +
           `${openTag} class="tgt${face}" data-block-id="${escapeHtml(block.id)}" dir="${
             block.direction === 'rtl' ? 'rtl' : 'ltr'
-          }">${htmlText(target, block.links)}</${closeTag}>` +
+          }">${blockInner(block, target)}</${closeTag}>` +
           `</div>`,
       )
     } else {
@@ -367,9 +380,9 @@ function flowPage(page: ExportDocument['pages'][number], options: HtmlOptions): 
       rows.push(
         `${openTag} class="tgt${face}" data-block-id="${escapeHtml(block.id)}"` +
           ` dir="${block.direction === 'rtl' ? 'rtl' : 'ltr'}">` +
-          `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${htmlText(
+          `${marker ? `<span class="marker">${escapeHtml(marker)}</span>` : ''}${blockInner(
+            block,
             text,
-            block.links,
           )}</${closeTag}>`,
       )
     }
@@ -448,6 +461,7 @@ ${print ? '.page { border: none; }' : ''}
   tab-size: 4;
   white-space: pre-wrap;
 }
+${tokenCssRules()}
 /* A form field's tooltip and a dropdown's option captions are text the page
    never printed (src/pdf/formFields.ts). The block already arrives italic and
    grey, so this rule is the hook a reader of the document can reach for — and

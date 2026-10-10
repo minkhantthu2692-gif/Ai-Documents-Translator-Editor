@@ -578,6 +578,44 @@ describe('code blocks', () => {
     expect(html).toContain('white-space: pre-wrap;')
   })
 
+  it('paints the tokens of a snippet in the shared palette', () => {
+    const snippet = 'const n = 42 // tally'
+    const html = buildHtmlDocument(codeDoc({ sourceText: snippet, translatedText: snippet }), base)
+    expect(html).toContain('<span class="tok-k">const</span>')
+    expect(html).toContain('<span class="tok-n">42</span>')
+    expect(html).toContain('<span class="tok-c">// tally</span>')
+    // …and ships the rules those spans lean on, screen and print alike.
+    expect(html).toContain('.tok-k { color: #0000FF; }')
+    expect(html).toContain('.tok-c { color: #008000; }')
+    const print = buildPrintDocument(
+      codeDoc({ sourceText: snippet, translatedText: snippet }),
+      base,
+    )
+    expect(print).toContain('<span class="tok-k">const</span>')
+    expect(print).toContain('.tok-k { color: #0000FF; }')
+  })
+
+  it('paints both sides of a pair in the flow layout', () => {
+    const html = buildHtmlDocument(
+      codeDoc({ sourceText: 'return 1', translatedText: 'return 2' }),
+      { ...base, layout: 'flow', includeOriginal: true, bilingual: 'side-by-side' },
+    )
+    expect(html.match(/<span class="tok-k">return<\/span>/g) ?? []).toHaveLength(2)
+  })
+
+  it('keeps an annotation link on a snippet rather than losing it to colour', () => {
+    const html = buildHtmlDocument(
+      codeDoc({
+        sourceText: 'see docs',
+        translatedText: 'see docs',
+        links: [{ text: 'docs', url: 'https://example.com/docs' }],
+      }),
+      base,
+    )
+    expect(html).toContain('<a href="https://example.com/docs"')
+    expect(html).not.toContain('<span class="tok-')
+  })
+
   it('never lets a snippet become a heading', () => {
     const html = buildHtmlDocument(codeDoc({ headingLevel: 1 }), base)
     expect(html).not.toMatch(/<h[1-6][^>]*data-block-id/)

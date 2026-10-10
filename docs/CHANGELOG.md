@@ -354,6 +354,26 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   direct `[ref /XYZ …]`, a named `/Dests` entry and an external URI on one page, plus the
   no-resolver behavior older readers rely on), `linkSegments` internals, and one test per
   exporter. Matrix type 25 moves 🔶→⏳ to ✅.
+- **Phase (e) — syntax colouring for code snippets at export** (type 24's last open
+  item). The PDF never records which tokens were which colour per glyph, so
+  `src/export/highlight.ts` re-derives them from the printed text with a small
+  language-agnostic lexer: line/block/`#` comments (with `#include`-style preprocessor
+  directives kept out of the comment pile), all four quoting styles (single, double,
+  backtick, triple-quote; escapes; a template literal may cross lines, an unterminated
+  quote stops at the newline), numeric literals in every spelling, a curated keyword
+  set guarded so a word behind a dot is never one (`obj.map`, `p.then`), and any bare
+  word that opens a call as a function. One shared VS Code-light palette: HTML and
+  EPUB paint `.tok-*` spans with the CSS shipped in both stylesheets, DOCX colours
+  each token's run in `Courier New` keeping the line breaks (`<w:br/>`) exactly where
+  the snippet broke, and Markdown keeps its fence plain because CommonMark has no
+  inline colour and a fence labelled with a guessed language would misrender with
+  authority. The lexer never sees the language (extraction records only `kind:
+  'code'`), so the reading is plausible rather than the original's — documented in the
+  matrix. A snippet that still carries annotation links keeps them and goes unpainted
+  in HTML and DOCX: an anchor and a tokenisation cannot both own the text. Tokens
+  concatenate back to the input byte-for-byte, the invariant every escaper leans on
+  (16 lexer tests in `highlight.test.ts`; one test per exporter). Matrix type 24 moves
+  🔶→⏳ to ✅.
 
 ### Security
 

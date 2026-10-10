@@ -46,6 +46,7 @@ import {
   textOf,
 } from './shared'
 import type { ExportBlock, ExportDocument } from './types'
+import { tokenColor, tokenizeCode } from './highlight'
 import {
   MAX_FIGURE_WIDTH_PT,
   figureAlt,
@@ -135,9 +136,22 @@ const LINK_COLOR = '0563C1'
  */
 const CODE_FONT = 'Courier New'
 
-/** One run carrying the block's font, size, emphasis and script direction. */
-function blockRun(text: string, block: ExportBlock, font: string, breakBefore = false): TextRun {
-  const color = docxColor(block.color)
+/**
+ * One run carrying the block's font, size, emphasis and script direction.
+ *
+ * `overrideColor` is the syntax colour of a code token: it wins over the
+ * colour printed on the block, because in a snippet that colour is usually
+ * the single ink the whole listing was set in, while the token palette
+ * re-derives the roles the original tool painted.
+ */
+function blockRun(
+  text: string,
+  block: ExportBlock,
+  font: string,
+  breakBefore = false,
+  overrideColor: string | null = null,
+): TextRun {
+  const color = overrideColor ?? docxColor(block.color)
   return new TextRun({
     text,
     font,
@@ -165,11 +179,36 @@ function blockRun(text: string, block: ExportBlock, font: string, breakBefore = 
  * w:val="Hyperlink"/>` as nothing at all, and a link a reader cannot see is a
  * link nobody clicks.
  */
+/**
+ * A code snippet as runs: one per token in the palette, line breaks kept
+ * exactly as printed.
+ *
+ * Each token is split on newlines the way `blockChildren` splits a plain
+ * stretch — Word discards a bare `\n`, so every line after the first gets its
+ * own run carrying `<w:br/>` — which lets a multi-line comment (a single
+ * token) break exactly where the listing broke.
+ */
+function codeRuns(text: string, block: ExportBlock, font: string): TextRun[] {
+  const runs: TextRun[] = []
+  for (const token of tokenizeCode(text)) {
+    const color = tokenColor(token.kind)
+    token.text
+      .split('\n')
+      .forEach((part, index) => runs.push(blockRun(part, block, font, index > 0, color)))
+  }
+  return runs
+}
+
 function blockChildren(
   text: string,
   block: ExportBlock,
   font: string,
 ): Array<TextRun | ExternalHyperlink> {
+  // A snippet with no annotation links is painted token by token. With links
+  // it keeps the segment pass instead: a hyperlink is one run, and weaving it
+  // through a different tokenisation would have to re-match the anchor inside
+  // every token — colour yields to the link, the same trade HTML makes.
+  if (block.kind === 'code' && block.links.length === 0) return codeRuns(text, block, font)
   const runs: Array<TextRun | ExternalHyperlink> = []
   for (const segment of linkSegments(text, block.links)) {
     // A `#page-N` segment is an in-document jump: Word renders those through

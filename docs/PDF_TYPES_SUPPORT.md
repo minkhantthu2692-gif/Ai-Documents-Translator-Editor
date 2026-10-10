@@ -88,7 +88,7 @@ same kinds, text, `tableCells`, link anchors and boxes within 3 pt.
 | 21 | PDF With Embedded Fonts (subset/custom/fallback) | ✅     | Font inventory (embedded/standard/other) in metadata ✅, subset-prefix cleaning ✅, Myanmar fallback stack in export ✅ |
 | 22 | PDF With Complex Layout (text boxes, overlap, sidebars, watermarks) | ⏳→✅   | `complex` class + scoring ✅ (this phase); column/sidebar reading order ✅; text-box + overlap repair in phase c |
 | 23 | PDF With Equations / Math content | ❌     | Formulas extract as plain text (lossy); LaTeX/OCR-of-equations not implemented |
-| 24 | PDF With Code (syntax, monospace, formatting) | 🔶→⏳ | Monospace face extracted as style ✅; **block-level code formatting** ✅ — a snippet is fenced in Markdown, `<pre>` in EPUB, `Courier New` with real `<w:br/>` in DOCX, and monospace with `white-space: pre-wrap` in HTML/print; **syntax colouring** ❌ — the PDF never hands over which tokens were which colour per glyph, so a snippet is set in one colour like the prose around it |
+| 24 | PDF With Code (syntax, monospace, formatting) | ✅ | Monospace face extracted as style ✅; **block-level code formatting** ✅ — a snippet is fenced in Markdown, `<pre>` in EPUB, `Courier New` with real `<w:br/>` in DOCX, and monospace with `white-space: pre-wrap` in HTML/print; **syntax colouring** ✅ — the PDF never hands over which tokens were which colour per glyph, so a language-agnostic lexer re-derives them from the printed text at export (`src/export/highlight.ts`) and one shared palette paints them everywhere: `.tok-*` spans in HTML/EPUB over CSS shipped in both stylesheets, coloured runs in DOCX, plain fenced text in Markdown (CommonMark has no inline colour and a fence labelled with a guessed language would misrender with authority); a snippet with surviving annotation links keeps the links and goes unpainted |
 | 25 | PDF With Hyperlinks (external, internal, TOC, cross-references) | ✅ | External links ✅ — rectangle → words → `LinkRef[]` → anchored output in HTML/EPUB/Markdown/DOCX/JSON; URL text preserved as plain text ✅ in every format; internal `/Dest` links ✅ — resolved through the open document (named destinations via `getDestination`, refs via `getPageIndex`) to a page index and rendered as in-document anchors (`#page-N`) against HTML page sections, EPUB page headings (chapter-aware: a cross-chapter jump prefixes the owning `chap_M.xhtml`) and Markdown page-heading slugs; DOCX prints the words without a hyperlink (Word renders those through bookmarks we do not write) (`fixtures/links-internal.pdf`, direct + named + external on one page) |
 
 ## Phase roadmap for this matrix
@@ -801,10 +801,20 @@ closes up in the flow formats. The face is read off the family *name*, so a
 PDF that subsets a monospaced font under a name with no hint of one (some do)
 is caught only when its punctuation scores. And the wider `canMerge` tolerance
 means two unrelated monospaced blocks that sit close together can fuse into
-one, since "both lines are monospaced" is the whole of that test. No export
-format renders syntax colouring: the PDF does not record which tokens were
-which colour per glyph, so a snippet is set in one colour like the prose
-around it. Table detection has three gaps of its own. A gutter narrower than
+one, since "both lines are monospaced" is the whole of that test. Syntax
+colouring is re-derived rather than recovered: the PDF does not record which
+tokens were which colour per glyph, so a small language-agnostic lexer
+(`src/export/highlight.ts`) runs over the printed text at export and paints
+comments, the four quoting styles, numbers, preprocessor directives, a
+curated keyword set and any word that opens a call — in `.tok-*` spans in
+HTML/EPUB, coloured runs in DOCX, and a plain fence in Markdown, which has
+no inline colour to paint with. The lexer never sees the language (extraction
+records only that the block is code), so the result is a plausible reading,
+not the original's: whether `#x` is a directive or a comment depends on the
+language it was, and a snippet whose keywords fall outside the curated set
+comes out plainer than it was. A snippet that still carries annotation links
+keeps them and skips the colouring instead. Table detection has three gaps of
+its own. A gutter narrower than
 one em is not read as a column - that is the same threshold that keeps word
 spaces out, and plenty of tables are ruled tighter than a full em. A row whose
 runs offer no boundary at all (a last cell left blank, for instance) stops the

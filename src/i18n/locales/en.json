@@ -1131,6 +1131,8 @@
       "jpg": "JPG — smaller"
     },
     "includeImages": "Embed page artwork behind the text",
+    "adjustLayout": "Adjust layout when a translation grows",
+    "adjustLayoutDesc": "Off, by default: every block stays where the PDF put it, which is what an image export promises. On: a block that will not fit even at its smallest readable size is pushed down over the ones below, exactly as the HTML and print exports do — and any block the page edge stops is reported after the export.",
     "fileName": "File name",
     "pdfExplainer": "The PDF keeps real vector text — selectable and searchable — and is produced through the browser’s print dialog using the bundled Myanmar fonts. Choose Raster PDF instead if you need a pixel-exact copy.",
     "rasterExplainer": "The raster PDF is pixel-exact: every page is an image, so no print dialog is used and there is no text layer — the text cannot be selected or searched, and the file is larger.",

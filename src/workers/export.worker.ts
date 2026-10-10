@@ -88,6 +88,57 @@ async function pageImageUrls(
   return out
 }
 
+/**
+ * What a layout pass has to say about itself: an estimate the browser would
+ * not measure for, and any block the page edge stopped. Every format with
+ * geometry to move around — the HTML/print documents, and the raster pair when
+ * the reader opted into adjustment — answers the same two questions, so all
+ * three report them the same way.
+ */
+function reportLayout(issues: ExportIssue[], measured: boolean, clipped: string[]): void {
+  if (!measured) {
+    issues.push({
+      code: 'EXPORT_LAYOUT_ESTIMATED',
+      fonts: [],
+      detail:
+        'this browser gave the export no text measurer, so blocks were re-flowed from an estimated character width and may sit a line out',
+    })
+  }
+  if (clipped.length > 0) {
+    issues.push({
+      code: 'EXPORT_LAYOUT_CLIPPED',
+      fonts: [],
+      count: clipped.length,
+      detail: `${clipped.length} blocks could not be re-flowed: the page box is fixed and the push ran out of edge, so they overlap the block above`,
+    })
+  }
+}
+
+/**
+ * The two callbacks a raster build reports its layout through, plus the call
+ * that turns what they collected into issues. `null` when the reader did not
+ * ask for adjustment — a sheet that places every block where the PDF put it
+ * has no reflow to describe.
+ */
+interface LayoutReporter {
+  onOverlap: (blockId: string) => void
+  onEstimated: () => void
+  finish: () => void
+}
+
+function layoutReporter(issues: ExportIssue[], active: boolean): LayoutReporter | null {
+  if (!active) return null
+  const clipped: string[] = []
+  let measured = true
+  return {
+    onOverlap: (blockId) => clipped.push(blockId),
+    onEstimated: () => {
+      measured = false
+    },
+    finish: () => reportLayout(issues, measured, clipped),
+  }
+}
+
 /** Base64 payloads for the EPUB `@font-face` injection. */
 async function fontPayloads(
   faces: FontFaceInfo[],
@@ -189,22 +240,7 @@ async function build(request: ExportBuildRequest): Promise<ExportArtifact> {
         measure,
         (blockId) => clipped.push(blockId),
       )
-      if (!measured) {
-        issues.push({
-          code: 'EXPORT_LAYOUT_ESTIMATED',
-          fonts: [],
-          detail:
-            'this browser gave the export no text measurer, so blocks were re-flowed from an estimated character width and may sit a line out',
-        })
-      }
-      if (clipped.length > 0) {
-        issues.push({
-          code: 'EXPORT_LAYOUT_CLIPPED',
-          fonts: [],
-          count: clipped.length,
-          detail: `${clipped.length} blocks could not be re-flowed: the page box is fixed and the push ran out of edge, so they overlap the block above`,
-        })
-      }
+      reportLayout(issues, measured, clipped)
       blob = new Blob([html], { type: WORKER_MIME[format] })
       break
     }
@@ -280,21 +316,33 @@ async function build(request: ExportBuildRequest): Promise<ExportArtifact> {
     }
 
     case 'pdf-raster': {
+      // Placement is measured only when the reader opted into adjustment: the
+      // default sheet paints every block at the y the PDF gave it, so there is
+      // no reflow to report on.
+      const layout = layoutReporter(issues, options.adjustLayout)
       const bytes = await buildRasterPdf(doc, images, {
         ...rasterOptionsFrom(options),
+        onOverlap: layout?.onOverlap,
+        onEstimated: layout?.onEstimated,
         onPage: (done, total) => progress(id, 'render', done, total),
       })
+      layout?.finish()
       blob = new Blob([bytes as BlobPart], { type: WORKER_MIME['pdf-raster'] })
       break
     }
 
     case 'images': {
+      const layout = layoutReporter(issues, options.adjustLayout)
       const bytes = await buildImagesZip(doc, images, {
         format: options.imageFormat,
         scale: options.imageScale,
         fontStack: options.fontStack,
+        adjustLayout: options.adjustLayout,
+        onOverlap: layout?.onOverlap,
+        onEstimated: layout?.onEstimated,
         onFile: (done, total) => progress(id, 'render', done, total),
       })
+      layout?.finish()
       blob = new Blob([bytes as BlobPart], { type: WORKER_MIME.images })
       break
     }

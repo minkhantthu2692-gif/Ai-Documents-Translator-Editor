@@ -4,10 +4,12 @@
  * The *other* PDF path: every page becomes one full-bleed image — the page
  * artwork with the translation painted on top — embedded in a PDF whose sheet
  * is the original page size. Layout is therefore exact: no font substitution,
- * no shaping differences, no reflow, and no dialog to confirm (it downloads
- * straight away). The cost is a document with **no text layer**: nothing is
- * selectable, searchable or copyable. The Export dialog states exactly this
- * trade-off next to the print-to-PDF option.
+ * no shaping differences, no reflow — unless the reader turns on *Adjust
+ * layout*, the one opt-in that trades that exactness for a page which does not
+ * paint over itself — and no dialog to confirm (it downloads straight away).
+ * The cost is a document with **no text layer**: nothing is selectable,
+ * searchable or copyable. The Export dialog states exactly this trade-off next
+ * to the print-to-PDF option.
  */
 
 import { PDFDocument } from 'pdf-lib'
@@ -26,6 +28,12 @@ export interface RasterPdfOptions {
   fontStack: string
   /** JPEG encoder quality for the composited sheets. */
   quality?: number
+  /** Push down what auto-fit could not clear (`ExportOptions.adjustLayout`). */
+  adjustLayout?: boolean
+  /** Called once per block the page edge stopped while reflowing. */
+  onOverlap?: (blockId: string) => void
+  /** Called once per page measured without a canvas. */
+  onEstimated?: () => void
   /** Called after each page is embedded (progress). */
   onPage?: (done: number, total: number) => void
 }
@@ -49,11 +57,14 @@ export function missingArtwork(doc: ExportDocument, backgrounds: RasterImage[]):
   return doc.pages.filter((page) => !have.has(page.index)).length
 }
 
-export function rasterOptionsFrom(options: ExportOptions): Omit<RasterPdfOptions, 'onPage'> {
+export function rasterOptionsFrom(
+  options: ExportOptions,
+): Omit<RasterPdfOptions, 'onPage' | 'onOverlap' | 'onEstimated'> {
   return {
     scale: options.imageScale,
     fontStack: options.fontStack,
     quality: 0.92,
+    adjustLayout: options.adjustLayout,
   }
 }
 
@@ -83,6 +94,9 @@ export async function buildRasterPdf(
       fontStack: options.fontStack,
       type: 'image/jpeg',
       quality: options.quality ?? 0.92,
+      adjustLayout: options.adjustLayout,
+      onOverlap: options.onOverlap,
+      onEstimated: options.onEstimated,
     })
     const embedded = await pdf.embedJpg(await sheet.arrayBuffer())
     const pageRef = pdf.addPage([page.width, page.height])

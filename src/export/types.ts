@@ -176,6 +176,16 @@ export interface ExportOptions {
    * like the original PDF.
    */
   includeImages: boolean
+  /**
+   * `pdf-raster` and `images` only: push the blocks a longer translation
+   * outgrew down over the ones below, the way the HTML and print exports do.
+   *
+   * Off — the default — is the promise of an image export: every block stays
+   * where the PDF put it, so the sheet is geometry-exact. Auto-fit still
+   * shrinks a block into its box first, so this only spends a push on text
+   * that will not fit even at the 6pt floor.
+   */
+  adjustLayout: boolean
 }
 
 export const DEFAULT_EXPORT_OPTIONS: ExportOptions = {
@@ -188,6 +198,7 @@ export const DEFAULT_EXPORT_OPTIONS: ExportOptions = {
   fontFallback: 'Noto Sans',
   fontStack: '',
   includeImages: true,
+  adjustLayout: false,
 }
 
 export type ExportStage = 'collect' | 'render' | 'build' | 'package' | 'write'

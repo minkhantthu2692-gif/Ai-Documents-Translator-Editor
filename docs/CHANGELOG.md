@@ -77,13 +77,23 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   moves both columns under it, and an overlap the source PDF already had is left for the reader.
   HTML now emits `min-height` where it emitted `height`, so a box is a floor the translation may
   grow into rather than a ceiling it paints over. Formats with no geometry — DOCX, EPUB,
-  Markdown — and the raster export are unchanged. The editor canvas runs the same pass through
+  Markdown — and the raster export are unchanged, the raster pair by default only (see the
+  opt-in below). The editor canvas runs the same pass through
   `reflowForPage`, so a page cannot look broken on screen and clean in the file it prints to. A browser that
   will not give the export a canvas to measure with now says so: reflow falls back to an estimated character
   width, and the export raises an `EXPORT_LAYOUT_ESTIMATED` warning (EN + MY) instead of placing blocks
   silently. The other silent case is gone too: a block the bottom edge stopped — the page box is fixed, so the
   push runs out of room — is counted and reported as `EXPORT_LAYOUT_CLIPPED` (EN + MY) rather than left
   to overlap in quiet.
+- **Adjust layout for the raster pair** (Fix 2 of the phase (d) follow-ups): Raster PDF and the
+  PNG/JPG pack painted every block at the `y` the PDF gave it, so a translation that would not fit
+  even at the 6pt floor printed over the block below. `ExportOptions.adjustLayout` — off by
+  default, offered as "Adjust layout when a translation grows" in the Export dialog for exactly
+  those two formats — runs the same push-down through `layoutBlocks` in `src/export/composite.ts`,
+  measured against the size the paint will actually use (auto-fit has already shrunk the block, so
+  only text still overflowing at the floor spends a push), and reports `EXPORT_LAYOUT_ESTIMATED`
+  and `EXPORT_LAYOUT_CLIPPED` the way the HTML and print paths do. Left off, the sheet is exactly
+  as geometry-exact as it was.
 - **Code blocks** in PDF extraction (phase (c) of `docs/PDF_TYPES_SUPPORT.md`, types 13 and 24):
   `src/pdf/codeBlocks.ts` calls a run of lines code when two independent readings agree — a
   monospaced face *and* statement punctuation, a monospaced face *and* nesting (which is what

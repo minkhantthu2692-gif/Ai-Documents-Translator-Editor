@@ -58,6 +58,13 @@ const ORIGINAL_FORMATS: readonly ExportFormat[] = ['html', 'docx', 'markdown', '
 /** Layout formats that can carry the rendered page artwork. */
 const ARTWORK_FORMATS: readonly ExportFormat[] = ['html', 'pdf']
 
+/**
+ * Formats that paint their pages block by block, so they are the only ones
+ * with a layout to adjust — and, being images, the only ones where adjusting
+ * costs the exactness the format otherwise promises.
+ */
+const ADJUST_FORMATS: readonly ExportFormat[] = ['pdf-raster', 'images']
+
 const BILINGUAL_MODES = ['side-by-side', 'interleaved'] as const
 
 const IMAGE_FORMATS = ['png', 'jpg'] as const
@@ -76,10 +83,11 @@ interface CheckboxProps {
   onChange: (checked: boolean) => void
   label: string
   disabled?: boolean
+  testId?: string
 }
 
 /** Plain checkbox (the kit has no Checkbox; Switch would be too heavy here). */
-function Checkbox({ checked, onChange, label, disabled }: CheckboxProps) {
+function Checkbox({ checked, onChange, label, disabled, testId }: CheckboxProps) {
   return (
     <label className="flex cursor-pointer items-start gap-2 text-sm text-text">
       <input
@@ -88,6 +96,7 @@ function Checkbox({ checked, onChange, label, disabled }: CheckboxProps) {
         disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}
         className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+        data-testid={testId}
       />
       <span>{label}</span>
     </label>
@@ -226,9 +235,10 @@ export function ExportDialog({ open, onClose, projectId }: ExportDialogProps) {
   const showBilingual = format === 'bilingual-pdf'
   const showImageFormat = format === 'images'
   const showArtwork = ARTWORK_FORMATS.includes(format)
+  const showAdjust = ADJUST_FORMATS.includes(format)
   const showPdfExplainer = format === 'pdf' || format === 'bilingual-pdf'
   const showRasterExplainer = format === 'pdf-raster'
-  const showOptions = showOriginal || showBilingual || showImageFormat || showArtwork
+  const showOptions = showOriginal || showBilingual || showImageFormat || showArtwork || showAdjust
   const showFontWarning = preflight !== null && preflight.missing.length > 0
 
   const entries: DropdownEntry[] = FORMAT_GROUPS.flatMap((group, index): DropdownEntry[] => [
@@ -369,6 +379,23 @@ export function ExportDialog({ open, onClose, projectId }: ExportDialogProps) {
                 }
                 label={t('export.includeImages')}
               />
+            ) : null}
+
+            {showAdjust ? (
+              <div className="flex flex-col gap-1.5">
+                <Checkbox
+                  checked={options.adjustLayout}
+                  disabled={running}
+                  onChange={(checked) =>
+                    setOptions((current) => ({ ...current, adjustLayout: checked }))
+                  }
+                  label={t('export.adjustLayout')}
+                  testId="export-adjust-layout"
+                />
+                <p className="pl-6 text-xs leading-relaxed text-muted">
+                  {t('export.adjustLayoutDesc')}
+                </p>
+              </div>
             ) : null}
           </div>
         ) : null}

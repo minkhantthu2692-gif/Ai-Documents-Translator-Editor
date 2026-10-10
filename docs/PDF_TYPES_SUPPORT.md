@@ -562,8 +562,22 @@ surplus. Two rules keep that honest:
 The editor canvas runs the same pass, on the same measurer, so a page cannot
 look broken on screen and clean in the file it prints to. The formats with no
 geometry to push around are unchanged: DOCX, EPUB and Markdown are flow
-layouts with no box to overflow, and the raster export still paints the source
-exactly as it was — which is the entire promise of that format.
+layouts with no box to overflow, and the raster pair — Raster PDF and the
+PNG/JPG pack — still paints the source exactly as it was, which is the entire
+promise of an image format. That pair is also the one place a reader can ask
+for the push-down anyway: **Adjust layout when a translation grows** in the
+Export dialog (`ExportOptions.adjustLayout`, off by default) runs the same
+pass through `src/export/composite.ts`, measured against the size the paint
+will actually use — auto-fit has already shrunk each block into its box, so
+only text that still overflows at the 6pt floor spends a push — and reports
+`EXPORT_LAYOUT_ESTIMATED` and `EXPORT_LAYOUT_CLIPPED` exactly as the HTML and
+print paths do. With it off, nothing about the sheet changes.
+
+Either way the push cannot dodge artwork: figures and rules are painted into the
+background before the text is, so a block grown taller than the gap above a
+figure ends up over it — the same bargain the HTML path makes. Only the page
+edge names itself (`EXPORT_LAYOUT_CLIPPED`); a block that landed on artwork is
+left for the reader to see.
 
 _Known limitations carried over: table cell truncation at 45k characters,
 style reset on re-parse, no equation rendering (type 23). Reading order is
@@ -583,6 +597,9 @@ uses, so a document exported where that canvas refused to open falls back to a
 0.52em-per-character estimate and can shift a block a line further than it
 needed. That is no longer silent — the export reports an
 `EXPORT_LAYOUT_ESTIMATED` warning, in English and Myanmar, when it happened.
+For the raster pair that warning is raised only when **Adjust layout** is on:
+without it no block is *placed* by measurement, but the paint still wraps from
+the same estimate, and there the result is visible only in the sheet.
 The overflow badges survive reflow on purpose: it changes where a
 block sits, not whether it outgrew the box the PDF cut for it.
 Code detection carries the fixture caveat hardest: the detector and the

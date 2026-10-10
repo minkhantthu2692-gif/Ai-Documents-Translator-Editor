@@ -17,6 +17,12 @@ export interface ImagesZipOptions {
   scale: number
   fontStack: string
   quality?: number
+  /** Push down what auto-fit could not clear (`ExportOptions.adjustLayout`). */
+  adjustLayout?: boolean
+  /** Called once per block the page edge stopped while reflowing. */
+  onOverlap?: (blockId: string) => void
+  /** Called once per page measured without a canvas. */
+  onEstimated?: () => void
   onFile?: (done: number, total: number) => void
 }
 
@@ -54,6 +60,9 @@ export async function buildImagesZip(
       fontStack: options.fontStack,
       type: mime,
       ...(options.quality !== undefined ? { quality: options.quality } : {}),
+      adjustLayout: options.adjustLayout,
+      onOverlap: options.onOverlap,
+      onEstimated: options.onEstimated,
     })
     zip.file(file, image)
     pages.push({ page: page.index + 1, file, hasArtwork: background !== null })

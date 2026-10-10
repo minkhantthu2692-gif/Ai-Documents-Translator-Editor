@@ -12,6 +12,7 @@
  */
 
 import { createCanvasMeasurer, fitBlockText, type TextMeasurer } from '@/editor/autofit'
+import { reflowBlocks } from './reflow'
 import { listPrefix, pageBlocks, fontStackFor } from './shared'
 import type { ExportBlock, ExportPage } from './types'
 
@@ -23,6 +24,15 @@ export interface CompositeOptions {
   /** Output type (`image/jpeg` also takes a 0..1 `quality`). */
   type?: 'image/png' | 'image/jpeg'
   quality?: number
+  /**
+   * Push down what auto-fit could not clear (see `ExportOptions.adjustLayout`).
+   * Off keeps every block at the `y` the PDF gave it.
+   */
+  adjustLayout?: boolean
+  /** Called once per block the page edge stopped (only while reflowing). */
+  onOverlap?: (blockId: string) => void
+  /** Called when no canvas was available to measure text with. */
+  onEstimated?: () => void
 }
 
 /** Canvas measuring context for a worker thread (no DOM available there). */
@@ -96,6 +106,62 @@ function drawBlock(
 }
 
 /**
+ * The blocks `compositePage` will paint, in painting order.
+ *
+ * With `adjustLayout` off — the default — this is the page exactly as
+ * extracted: every block at the `y` the PDF gave it, which is the promise an
+ * image export makes. On, the page runs the same push-down the HTML and print
+ * exports use, measured against what the paint will actually use: auto-fit has
+ * already shrunk each block into its box, so a translation that fits after
+ * shrinking leaves its neighbours exactly where they were, and only text that
+ * still overflows at the 6pt floor spends a push. The list marker travels with
+ * the text for the reason `printedLine` carries it in the HTML path — a bullet
+ * that pushes the first word onto a second line has to be counted too.
+ */
+export function layoutBlocks(
+  page: ExportPage,
+  options: CompositeOptions,
+  measure: TextMeasurer,
+): ExportBlock[] {
+  const blocks = pageBlocks(page)
+  if (options.adjustLayout !== true) return blocks
+  try {
+    const painted = blocks.map((block) => {
+      const text = textOf(block)
+      if (text.trim().length === 0) return block
+      const fitted = fitBlockText({
+        text,
+        box: { width: block.width, height: block.height },
+        fontFamily: block.fontFamily,
+        bold: block.bold,
+        italic: block.italic,
+        originalSize: block.fontSize,
+        lineHeight: block.lineHeight,
+        measure,
+      })
+      return fitted.fontSize === block.fontSize ? block : { ...block, fontSize: fitted.fontSize }
+    })
+
+    const onOverlap = options.onOverlap
+    return reflowBlocks(painted, {
+      measure,
+      pageHeight: page.height,
+      textOf: (block) => {
+        const text = textOf(block)
+        return `${listPrefix(block, text)}${text}`
+      },
+      onOverlap: onOverlap ? (block) => onOverlap(block.id) : undefined,
+    })
+  } catch {
+    // Adjusting the layout is something the reader opted into, not the export
+    // itself: a pass that cannot finish leaves the page at source geometry —
+    // where this option starts anyway — rather than failing the whole sheet,
+    // the same bargain `drawBlock` makes for a single unrenderable block.
+    return blocks
+  }
+}
+
+/**
  * Composites one page. `background` may be null (blank sheet with text) — the
  * callers treat a failed background render as "no artwork", never as a
  * reason to drop the text.
@@ -125,8 +191,10 @@ export async function compositePage(
     }
   }
 
-  const measure = workerMeasurer()
-  for (const block of pageBlocks(page)) {
+  // One measurer for both jobs: it decides where a block is painted and, when
+  // the caller asked for layout adjustment, where reflow puts it.
+  const measure = workerMeasurer(options.onEstimated)
+  for (const block of layoutBlocks(page, options, measure)) {
     try {
       drawBlock(ctx, block, options, measure)
     } catch {

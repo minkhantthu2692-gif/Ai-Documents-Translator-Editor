@@ -1182,6 +1182,62 @@ try {
   )
   check('page artwork can be turned off before export', artworkOff === 'off', String(artworkOff))
 
+  // The layout-adjustment toggle belongs to the raster pair only: HTML, PDF
+  // and the bilingual PDF already reflow, so they have nothing to opt into.
+  const noToggleForHtml = await evalJs(
+    `document.querySelector('[data-testid="export-adjust-layout"]') === null`,
+  )
+  check(
+    'layout adjustment is not offered for HTML',
+    noToggleForHtml === true,
+    String(noToggleForHtml),
+  )
+
+  check('format menu reopens', await clickWhenReady('[data-testid="export-format-html"]'))
+  const pickFormat = (wanted) =>
+    evalJs(
+      `(() => {
+        const item = [...document.querySelectorAll('[role="menuitem"]')].find((b) =>
+          b.textContent.trim().startsWith('${wanted}'),
+        )
+        if (!item) return 'no-item'
+        item.click()
+        return 'clicked'
+      })()`,
+    )
+
+  const toRaster = await pickFormat('Raster PDF')
+  const rasterToggle = await waitFor(
+    `!!document.querySelector('[data-testid="export-adjust-layout"]')`,
+    8000,
+  )
+  check('raster formats offer layout adjustment', Boolean(rasterToggle), String(toRaster))
+  const toggleDefault = await evalJs(
+    `(() => {
+      const el = document.querySelector('[data-testid="export-adjust-layout"]')
+      if (!el) return 'missing'
+      if (el.checked) el.click()
+      return el.checked ? 'still-on' : 'off-by-default'
+    })()`,
+  )
+  check(
+    'layout adjustment is off by default',
+    toggleDefault === 'off-by-default',
+    String(toggleDefault),
+  )
+
+  // Back to HTML for the export below: the toggle has to disappear with the
+  // format, or the next run would reflow a format that already reflows.
+  await click('[data-testid="export-format-pdf-raster"]')
+  await sleep(300)
+  await pickFormat('HTML')
+  const backToHtml = await waitFor(
+    `!!document.querySelector('[data-testid="export-format-html"]') &&
+     document.querySelector('[data-testid="export-adjust-layout"]') === null`,
+    8000,
+  )
+  check('format returns to HTML for the export run', Boolean(backToHtml))
+
   // The CDP session is attached to one page target, so the download directory
   // set up on /settings is gone after these navigations — re-assert it for
   // this page or Chrome silently drops the export's anchor download.

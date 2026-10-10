@@ -387,6 +387,114 @@ describe('complex.pdf', () => {
   })
 })
 
+describe('slide.pdf', () => {
+  // Type 10 — a presentation slide: one wide title spanning two free-floating
+  // text boxes whose lines share baselines. The title bridging the fold must
+  // not disable column detection, and each box must read whole — never row by
+  // row across both boxes.
+  const extract = async (doc: PDFDocumentProxy, pageIndex: number) => {
+    const page = await doc.getPage(pageIndex + 1)
+    return extractPage(page, {
+      pageIndex,
+      ctx: { sourceLang: 'en', targetLang: 'my' },
+      headerTexts: [],
+      footerTexts: [],
+    })
+  }
+
+  it('keeps the landscape page with a text layer and the title as its heading', async () => {
+    const doc = await open('slide.pdf')
+    const result = await probeDocument(doc)
+    expect(result.summary.tally).toEqual({ text: 1, scanned: 0, mixed: 0, complex: 0, empty: 0 })
+
+    const extracted = await extract(doc, 0)
+    expect(extracted.width).toBe(792)
+    expect(extracted.height).toBe(612)
+
+    const body = extracted.blocks
+      .filter((block) => block.region === 'body')
+      .sort((a, b) => a.order - b.order)
+    expect(body[0].kind).toBe('heading')
+    expect(body[0].text).toBe('Annual Results 2026')
+  })
+
+  it('reads each text box whole, the left box entirely before the right one', async () => {
+    const doc = await open('slide.pdf')
+    const extracted = await extract(doc, 0)
+    const boxes = extracted.blocks
+      .filter(
+        (block) => block.text.includes('Revenue grew') || block.text.includes('Headcount ended'),
+      )
+      .sort((a, b) => a.order - b.order)
+
+    expect(boxes).toHaveLength(2)
+    expect(boxes[0].text).toContain('Revenue grew')
+    expect(boxes[1].text).toContain('Headcount ended')
+    for (const box of boxes) expect(box.lines).toHaveLength(5)
+
+    // No row-by-row interleaving: every line of a box is that box's own, in order.
+    expect(boxes[0].lines.map((line) => line.text)).toEqual([
+      'Revenue grew across every region.',
+      'Operating margin improved to 18%.',
+      'Cash flow remained strongly positive.',
+      'Debt levels fell below guidance.',
+      'The board proposes no dividend change.',
+    ])
+    expect(boxes[1].lines.map((line) => line.text)).toEqual([
+      'Headcount ended the year at 4,120.',
+      'Two new markets opened in June.',
+      'The Berlin office doubled in size.',
+      'Attrition fell to four percent.',
+      'Hiring continues in engineering.',
+    ])
+  })
+})
+
+describe('magazine.pdf', () => {
+  // Type 12 — a magazine page: a photo inside the column with the copy flowing
+  // around it. The lines beside the photo start at their own x origin; they
+  // must land between the full-width paragraphs, not fused into either.
+  const extract = async (doc: PDFDocumentProxy, pageIndex: number) => {
+    const page = await doc.getPage(pageIndex + 1)
+    return extractPage(page, {
+      pageIndex,
+      ctx: { sourceLang: 'en', targetLang: 'my' },
+      headerTexts: [],
+      footerTexts: [],
+    })
+  }
+
+  it('classifies the page as mixed — a photo inside a text layer', async () => {
+    const doc = await open('magazine.pdf')
+    const result = await probeDocument(doc)
+    expect(result.summary.tally).toEqual({ text: 0, scanned: 0, mixed: 1, complex: 0, empty: 0 })
+  })
+
+  it('reads the intro, the beside-photo copy and the closing paragraph in order', async () => {
+    const doc = await open('magazine.pdf')
+    const extracted = await extract(doc, 0)
+    const paragraphs = extracted.blocks
+      .filter((block) => block.region === 'body' && block.kind === 'paragraph')
+      .sort((a, b) => a.order - b.order)
+
+    // Intro + the flow-around line above the photo = one five-line paragraph;
+    // the beside-photo copy is its own four-line block; closing is three.
+    expect(paragraphs.map((block) => block.lines.length)).toEqual([5, 4, 3])
+    expect(paragraphs[0].text).toContain('The road north climbs')
+    expect(paragraphs[0].text).toContain('The convoy halts for the border check at noon.')
+    expect(paragraphs[1].text).toContain('Soldiers wave the drivers')
+    expect(paragraphs[2].text).toContain('By evening the column reaches the northern plain')
+
+    // The beside-photo copy keeps its own x origin — it was not merged into a
+    // neighbouring paragraph's bounding box.
+    expect(Math.round(paragraphs[1].bbox.x)).toBe(290)
+
+    // The photo anchors to a block instead of becoming one.
+    const figures = extracted.blocks.reduce((sum, block) => sum + (block.figures?.length ?? 0), 0)
+    expect(figures).toBe(1)
+  })
+})
+
 describe('encrypted.pdf', () => {
   it('refuses to open without the password', async () => {
     await expect(open('encrypted.pdf')).rejects.toBeInstanceOf(PasswordException)

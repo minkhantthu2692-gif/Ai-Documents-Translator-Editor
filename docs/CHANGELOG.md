@@ -323,6 +323,18 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   icon per project row/card, success/failure toasts plus bilingual events, and a plain
   warning when the PDF is not part of the file. `src/db/projectFile.test.ts` (new, 7 tests)
   covers scope, remap, additivity, the active-list guarantee and every rejection path.
+- **Phase (e) — the "in phase c" promises for slides and magazines, verified against
+  fixtures** (`fixtures/slide.pdf` and `fixtures/magazine.pdf`, both new; four tests in
+  `pdfExtract.test.ts`). Types 10 (presentation) and 12 (magazine/brochure) have carried a
+  forward reference since the matrix was written; both are now closed against real
+  extraction. The slide — one wide 36 pt title spanning two free-floating text boxes whose
+  eleven-point lines share baselines, exactly the fusion trap column detection exists for —
+  comes out as heading → left box → right box, each box one whole five-line block, never
+  row-by-row across both boxes. The magazine — a photo inside the column with copy flowing
+  around it — comes out as intro paragraph (the flow-around line stays part of the paragraph
+  above the photo) → the four narrow beside-photo lines at their own x origin → the closing
+  paragraph, with the photo anchored to one block instead of becoming a block of its own;
+  the page probes `mixed` with the text layer intact. Both rows move 🔶→⏳ to ✅.
 
 ### Security
 

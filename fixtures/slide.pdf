@@ -1,0 +1,59 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [6 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Length 698 >>
+stream
+BT
+0 0 0 rg
+/F2 36 Tf
+1 0 0 1 60 500 Tm (Annual Results 2026) Tj
+/F1 11 Tf
+1 0 0 1 60 440 Tm (Revenue grew across every region.) Tj
+1 0 0 1 60 424 Tm (Operating margin improved to 18%.) Tj
+1 0 0 1 60 408 Tm (Cash flow remained strongly positive.) Tj
+1 0 0 1 60 392 Tm (Debt levels fell below guidance.) Tj
+1 0 0 1 60 376 Tm (The board proposes no dividend change.) Tj
+1 0 0 1 430 440 Tm (Headcount ended the year at 4,120.) Tj
+1 0 0 1 430 424 Tm (Two new markets opened in June.) Tj
+1 0 0 1 430 408 Tm (The Berlin office doubled in size.) Tj
+1 0 0 1 430 392 Tm (Attrition fell to four percent.) Tj
+1 0 0 1 430 376 Tm (Hiring continues in engineering.) Tj
+/F1 9 Tf
+1 0 0 1 380 30 Tm (Slide 3) Tj
+ET
+
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 792 612] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Title (Slide sample) /Creator (make-fixtures.mjs) /Producer (make-fixtures.mjs) /CreationDate (D:20260115093000+06'30') /ModDate (D:20260320174500+06'30') >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000218 00000 n 
+0000000320 00000 n 
+0000001069 00000 n 
+0000001205 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R /Info 7 0 R >>
+startxref
+1382
+%%EOF

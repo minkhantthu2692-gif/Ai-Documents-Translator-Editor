@@ -157,14 +157,14 @@ function addPagesObject(writer) {
   return writer.add('<< /Type /Pages /Kids [] /Count 0 >>') // object 2
 }
 
-function addPage(writer, pagesNum, resources, contents, annots = []) {
+function addPage(writer, pagesNum, resources, contents, annots = [], mediaBox = LETTER) {
   const contentsRef = Array.isArray(contents)
     ? `[${contents.map((num) => `${num} 0 R`).join(' ')}]`
     : `${contents} 0 R`
   const annotsRef =
     annots.length > 0 ? ` /Annots [${annots.map((num) => `${num} 0 R`).join(' ')}]` : ''
   return writer.add(
-    `<< /Type /Page /Parent ${pagesNum} 0 R ${LETTER} ` +
+    `<< /Type /Page /Parent ${pagesNum} 0 R ${mediaBox} ` +
       `/Resources << ${resources} >> /Contents ${contentsRef}${annotsRef} >>`,
   )
 }
@@ -786,6 +786,148 @@ function buildComplexPdf() {
 }
 
 /* ------------------------------------------------------------------ */
+/* A presentation slide (type 10): a wide title spanning two free-     */
+/* floating text boxes whose lines share baselines — per-slide box     */
+/* reading order must come out title → left box → right box.           */
+/* ------------------------------------------------------------------ */
+
+function buildSlidePdf() {
+  const writer = new PdfWriter()
+  const pagesNum = addPagesObject(writer)
+  const regular = writer.add(FONT_REGULAR)
+  const bold = writer.add(FONT_BOLD)
+  const resources = `/Font << /F1 ${regular} 0 R /F2 ${bold} 0 R >>`
+
+  const parts = ['BT\n', '0 0 0 rg\n']
+  // Title: 36pt bold, spanning the slide above both boxes.
+  parts.push('/F2 36 Tf\n1 0 0 1 60 500 Tm (Annual Results 2026) Tj\n')
+  // Left text box: five 11pt lines.
+  parts.push('/F1 11 Tf\n')
+  const left = [
+    'Revenue grew across every region.',
+    'Operating margin improved to 18%.',
+    'Cash flow remained strongly positive.',
+    'Debt levels fell below guidance.',
+    'The board proposes no dividend change.',
+  ]
+  left.forEach((line, index) => {
+    parts.push(`1 0 0 1 60 ${440 - index * 16} Tm (${escape(line)}) Tj\n`)
+  })
+  // Right text box: five 11pt lines on the SAME baselines as the left one —
+  // clustering fuses each pair into one row unless the gutter is recovered.
+  const right = [
+    'Headcount ended the year at 4,120.',
+    'Two new markets opened in June.',
+    'The Berlin office doubled in size.',
+    'Attrition fell to four percent.',
+    'Hiring continues in engineering.',
+  ]
+  right.forEach((line, index) => {
+    parts.push(`1 0 0 1 430 ${440 - index * 16} Tm (${escape(line)}) Tj\n`)
+  })
+  // Slide-number band: small, low, centred — a footer by position.
+  parts.push('/F1 9 Tf\n1 0 0 1 380 30 Tm (Slide 3) Tj\n')
+  parts.push('ET\n')
+
+  const stream = writer.addStream('', Buffer.from(parts.join(''), 'latin1'))
+  const page = addPage(writer, pagesNum, resources, stream, [], '/MediaBox [0 0 792 612]')
+  finalizePages(writer, pagesNum, [page])
+  writer.setInfo({
+    Title: 'Slide sample',
+    Creator: 'make-fixtures.mjs',
+    Producer: 'make-fixtures.mjs',
+    CreationDate: "D:20260115093000+06'30'",
+    ModDate: "D:20260320174500+06'30'",
+  })
+  return writer.render()
+}
+
+/* ------------------------------------------------------------------ */
+/* A magazine page (type 12): a photo inside the text column with the  */
+/* copy flowing around it — narrow lines beside the photo between      */
+/* full-width lines, which must read intro → beside → closing.          */
+/* ------------------------------------------------------------------ */
+
+function buildMagazinePdf() {
+  const writer = new PdfWriter()
+  const pagesNum = addPagesObject(writer)
+  const regular = writer.add(FONT_REGULAR)
+  const bold = writer.add(FONT_BOLD)
+  const fontResources = `/Font << /F1 ${regular} 0 R /F2 ${bold} 0 R >>`
+
+  const width = 120
+  const height = 90
+  const pixels = Buffer.alloc(width * height * 3, 0xff)
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 3
+      pixels[offset] = 180 - x
+      pixels[offset + 1] = 120
+      pixels[offset + 2] = 90 + y
+    }
+  }
+  const image = writer.addStream(
+    `/Type /XObject /Subtype /Image /Width ${width} /Height ${height} ` +
+      '/ColorSpace /DeviceRGB /BitsPerComponent 8',
+    pixels,
+  )
+
+  const parts = ['BT\n', '0 0 0 rg\n']
+  parts.push('/F1 9 Tf\n1 0 0 1 60 760 Tm (The Monthly Review) Tj\n')
+  parts.push('/F2 24 Tf\n1 0 0 1 60 715 Tm (The Long Road North) Tj\n')
+  parts.push('/F1 11 Tf\n')
+  const intro = [
+    'The road north climbs out of the valley before dawn.',
+    'Trucks pass in convoys, headlights cutting the fog.',
+    'By mid-morning the pass is a ribbon above the clouds.',
+    'Everything that travels this route is counted twice.',
+  ]
+  intro.forEach((line, index) => {
+    parts.push(`1 0 0 1 60 ${680 - index * 15} Tm (${escape(line)}) Tj\n`)
+  })
+  // Last full-width line before the photo band.
+  parts.push('1 0 0 1 60 620 Tm (The convoy halts for the border check at noon.) Tj\n')
+  // Beside the photo: four narrow lines, its own x origin.
+  const beside = [
+    'Soldiers wave the drivers',
+    'through without ceremony.',
+    'The paperwork travels ahead,',
+    'by fax, to the next post.',
+  ]
+  beside.forEach((line, index) => {
+    parts.push(`1 0 0 1 290 ${581 - index * 14} Tm (${escape(line)}) Tj\n`)
+  })
+  // Closing paragraph: full width again, below the photo.
+  const closing = [
+    'By evening the column reaches the northern plain.',
+    'The drivers sleep in the cab, engines idling.',
+    'Dawn brings the same road, in reverse.',
+  ]
+  closing.forEach((line, index) => {
+    parts.push(`1 0 0 1 60 ${455 - index * 15} Tm (${escape(line)}) Tj\n`)
+  })
+  parts.push('/F1 9 Tf\n1 0 0 1 300 40 Tm (42) Tj\n')
+  parts.push('ET\n')
+
+  const text = writer.addStream('', Buffer.from(parts.join(''), 'latin1'))
+  // The photo sits left, inside the beside-lines band (y 470..595).
+  const art = writer.addStream('', Buffer.from('q\n210 0 0 125 60 470 cm\n/Im1 Do\nQ\n', 'latin1'))
+  const page = addPage(writer, pagesNum, `${fontResources} /XObject << /Im1 ${image} 0 R >>`, [
+    art,
+    text,
+  ])
+  finalizePages(writer, pagesNum, [page])
+  writer.setInfo({
+    Title: 'Magazine layout sample',
+    Creator: 'make-fixtures.mjs',
+    Producer: 'make-fixtures.mjs',
+    CreationDate: "D:20260115093000+06'30'",
+    ModDate: "D:20260320174500+06'30'",
+  })
+  return writer.render()
+}
+
+/* ------------------------------------------------------------------ */
 /* RC4 40-bit encryption (standard security handler, V1 / R2)          */
 /* ------------------------------------------------------------------ */
 
@@ -1290,6 +1432,8 @@ const outputs = [
   ['mixed.pdf', buildMixedPdf()],
   ['encrypted.pdf', buildEncryptedPdf(3)],
   ['complex.pdf', buildComplexPdf()],
+  ['slide.pdf', buildSlidePdf()],
+  ['magazine.pdf', buildMagazinePdf()],
   ['links.pdf', buildLinksPdf()],
   ['table.pdf', buildTablePdf()],
   ['table-spans.pdf', buildTableSpansPdf()],

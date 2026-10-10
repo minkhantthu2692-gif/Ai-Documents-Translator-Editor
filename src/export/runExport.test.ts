@@ -5,6 +5,7 @@ import { blockRepo, pageRepo } from '@/db/repo-content'
 import { suggestFallback, BUNDLED_FAMILIES } from '@/fonts'
 import {
   EXPORT_STACK_FAMILIES,
+  figureRequirement,
   imageRequirement,
   preflightFamilies,
   preflightProject,
@@ -35,6 +36,32 @@ describe('imageRequirement', () => {
     for (const format of ['markdown', 'text', 'json', 'csv', 'tsv', 'docx', 'epub'] as const) {
       expect(imageRequirement(format, true)).toBe(false)
     }
+  })
+})
+
+describe('figureRequirement', () => {
+  it('asks for figures exactly in the formats that can embed a picture but carry no page art', () => {
+    expect(figureRequirement('docx', true)).toBe(true)
+    expect(figureRequirement('epub', true)).toBe(true)
+    expect(figureRequirement('markdown', true)).toBe(true)
+  })
+
+  it('does not ask in formats that already show the figures as page art', () => {
+    for (const format of ['html', 'pdf', 'bilingual-pdf', 'pdf-raster', 'images'] as const) {
+      expect(figureRequirement(format, true)).toBe(false)
+    }
+  })
+
+  it('does not ask in formats that are data rather than a document', () => {
+    for (const format of ['text', 'json', 'csv', 'tsv'] as const) {
+      expect(figureRequirement(format, true)).toBe(false)
+    }
+  })
+
+  it('follows the images option', () => {
+    expect(figureRequirement('docx', false)).toBe(false)
+    expect(figureRequirement('epub', false)).toBe(false)
+    expect(figureRequirement('markdown', false)).toBe(false)
   })
 })
 

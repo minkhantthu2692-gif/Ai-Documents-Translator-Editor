@@ -69,7 +69,7 @@ same kinds, text, `tableCells`, link anchors and boxes within 3 pt.
 | 2  | Scanned PDF (image-only, rotated, low-res, OCR) | ✅ | Classification `scanned` + auto-OCR inside the parse window (browser Tesseract: `queued→running→done`, confidence + text blocks persisted, E2E-verified); local sidecar OCR ✅ preferred automatically when running; pre-flight warns and offers OCR; rotated scans still need OSD ❌ |
 | 3  | Mixed PDF (text + scanned pages/images) | 🔶 | Per-page classes + method selection ✅ (text / OCR / hybrid): hybrid keeps the text layer authoritative, OCRs the rest and drops blocks that overlap existing text (unit-tested); reading order across merged column lines ✅ |
 | 4  | Multi-Column PDF (2/3-col, newspaper, reading order) | ✅     | `complex` classification for ≥3 columns ✅ (item-level gutter detection); reading order ✅ — rows fused across a gutter are cut back into one line per column, columns are read left-to-right (2–4), and a title spanning the fold opens its own zone ahead of both columns |
-| 5  | PDF With Images (captions, diagrams, charts) | 🔶→⏳ | Images kept in the page render/background ✅; **image-anchored extraction ✅** — every painted image's rectangle is traced from the operator list, filtered against page furniture and anchored to the block it illustrates as `PageBlock.figures` (see below); **embedding those figures in DOCX/EPUB/Markdown is phase 9b** ❌ (HTML/PDF already show them as page art) |
+| 5  | PDF With Images (captions, diagrams, charts) | 🔶→⏳ | Images kept in the page render/background ✅; **image-anchored extraction ✅** — every painted image's rectangle is traced from the operator list, filtered against page furniture and anchored to the block it illustrates as `PageBlock.figures` (see below); **cropped and embedded in DOCX / EPUB / Markdown ✅** (phase 9b, see "How a figure reaches DOCX, EPUB and Markdown") |
 | 6  | PDF With Tables (simple/complex, merged cells, multi-page) | 🔶→⏳ | **Real table cells ✅** — a run of rows whose columns align becomes one `kind: 'table'` block carrying `tableCells` (rows × columns) as data, and HTML/EPUB draw a real `<table>`, DOCX a real `w:tbl`, Markdown a pipe table, JSON the grid (see below); table rows are explicitly exempt from the column split so merging cells stay one row; **merged cells and multi-page tables ❌**, and a gutter narrower than one em is not read as a column |
 | 7  | Academic / Research PDF (footnotes, refs, citations, equations) | 🔶→⏳ | 2-column papers classified `text` ✅ and read in column order ✅; footnote regions ✅ (see below); heading hierarchy ✅ — every heading carries a 1–6 level from a document-wide ladder (see below); equations ❌ (see #23) |
 | 8  | Business / Report PDF (reports, invoices, financial) | 🔶 | Paragraph/table extraction ✅; invoice form layout understanding ❌ |
@@ -413,13 +413,64 @@ therefore reads pdf.js's `getOperatorList()` for the placements even though the
 *text* came from PyMuPDF, feeding both engines the same geometry — and
 `extractParity.test.ts` compares `figures` block for block because of it.
 
-_Figures carry these caveats: **DOCX, EPUB and Markdown still emit no artwork at
-all** — the crop-and-embed pass is phase 9b, so today only HTML/PDF/print show a
-picture, as page art rather than as a flow element; labels drawn by the PDF
-itself as vector art or text are not carried into a cropped image, while labels
-burned into the raster survive because they are part of the pixels; and a figure
-whose only neighbour is more than half a page away is dropped rather than
-guessed at._
+_Figures carry these caveats: a label the PDF draws itself as vector art or text
+is not carried into a cropped image (the background render inpaints text boxes,
+which is what keeps translated and source words from doubling up), while a label
+burned into the raster survives because it is part of the pixels; a figure whose
+only neighbour is more than half a page away is dropped rather than guessed at;
+and a figure anchored to ordinary prose has no words of its own, so its alt text
+is empty._
+
+### How a figure reaches DOCX, EPUB and Markdown
+
+Phase 9a stopped at boxes on purpose: pixels in a block row would not survive
+IndexedDB or the sync sheet, and a figure is content the moment it is *placed*,
+not the moment it is *found*. Phase 9b is the other half — the three formats
+that could not show a picture at all now crop one and embed it, and they all
+crop from exactly the same source.
+
+**The crop comes from the page render, not from the image object.** An image
+operator names a PDF object and the renderer paints it, but a picture on a real
+page is usually composited: a mask here, a colour wash there, a form XObject
+wrapping it. Rebuilding that would mean reimplementing the renderer. So the
+figure rectangles from 9a are cut out of the finished **background render** —
+the same `renderPageImages({ mode: 'background' })` asset the HTML and PDF
+exports already put behind their text. One code path, and a picture looks the
+same in a DOCX as it did in the browser preview. The cut happens inside
+`renderPage` (`cutOut` in `src/pdf/pageRender.ts`), right after the render and
+before the page blob is encoded, so the analysis worker never hands whole pages
+across the worker boundary just to throw them away.
+
+**Only figure-bearing pages are rendered.** `renderFigureCrops`
+(`src/export/figureCrops.ts`) groups the document's figures by page and asks
+for one render per page that has any. A 300-page report with four diagrams
+costs four raster passes, not three hundred — which is the difference between a
+figure export that finishes and one that does not.
+
+**PNG, not WebP.** `docx` stores images by MIME type and its `ImageRun` accepts
+only `jpg|png|gif|bmp`; EPUB readers are still uneven about WebP. The page
+itself stays WebP because it is by far the larger asset.
+
+**The three builders agree on identity, size and side.** `src/export/figureArt.ts`
+is the shared vocabulary: `figureKey(blockId, index)` names a crop the same way
+in the renderer and in the builder, `figureSize` gives a picture the printed size
+it had on the page (a PDF point is 96/72 of a CSS pixel, which is what both DOCX
+and CSS measure in) and shrinks only an over-wide one, proportionally, and
+`figureGoesBefore` decides which side of its block a figure goes on by comparing
+midpoints — so a picture painted *above* its caption still appears above it,
+while one painted below the paragraph it was paired with stays below. EPUB
+declares every crop in the package manifest under `OEBPS/images/figure-N.png`
+(an `<img>` whose target is missing from the manifest does not open in every
+reader), DOCX packs it into `word/media` with the caption as its accessibility
+description, and Markdown inlines it as a data URI because Markdown has no asset
+folder.
+
+**`includeImages: false` turns all of it off**, and `figureRequirement` in
+`src/export/runExport.ts` decides which formats pay for any of this: exactly
+`docx`, `epub` and `markdown`. HTML, PDF, bilingual PDF, the raster PDF and the
+image pack already carry the whole rendered page behind their text, so the
+figures are visible there and cropping them would only duplicate them; JSON
+carries the geometry and `text`/`csv`/`tsv` are not documents._
 
 ### Why a grown block is pushed instead of clipped
 

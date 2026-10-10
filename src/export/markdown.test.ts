@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import type { FigureRef } from '@/pdf/structure'
 import { buildMarkdown } from './markdown'
 import type { ExportBlock, ExportDocument } from './types'
+
+/** A traced figure for a page-space box, at the 2× the fixtures were rendered at. */
+function ref(bbox: { x: number; y: number; w: number; h: number }): FigureRef {
+  return { bbox, pixelWidth: bbox.w * 2, pixelHeight: bbox.h * 2 }
+}
 
 /** Minimal block with every `ExportBlock` field filled in. */
 function block(overrides: Partial<ExportBlock>): ExportBlock {
@@ -560,5 +566,125 @@ describe('tables', () => {
     const out = buildMarkdown(tableDoc({ translatedText: 'The figures were summarised.' }), opts)
     expect(out).not.toContain('| --- |')
     expect(out).toContain('The figures were summarised.')
+  })
+})
+
+describe('buildMarkdown figures', () => {
+  const opts = { title: 'Sample', includeOriginal: false, includePageHeadings: false }
+  const ART = [{ key: 'fig#0', bytes: new Uint8Array([1]), dataUrl: 'data:image/png;base64,AQ==' }]
+
+  function figureDoc(figure: Partial<ExportBlock>): ExportDocument {
+    const doc = makeDoc()
+    doc.pages = [
+      {
+        index: 0,
+        width: 612,
+        height: 792,
+        rotation: 0,
+        contentClass: 'mixed',
+        blocks: [block({ id: 'fig', y: 200, sourceText: '', translatedText: '', ...figure })],
+      },
+    ]
+    doc.pageCount = 1
+    return doc
+  }
+
+  it('inlines the picture as a data URI', () => {
+    const out = buildMarkdown(
+      figureDoc({
+        sourceText: 'Figure 1 — Stages',
+        figures: [ref({ x: 100, y: 40, w: 300, h: 140 })],
+      }),
+      { ...opts, figures: ART },
+    )
+    expect(out).toContain('![Figure 1 — Stages](data:image/png;base64,AQ==)')
+  })
+
+  it('puts a picture painted above its caption before the caption', () => {
+    const out = buildMarkdown(
+      figureDoc({
+        sourceText: 'Figure 2 — Stages',
+        figures: [ref({ x: 100, y: 40, w: 300, h: 140 })],
+      }),
+      { ...opts, figures: ART },
+    )
+    expect(out.indexOf('![')).toBeLessThan(out.indexOf('Figure 2'))
+  })
+
+  it('puts a picture painted below its block after it', () => {
+    const out = buildMarkdown(
+      figureDoc({
+        sourceText: 'The pipeline runs in four stages.',
+        figures: [ref({ x: 100, y: 400, w: 300, h: 140 })],
+      }),
+      { ...opts, figures: ART },
+    )
+    expect(out.indexOf('![')).toBeGreaterThan(out.indexOf('The pipeline runs'))
+  })
+
+  it('reuses the caption as alt text and gives a prose figure none', () => {
+    const captioned = buildMarkdown(
+      figureDoc({
+        sourceText: 'Figure 3 — Deployment',
+        figures: [ref({ x: 100, y: 40, w: 300, h: 140 })],
+      }),
+      { ...opts, figures: ART },
+    )
+    expect(captioned).toContain('![Figure 3 — Deployment](data:')
+
+    const unlabelled = buildMarkdown(
+      figureDoc({
+        sourceText: 'The pipeline runs in four stages.',
+        figures: [ref({ x: 100, y: 400, w: 300, h: 140 })],
+      }),
+      { ...opts, figures: ART },
+    )
+    expect(unlabelled).toContain('![](data:image/png;base64,AQ==)')
+  })
+
+  it('escapes a bracket that would end the alt label early', () => {
+    const out = buildMarkdown(
+      figureDoc({
+        sourceText: 'Figure 4 — [stages]',
+        figures: [ref({ x: 100, y: 40, w: 300, h: 140 })],
+      }),
+      { ...opts, figures: ART },
+    )
+    expect(out).toContain('![Figure 4 — \\[stages\\]](data:')
+  })
+
+  it('skips a figure whose crop never came back', () => {
+    const out = buildMarkdown(
+      figureDoc({
+        sourceText: 'Figure 5 — Lost',
+        figures: [ref({ x: 100, y: 40, w: 300, h: 140 })],
+      }),
+      { ...opts, figures: [] },
+    )
+    expect(out).not.toContain('![')
+    expect(out).toContain('Figure 5 — Lost')
+  })
+
+  it('leaves a document with no figures untouched', () => {
+    const withArt = buildMarkdown(figureDoc({ sourceText: 'Plain paragraph' }), {
+      ...opts,
+      figures: ART,
+    })
+    const plain = buildMarkdown(figureDoc({ sourceText: 'Plain paragraph' }), opts)
+    expect(withArt).toBe(plain)
+  })
+
+  it('keeps exactly one blank line around the picture', () => {
+    const out = buildMarkdown(
+      figureDoc({
+        sourceText: 'Figure 6 — Stages',
+        figures: [ref({ x: 100, y: 40, w: 300, h: 140 })],
+      }),
+      { ...opts, includePageHeadings: true, figures: ART },
+    )
+    const lines = out.split('\n')
+    const image = lines.findIndex((line) => line.startsWith('!['))
+    expect(lines[image - 1]).toBe('')
+    expect(lines[image + 1]).toBe('')
   })
 })

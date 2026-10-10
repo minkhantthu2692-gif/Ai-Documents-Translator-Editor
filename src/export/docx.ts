@@ -22,6 +22,7 @@ import {
   Document,
   ExternalHyperlink,
   HeadingLevel,
+  ImageRun,
   LineRuleType,
   Packer,
   PageBreak,
@@ -44,6 +45,15 @@ import {
   textOf,
 } from './shared'
 import type { ExportBlock, ExportDocument } from './types'
+import {
+  MAX_FIGURE_WIDTH_PT,
+  figureAlt,
+  figureArtMap,
+  figureGoesBefore,
+  figureKey,
+  figureSize,
+} from './figureArt'
+import type { FigureArt } from './figureArt'
 
 /** Options the export worker fills from the export dialog. */
 export interface DocxOptions {
@@ -59,6 +69,19 @@ export interface DocxOptions {
   pageHeadings: boolean
   /** Emit an explicit page break between source pages. */
   pageBreaks: boolean
+  /**
+   * Cropped figures keyed by `figureKey`, embedded as inline PNGs on the side
+   * of their block where the page painted them. DOCX has no way to reference
+   * art that is not packed into the file, so a figure that failed to render
+   * simply is not in the document.
+   */
+  figures?: FigureArt[]
+  /**
+   * Widest a figure may print, in PDF points. Defaults to the page minus an
+   * inch of margin per side — Word's own default, which this builder does not
+   * override.
+   */
+  maxFigureWidthPt?: number
 }
 
 /** docx alignment value for one `BlockAlignment`. */
@@ -310,6 +333,56 @@ function blockParagraphs(block: ExportBlock, options: DocxOptions): Array<Paragr
   })
 }
 
+/**
+ * The picture paragraphs for one block, split by the side of the block the
+ * page painted them on — a figure above its caption stays above it.
+ *
+ * Word sizes a drawing in CSS pixels at 96 dpi, so a figure keeps the printed
+ * size it had on the page (a PDF point is 96/72 of one) and only an over-wide
+ * one shrinks to the text column, proportionally. `altText` is the caption
+ * when the block has one: an image with no description is invisible to a
+ * screen reader, and an empty description is the honest signal that the
+ * picture carries nothing the text does not already say.
+ */
+function blockFigures(
+  block: ExportBlock,
+  maxFigureWidthPt: number,
+  art: Map<string, FigureArt>,
+): { before: Paragraph[]; after: Paragraph[] } {
+  if (art.size === 0 || block.figures.length === 0) return { before: [], after: [] }
+  const before: Paragraph[] = []
+  const after: Paragraph[] = []
+  block.figures.forEach((figure, index) => {
+    const found = art.get(figureKey(block.id, index))
+    if (!found) return
+    const size = figureSize(figure.bbox, maxFigureWidthPt)
+    const picture = new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 120, after: 120 },
+      children: [
+        new ImageRun({
+          type: 'png',
+          data: found.bytes,
+          transformation: { width: size.widthPx, height: size.heightPx },
+          altText: { name: found.key, description: figureAlt(block) },
+        }),
+      ],
+    })
+    ;(figureGoesBefore(block, figure.bbox) ? before : after).push(picture)
+  })
+  return { before, after }
+}
+
+/**
+ * How wide a figure may print: the page minus an inch of margin per side,
+ * which is what Word uses when a section declares none (and this builder
+ * declares none). Clamped so a very narrow page still shows something.
+ */
+function figureColumnWidth(doc: ExportDocument): number {
+  const width = doc.pages[0]?.width ?? 0
+  return Math.max(72, Math.min(MAX_FIGURE_WIDTH_PT, width - 144))
+}
+
 /** First source page geometry (PDF points) → section page size in twips. */
 function pageSizeOf(
   doc: ExportDocument,
@@ -334,6 +407,8 @@ function buildChildren(doc: ExportDocument, options: DocxOptions): Array<Paragra
     )
   }
   let pagesEmitted = 0
+  const art = figureArtMap(options.figures)
+  const maxFigureWidthPt = options.maxFigureWidthPt ?? figureColumnWidth(doc)
   for (const page of contentPages(doc)) {
     const blocks = pageBlocks(page)
     if (blocks.length === 0) continue
@@ -349,7 +424,10 @@ function buildChildren(doc: ExportDocument, options: DocxOptions): Array<Paragra
       )
     }
     for (const block of blocks) {
+      const figures = blockFigures(block, maxFigureWidthPt, art)
+      children.push(...figures.before)
       children.push(...blockParagraphs(block, options))
+      children.push(...figures.after)
     }
     pagesEmitted += 1
   }

@@ -22,6 +22,9 @@ import { downloadBlob } from '@/lib/download'
 import { ExportBuildError, buildInWorker, stageProgress } from './client'
 import { collectExportDocument, usedFamilies } from './collect'
 import { renderPageImages, needsImages, type RenderedImage } from './pageImages'
+import { renderFigureCrops } from './figureCrops'
+import { figureTargets, loadFigureArt } from './figureArt'
+import type { FigureArt } from './figureArt'
 import { printHtmlDocument } from './printFrame'
 import { fileNameFor, isDocumentEmpty, resolvedOptions, slugify, documentStats } from './shared'
 import type {
@@ -127,6 +130,24 @@ export function imageRequirement(format: ExportOptions['format'], includeImages:
   return needsImages(format)
 }
 
+/**
+ * Which formats need figures cropped out of their pages.
+ *
+ * Exactly the three that can embed a standalone picture but have no page-art
+ * channel: `html`, `pdf`, `bilingual-pdf`, `pdf-raster` and `images` already
+ * put the whole rendered page behind their text, so the figures are visible
+ * there and cropping them would only duplicate them; `json` carries the
+ * geometry and `text`/`csv`/`tsv` are not documents. The formats in this list
+ * are the ones that would otherwise lose every picture.
+ */
+export function figureRequirement(
+  format: ExportOptions['format'],
+  includeImages: boolean,
+): boolean {
+  if (!includeImages) return false
+  return format === 'docx' || format === 'epub' || format === 'markdown'
+}
+
 function addIssue(list: ExportIssue[], issue: ExportIssue): void {
   const key = `${issue.code}|${issue.fonts.join(',')}|`
   if (list.some((existing) => `${existing.code}|${existing.fonts.join(',')}|` === key)) return
@@ -193,6 +214,33 @@ export async function runExport(input: RunExportInput): Promise<ExportResult> {
     }
   }
 
+  // ── figures ────────────────────────────────────────────────────────────
+  // Only the formats with no page-art channel pay for this, and only the
+  // pages that actually carry a picture are rasterised — a 300-page report
+  // with four diagrams costs four renders, not three hundred.
+  let figures: FigureArt[] = []
+  if (figureRequirement(options.format, options.includeImages)) {
+    const wanted = figureTargets(doc)
+    if (wanted.length > 0) {
+      report('render', 0, 1)
+      const crops = await renderFigureCrops({
+        projectId: input.projectId,
+        doc,
+        scale: options.imageScale,
+        ...(input.signal ? { signal: input.signal } : {}),
+        onProgress: (done, total) => report('render', done, total),
+      })
+      figures = await loadFigureArt(crops)
+      if (figures.length < wanted.length) {
+        addIssue(issues, {
+          code: 'EXPORT_FAILED',
+          fonts: [],
+          detail: `${wanted.length - figures.length} of ${wanted.length} figures could not be cropped from their pages; those pictures are missing from this ${options.format.toUpperCase()} file`,
+        })
+      }
+    }
+  }
+
   // ── build ──────────────────────────────────────────────────────────────
   report('build', 0, 1)
   const faces = collectFontFaces([...usedFamilies(doc), ...EXPORT_STACK_FAMILIES])
@@ -204,6 +252,7 @@ export async function runExport(input: RunExportInput): Promise<ExportResult> {
       options,
       fontFaces: faces.length > 0 ? faces : preflight.faces,
       images,
+      ...(figures.length > 0 ? { figures } : {}),
     },
     (progress) => input.onProgress?.(progress),
   )

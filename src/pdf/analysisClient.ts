@@ -13,6 +13,7 @@
 import AnalysisWorker from '@/workers/analysis.worker?worker'
 import type { ReasonCode } from '@/core/reasonCodes'
 import type { ExtractedPage, ProbeResult } from '@/pdf/pdfExtract'
+import type { FigureCropTarget, PageCrop } from '@/pdf/pageRender'
 import type { SkipContext } from '@/pdf/skipRules'
 import type { AnalysisEvent, AnalysisPayload, AnalysisRequest } from '@/workers/protocol'
 
@@ -235,11 +236,42 @@ class AnalysisClient {
     this.renderInFlight.set(key, id)
     try {
       const event = await this.send({ kind: 'render', fileId, pageIndex, scale, mode }, options, id)
-      if (event.kind === 'renderResult') return event.blob
+      if (event.kind === 'renderResult') {
+        if (!event.blob) throw new Error(`page ${pageIndex} rendered without an image`)
+        return event.blob
+      }
       throw unexpected(event)
     } finally {
       if (this.renderInFlight.get(key) === id) this.renderInFlight.delete(key)
     }
+  }
+
+  /**
+   * Cuts figure rectangles out of a page's background render.
+   *
+   * Always `background` mode, so vector text painted *inside* a figure is
+   * inpainted away and only the artwork survives — the same pixels the HTML
+   * and PDF exports already put behind their text, which is why a figure
+   * looks the same in a DOCX as it does in the browser preview.
+   *
+   * The page itself never comes back: this is the path a DOCX/EPUB/Markdown
+   * export uses to embed standalone pictures, and shipping whole pages it has
+   * nowhere to put would only cost memory.
+   */
+  async renderFigures(
+    fileId: string,
+    pageIndex: number,
+    scale: number,
+    crops: readonly FigureCropTarget[],
+    options: { signal?: AbortSignal } = {},
+  ): Promise<PageCrop[]> {
+    if (crops.length === 0) return []
+    const event = await this.send(
+      { kind: 'render', fileId, pageIndex, scale, mode: 'background', crops: [...crops] },
+      options,
+    )
+    if (event.kind === 'renderResult') return event.crops ?? []
+    throw unexpected(event)
   }
 
   /**

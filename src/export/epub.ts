@@ -21,6 +21,8 @@
 import JSZip from 'jszip'
 import { directionOf } from '@/lib/text'
 import type { LinkRef } from '@/pdf/links'
+import { figureAlt, figureArtMap, figureGoesBefore, figureKey, figureSize } from './figureArt'
+import type { FigureArt } from './figureArt'
 import {
   DEFAULT_FONT_STACK,
   applyLinks,
@@ -47,6 +49,41 @@ export interface EpubOptions {
   fontStack: string
   /** Optional base64 font payload: { fileName, mimeType, base64 }[] injected as @font-face src url(data:...). */
   fonts?: Array<{ fileName: string; mimeType: string; base64: string }>
+  /**
+   * Cropped figures keyed by `figureKey`, filed under `OEBPS/images` and
+   * declared in the package manifest. An EPUB with an `<img>` whose target is
+   * missing from the manifest does not open in every reader, so the hrefs are
+   * derived once, in `buildEpub`, and shared by the chapters and the OPF.
+   */
+  figures?: FigureArt[]
+}
+
+/**
+ * What the chapter writers actually see: `figures` resolved to an array plus
+ * the href each crop was filed under, so no chapter has to guess a file name
+ * and the package document and the markup cannot drift apart.
+ */
+interface ChapterOptions extends Omit<EpubOptions, 'figures'> {
+  figures: FigureArt[]
+  figureHrefs: Map<string, string>
+}
+
+/** Files the crops under `images/figure-N.png`, in the order they arrived. */
+function chapterOptions(options: EpubOptions, doc: ExportDocument): ChapterOptions {
+  // Only the crops a chapter actually references are kept: an `<item>` whose
+  // file no chapter shows is a dangling manifest entry, and a picture on a
+  // block the export filtered out (locked, skipped, outside the page range)
+  // would otherwise ship as one.
+  const wanted = new Set<string>()
+  for (const page of contentPages(doc)) {
+    for (const block of page.blocks) {
+      block.figures.forEach((_, index) => wanted.add(figureKey(block.id, index)))
+    }
+  }
+  const figures = (options.figures ?? []).filter((art) => wanted.has(art.key))
+  const figureHrefs = new Map<string, string>()
+  figures.forEach((art, index) => figureHrefs.set(art.key, `images/figure-${index + 1}.png`))
+  return { ...options, figures, figureHrefs }
 }
 
 /** Source pages per chapter — keeps the navigation document small. */
@@ -193,6 +230,41 @@ function tableMarkup(
  * the translation (falling back to the source when there is no translation
  * yet) — a bilingual book would otherwise list every heading twice.
  */
+/**
+ * The `<figure>` elements for one block, split by the side of the block the
+ * page painted them on — a picture above its caption stays above it.
+ *
+ * EPUB is reflowable, so a figure is sized in points (its printed size) but
+ * capped at the column: `max-width: 100%` stops a wide diagram from
+ * overflowing a narrow reader and `height: auto` keeps the aspect ratio when
+ * it does shrink. A figure whose crop did not survive rendering is absent
+ * rather than a broken link — a reader that cannot resolve an `<img>` target
+ * may refuse to open the book at all.
+ */
+function blockFiguresMarkup(
+  block: ExportBlock,
+  options: ChapterOptions,
+): { before: string[]; after: string[] } {
+  const art = figureArtMap(options.figures)
+  if (art.size === 0 || block.figures.length === 0) return { before: [], after: [] }
+  const before: string[] = []
+  const after: string[] = []
+  block.figures.forEach((figure, index) => {
+    const found = art.get(figureKey(block.id, index))
+    if (!found) return
+    const href = options.figureHrefs.get(found.key)
+    if (!href) return
+    const size = figureSize(figure.bbox)
+    const line =
+      `<figure class="figure">` +
+      `<img src="${escapeHtml(href)}" alt="${escapeHtml(figureAlt(block))}" ` +
+      `style="width: ${size.widthPt}pt; max-width: 100%; height: auto"/>` +
+      `</figure>`
+    ;(figureGoesBefore(block, figure.bbox) ? before : after).push(line)
+  })
+  return { before, after }
+}
+
 function blockParagraphs(block: ExportBlock, doc: ExportDocument, options: EpubOptions): string[] {
   const { source, target, primary } = textOf(block, options.includeOriginal)
   const entries: Array<{ text: string; source: boolean }> = []
@@ -250,12 +322,13 @@ function blockParagraphs(block: ExportBlock, doc: ExportDocument, options: EpubO
 }
 
 /** One chapter: an `<h2>` per source page, then that page's blocks. */
-function chapterXhtml(pages: ExportPage[], doc: ExportDocument, options: EpubOptions): string {
+function chapterXhtml(pages: ExportPage[], doc: ExportDocument, options: ChapterOptions): string {
   const body: string[] = []
   for (const page of pages) {
     body.push(`  <h2>Page ${page.index + 1}</h2>`)
     for (const block of pageBlocks(page)) {
-      for (const line of blockParagraphs(block, doc, options)) {
+      const { before, after } = blockFiguresMarkup(block, options)
+      for (const line of [...before, ...blockParagraphs(block, doc, options), ...after]) {
         body.push(`  ${line}`)
       }
     }
@@ -328,13 +401,20 @@ function modifiedStamp(exportedAt: number): string {
 /** OPF package document: metadata, manifest and spine in reading order. */
 function contentOpf(
   doc: ExportDocument,
-  options: EpubOptions,
+  options: ChapterOptions,
   chapters: readonly ExportPage[][],
 ): string {
   const lang = langTag(options.lang)
   const manifest = chapters.map(
     (_, index) =>
       `    <item id="chapter-${index + 1}" href="text/chap_${index + 1}.xhtml" media-type="application/xhtml+xml"/>`,
+  )
+  // Every embedded figure is a real manifest entry: an `<img>` in a chapter
+  // whose target is not declared is a validity error, and some readers drop
+  // the whole book rather than the picture.
+  const figures = options.figures.map(
+    (art, index) =>
+      `    <item id="figure-${index + 1}" href="${escapeHtml(options.figureHrefs.get(art.key) ?? '')}" media-type="image/png"/>`,
   )
   const spine = chapters.map((_, index) => `    <itemref idref="chapter-${index + 1}"/>`)
   return [
@@ -351,6 +431,7 @@ function contentOpf(
     '    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>',
     '    <item id="css" href="css/main.css" media-type="text/css"/>',
     ...manifest,
+    ...figures,
     '  </manifest>',
     '  <spine>',
     ...spine,
@@ -397,6 +478,14 @@ function mainCss(options: EpubOptions): string {
     '  padding: 0.2em 0.4em;',
     '  vertical-align: top;',
     '}',
+    'figure.figure {',
+    '  margin: 1em 0;',
+    '  text-align: center;',
+    '}',
+    'figure.figure img {',
+    '  max-width: 100%;',
+    '  height: auto;',
+    '}',
   )
   return `${rules.join('\n')}\n`
 }
@@ -404,15 +493,25 @@ function mainCss(options: EpubOptions): string {
 /** Returns EPUB bytes (Uint8Array). */
 export async function buildEpub(doc: ExportDocument, options: EpubOptions): Promise<Uint8Array> {
   const chapters = groupPages(contentPages(doc))
+  const resolved = chapterOptions(options, doc)
   const zip = new JSZip()
   // Must stay the first entry: readers verify it without unzipping.
   zip.file('mimetype', MIMETYPE, { compression: 'STORE' })
   zip.file('META-INF/container.xml', CONTAINER_XML)
-  zip.file('OEBPS/content.opf', contentOpf(doc, options, chapters))
+  zip.file('OEBPS/content.opf', contentOpf(doc, resolved, chapters))
   zip.file('OEBPS/nav.xhtml', navXhtml(options.title, langTag(options.lang), chapters))
   zip.file('OEBPS/css/main.css', mainCss(options))
+  // A figure's bytes go in beside the chapters that reference them, under the
+  // exact href `contentOpf` declared — the two are computed from the same
+  // list, so they cannot disagree.
+  resolved.figures.forEach((art, index) => {
+    zip.file(
+      `OEBPS/${resolved.figureHrefs.get(art.key) ?? `images/figure-${index + 1}.png`}`,
+      art.bytes,
+    )
+  })
   chapters.forEach((pages, index) => {
-    zip.file(`OEBPS/text/chap_${index + 1}.xhtml`, chapterXhtml(pages, doc, options))
+    zip.file(`OEBPS/text/chap_${index + 1}.xhtml`, chapterXhtml(pages, doc, resolved))
   })
   return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' })
 }

@@ -13,16 +13,52 @@
  */
 
 import type { PDFPageProxy, RenderTask } from 'pdfjs-dist'
+import type { BBox } from './stableId'
 
 export interface RenderPageOptions {
   /** Viewport scale (1 = 72 dpi). Thumbnails use ~0.15–0.25. */
   scale: number
   /** Repaint the text boxes with their sampled surroundings. */
   maskText?: boolean
+  /**
+   * Also cut these page rectangles out of the finished render and hand them
+   * back separately (see `PageCrop`). This is how the figure pipeline feeds
+   * the formats that can only embed standalone pictures — DOCX, EPUB and
+   * Markdown — without ever shipping whole pages back to the main thread.
+   *
+   * Asking for crops turns the render into a figure render: the whole-page
+   * blob is not encoded, because the only caller that asks is the one that
+   * does not want the page.
+   */
+  crops?: readonly FigureCropTarget[]
+}
+
+/** A rectangle of the page an export wants as its own picture. */
+export interface FigureCropTarget {
+  /** Identity echoed back on the crop; unique within one render request. */
+  key: string
+  /** Page space in PDF points, top-left origin — the same frame as a `BBox`. */
+  bbox: BBox
+}
+
+export interface PageCrop {
+  key: string
+  blob: Blob
+}
+
+export interface RenderResult {
+  /**
+   * The whole page, encoded as WebP (PNG where WebP is unavailable). `null`
+   * when the caller asked for `crops` only — a figure-only export has no use
+   * for the page and should not pay to encode it.
+   */
+  page: Blob | null
+  /** The requested cut-outs, PNG, in request order — empty unless asked for. */
+  crops: PageCrop[]
 }
 
 export interface RenderHandle {
-  promise: Promise<Blob>
+  promise: Promise<RenderResult>
   /** Aborts the pdf.js render task; the promise rejects with a cancel error. */
   cancel: () => void
 }
@@ -52,12 +88,51 @@ export function isRenderCancelled(error: unknown): boolean {
   return name === 'RenderingCancelledException' || name === 'AbortError'
 }
 
-function toBlob(canvas: OffscreenCanvas): Promise<Blob> {
-  return canvas.convertToBlob({ type: 'image/webp', quality: 0.75 }).then(async (blob) => {
+function toBlob(
+  canvas: OffscreenCanvas,
+  type: 'image/webp' | 'image/png' = 'image/webp',
+): Promise<Blob> {
+  return canvas.convertToBlob({ type, quality: 0.75 }).then(async (blob) => {
     // Some engines cannot encode WebP — fall back to PNG rather than fail.
-    if (blob && blob.type === 'image/webp') return blob
+    if (blob && blob.type === type) return blob
     return canvas.convertToBlob({ type: 'image/png' })
   })
+}
+
+/**
+ * Cuts the requested rectangles out of a finished page render.
+ *
+ * A crop that lands outside the sheet (a box clamped by extraction, or one
+ * whose block straddles the trim) is clipped rather than dropped, and one that
+ * rounds down to nothing is skipped — an export would rather lose a decorative
+ * sliver than embed a zero-width picture.
+ *
+ * PNG on purpose: `docx` stores images by MIME type and only knows
+ * `jpg|png|gif|bmp`, while EPUB readers are still uneven about WebP. The page
+ * itself stays WebP because it is the much larger asset.
+ */
+async function cutOut(
+  canvas: OffscreenCanvas,
+  scale: number,
+  figures: readonly FigureCropTarget[],
+): Promise<PageCrop[]> {
+  if (figures.length === 0) return []
+  const out: PageCrop[] = []
+  for (const target of figures) {
+    const x = Math.max(0, Math.round(target.bbox.x * scale))
+    const y = Math.max(0, Math.round(target.bbox.y * scale))
+    const right = Math.min(canvas.width, Math.round((target.bbox.x + target.bbox.w) * scale))
+    const bottom = Math.min(canvas.height, Math.round((target.bbox.y + target.bbox.h) * scale))
+    const w = right - x
+    const h = bottom - y
+    if (w < 1 || h < 1) continue
+    const piece = new OffscreenCanvas(w, h)
+    const context = piece.getContext('2d')
+    if (!context) continue
+    context.drawImage(canvas, x, y, w, h, 0, 0, w, h)
+    out.push({ key: target.key, blob: await toBlob(piece, 'image/png') })
+  }
+  return out
 }
 
 /** Text runs as viewport-space boxes (top-left origin). */
@@ -165,7 +240,9 @@ export function renderPage(page: PDFPageProxy, options: RenderPageOptions): Rend
   let task: RenderTask | null = null
   let cancelled = false
 
-  const promise = (async (): Promise<Blob> => {
+  const crops = options.crops ?? []
+
+  const promise = (async (): Promise<RenderResult> => {
     if (!context) throw new Error('2D canvas context unavailable')
     context.fillStyle = '#ffffff'
     context.fillRect(0, 0, width, height)
@@ -187,7 +264,9 @@ export function renderPage(page: PDFPageProxy, options: RenderPageOptions): Rend
       }
     }
     if (cancelled) throw new Error('render cancelled')
-    return toBlob(canvas)
+    const cut = await cutOut(canvas, scale, crops)
+    const pageBlob = crops.length > 0 ? null : await toBlob(canvas)
+    return { page: pageBlob, crops: cut }
   })()
 
   return {

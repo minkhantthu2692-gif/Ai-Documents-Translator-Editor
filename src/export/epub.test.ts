@@ -1,7 +1,13 @@
 import JSZip from 'jszip'
 import { describe, expect, it } from 'vitest'
+import type { FigureRef } from '@/pdf/structure'
 import { buildEpub, type EpubOptions } from './epub'
 import type { ExportBlock, ExportDocument, ExportPage } from './types'
+
+/** A traced figure for a page-space box, at the 2× the fixtures were rendered at. */
+function ref(bbox: { x: number; y: number; w: number; h: number }): FigureRef {
+  return { bbox, pixelWidth: bbox.w * 2, pixelHeight: bbox.h * 2 }
+}
 
 function block(partial: Partial<ExportBlock>): ExportBlock {
   return {
@@ -423,5 +429,125 @@ describe('buildEpub tables', () => {
     const chapter = await tableChapter({ translatedText: 'The figures were summarised.' })
     expect(chapter).not.toContain('<table')
     expect(chapter).toContain('The figures were summarised.')
+  })
+})
+
+describe('buildEpub figures', () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  const ART = [{ key: 'cap#0', bytes: PNG, dataUrl: 'data:image/png;base64,iVBORw0KG==' }]
+
+  function figureDoc(figure: Partial<ExportBlock>): ExportDocument {
+    return {
+      ...fixtureDoc(),
+      pages: [
+        page(0, [block({ id: 'cap', y: 200, sourceText: '', translatedText: '', ...figure })]),
+      ],
+    }
+  }
+
+  async function figureChapter(figure: Partial<ExportBlock>, figures = ART): Promise<string> {
+    const zip = await JSZip.loadAsync(await buildEpub(figureDoc(figure), epubOptions({ figures })))
+    return zipText(zip, 'OEBPS/text/chap_1.xhtml')
+  }
+
+  it('files the picture under OEBPS/images and declares it in the manifest', async () => {
+    const zip = await JSZip.loadAsync(
+      await buildEpub(
+        figureDoc({
+          sourceText: 'Figure 1 — Stages',
+          figures: [ref({ x: 100, y: 40, w: 300, h: 140 })],
+        }),
+        epubOptions({ figures: ART }),
+      ),
+    )
+    const opf = await zipText(zip, 'OEBPS/content.opf')
+    expect(opf).toContain('<item id="figure-1" href="images/figure-1.png" media-type="image/png"/>')
+    expect(await zip.file('OEBPS/images/figure-1.png')?.async('uint8array')).toEqual(PNG)
+  })
+
+  it('puts a picture painted above its caption before the caption', async () => {
+    const chapter = await figureChapter({
+      sourceText: 'Figure 1 — Stages',
+      figures: [ref({ x: 100, y: 40, w: 300, h: 140 })],
+    })
+    expect(chapter.indexOf('<figure class="figure">')).toBeLessThan(chapter.indexOf('Figure 1'))
+  })
+
+  it('puts a picture painted below its block after it', async () => {
+    const chapter = await figureChapter({
+      sourceText: 'The pipeline runs in four stages.',
+      figures: [ref({ x: 100, y: 400, w: 300, h: 140 })],
+    })
+    expect(chapter.indexOf('<figure class="figure">')).toBeGreaterThan(
+      chapter.indexOf('The pipeline runs'),
+    )
+  })
+
+  it('reuses the caption as alt text and gives a prose figure none', async () => {
+    const captioned = await figureChapter({
+      sourceText: 'Figure 2 — Deployment',
+      figures: [ref({ x: 100, y: 40, w: 300, h: 140 })],
+    })
+    expect(captioned).toContain('alt="Figure 2 — Deployment"')
+
+    const unlabelled = await figureChapter({
+      sourceText: 'The pipeline runs in four stages.',
+      figures: [ref({ x: 100, y: 40, w: 300, h: 140 })],
+    })
+    expect(unlabelled).toContain('alt=""')
+  })
+
+  it('sizes the picture in points and caps it at the column', async () => {
+    const wide = await figureChapter({
+      sourceText: 'Figure 3 — Wide',
+      figures: [ref({ x: 20, y: 40, w: 700, h: 350 })],
+    })
+    expect(wide).toContain('width: 480pt; max-width: 100%; height: auto')
+
+    const narrow = await figureChapter({
+      sourceText: 'Figure 4 — Narrow',
+      figures: [ref({ x: 100, y: 40, w: 240, h: 120 })],
+    })
+    expect(narrow).toContain('width: 240pt')
+  })
+
+  it('skips a figure whose crop never came back instead of linking a missing file', async () => {
+    const chapter = await figureChapter(
+      { sourceText: 'Figure 5 — Lost', figures: [ref({ x: 100, y: 40, w: 300, h: 140 })] },
+      [],
+    )
+    expect(chapter).not.toContain('<img')
+    expect(chapter).toContain('Figure 5 — Lost')
+  })
+
+  it('still parses as XML with a figure in it', async () => {
+    const chapter = await figureChapter({
+      sourceText: 'Figure 6 — <b>escaped</b>',
+      figures: [ref({ x: 100, y: 40, w: 300, h: 140 })],
+    })
+    expectWellFormed(chapter, 'chap_1.xhtml')
+  })
+
+  it('leaves a document with no figures untouched', async () => {
+    const doc = figureDoc({ sourceText: 'Plain paragraph' })
+    const withArt = await zipText(
+      await JSZip.loadAsync(await buildEpub(doc, epubOptions({ figures: ART }))),
+      'OEBPS/text/chap_1.xhtml',
+    )
+    const plain = await zipText(
+      await JSZip.loadAsync(await buildEpub(doc, epubOptions())),
+      'OEBPS/text/chap_1.xhtml',
+    )
+    expect(withArt).toBe(plain)
+    expect(withArt).not.toContain('<img')
+  })
+
+  it('declares nothing in the manifest for art no chapter references', async () => {
+    const zip = await JSZip.loadAsync(
+      await buildEpub(figureDoc({ sourceText: 'Plain paragraph' }), epubOptions({ figures: ART })),
+    )
+    const opf = await zipText(zip, 'OEBPS/content.opf')
+    expect(opf).not.toContain('figure-1')
+    expect(zip.file('OEBPS/images/figure-1.png')).toBeNull()
   })
 })

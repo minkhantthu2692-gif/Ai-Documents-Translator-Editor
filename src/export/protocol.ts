@@ -15,6 +15,7 @@ import type {
   ExportOptions,
   ExportStage,
 } from './types'
+import type { FigureArt } from './figureArt'
 import type { FontFaceInfo } from '@/fonts'
 
 export interface ExportBuildRequest {
@@ -26,6 +27,12 @@ export interface ExportBuildRequest {
   fontFaces: FontFaceInfo[]
   /** Rendered page backgrounds (index → blob), when the caller rendered them. */
   images: Array<{ index: number; blob: Blob }>
+  /**
+   * Cropped figures keyed by `figureKey`, when the caller rendered them. Only
+   * DOCX, EPUB and Markdown read it — the formats that already carry whole
+   * page art can see the figures in it and would only duplicate them.
+   */
+  figures?: FigureArt[]
 }
 
 export type ExportWorkerRequest = ExportBuildRequest

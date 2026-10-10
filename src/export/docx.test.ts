@@ -1,7 +1,13 @@
 import JSZip from 'jszip'
 import { describe, expect, it } from 'vitest'
+import type { FigureRef } from '@/pdf/structure'
 import { buildDocx, type DocxOptions } from './docx'
 import type { ExportBlock, ExportDocument, ExportPage } from './types'
+
+/** A traced figure for a page-space box, at the 2× the fixtures were rendered at. */
+function ref(bbox: { x: number; y: number; w: number; h: number }): FigureRef {
+  return { bbox, pixelWidth: bbox.w * 2, pixelHeight: bbox.h * 2 }
+}
 
 function block(partial: Partial<ExportBlock>): ExportBlock {
   return {
@@ -384,5 +390,100 @@ describe('buildDocx tables', () => {
     const xml = await tableXml({ translatedText: 'The figures were summarised.' })
     expect(xml).not.toContain('<w:tbl>')
     expect(xml).toContain('The figures were summarised.')
+  })
+})
+
+describe('buildDocx figures', () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  const ART = [{ key: 'cap#0', bytes: PNG, dataUrl: 'data:image/png;base64,iVBORw0KG==' }]
+
+  function figureDoc(figure: Partial<ExportBlock>): ExportDocument {
+    return {
+      ...fixtureDoc(),
+      pages: [
+        page(0, [block({ id: 'cap', y: 200, sourceText: '', translatedText: '', ...figure })]),
+      ],
+    }
+  }
+
+  async function figureBytes(figure: Partial<ExportBlock>, figures = ART, opts = {}) {
+    return buildDocx(figureDoc(figure), options({ figures, ...opts }))
+  }
+
+  async function figureXml(figure: Partial<ExportBlock>, figures = ART, opts = {}) {
+    return zipText(await figureBytes(figure, figures, opts), 'word/document.xml')
+  }
+
+  it('packs the picture into the document package', async () => {
+    const zip = await JSZip.loadAsync(
+      await figureBytes({
+        sourceText: 'Figure 1 — Stages',
+        figures: [ref({ x: 100, y: 40, w: 300, h: 140 })],
+      }),
+    )
+    const media = zip.file(/word\/media\//)
+    expect(media).toHaveLength(1)
+    expect(await media[0].async('uint8array')).toEqual(PNG)
+    expect(
+      await zipText(await figureBytes({ sourceText: 'x' }), 'word/document.xml'),
+    ).not.toContain('<w:drawing>')
+  })
+
+  it('puts a picture painted above its caption before the caption', async () => {
+    const xml = await figureXml({
+      sourceText: 'Figure 2 — Stages',
+      figures: [ref({ x: 100, y: 40, w: 300, h: 140 })],
+    })
+    expect(xml.indexOf('<w:drawing>')).toBeLessThan(xml.indexOf('Figure 2'))
+  })
+
+  it('puts a picture painted below its block after it', async () => {
+    const xml = await figureXml({
+      sourceText: 'The pipeline runs in four stages.',
+      figures: [ref({ x: 100, y: 400, w: 300, h: 140 })],
+    })
+    expect(xml.indexOf('<w:drawing>')).toBeGreaterThan(xml.indexOf('The pipeline runs'))
+  })
+
+  it('carries the caption as the accessibility description', async () => {
+    const xml = await figureXml({
+      sourceText: 'Figure 3 — Deployment',
+      figures: [ref({ x: 100, y: 40, w: 300, h: 140 })],
+    })
+    expect(xml).toContain('descr="Figure 3 — Deployment"')
+  })
+
+  it('shrinks a figure wider than the column, and only then', async () => {
+    const wide = {
+      sourceText: 'Figure 4 — Wide',
+      figures: [ref({ x: 0, y: 40, w: 700, h: 350 })],
+    }
+    const extent = (xml: string): number => Number(/<wp:extent cx="(\d+)"/.exec(xml)?.[1] ?? 0)
+
+    const free = extent(await figureXml(wide))
+    const clamped = extent(await figureXml(wide, ART, { maxFigureWidthPt: 200 }))
+    expect(free).toBeGreaterThan(0)
+    expect(clamped).toBeGreaterThan(0)
+    expect(clamped).toBeLessThan(free)
+
+    const natural = extent(
+      await figureXml({
+        sourceText: 'Figure 5',
+        figures: [ref({ x: 0, y: 40, w: 300, h: 140 })],
+      }),
+    )
+    const alsoClamped = extent(
+      await figureXml(
+        { sourceText: 'Figure 5', figures: [ref({ x: 0, y: 40, w: 300, h: 140 })] },
+        ART,
+        { maxFigureWidthPt: 100 },
+      ),
+    )
+    expect(alsoClamped).toBeLessThan(natural)
+  })
+
+  it('leaves a document with no figures untouched', async () => {
+    const xml = await zipText(await buildDocx(fixtureDoc(), options()), 'word/document.xml')
+    expect(xml).not.toContain('<w:drawing>')
   })
 })

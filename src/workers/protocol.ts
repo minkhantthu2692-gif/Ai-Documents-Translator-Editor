@@ -11,6 +11,7 @@
 
 import type { ReasonCode } from '@/core/reasonCodes'
 import type { ExtractedPage, ProbeResult } from '@/pdf/pdfExtract'
+import type { FigureCropTarget, PageCrop } from '@/pdf/pageRender'
 import type { SkipContext } from '@/pdf/skipRules'
 
 export type AnalysisStage = 'open' | 'probe' | 'extract' | 'render'
@@ -54,6 +55,13 @@ export interface RenderRequest extends RequestBase {
   scale: number
   /** `thumbnail` keeps the text, `background` masks it out. */
   mode: 'thumbnail' | 'background'
+  /**
+   * Page rectangles to cut out of the finished render and hand back as
+   * separate pictures. This is how the figure pipeline feeds the formats that
+   * can only embed standalone images (DOCX, EPUB, Markdown) without ever
+   * shipping whole pages across the worker boundary.
+   */
+  crops?: FigureCropTarget[]
 }
 
 export interface CloseRequest extends RequestBase {
@@ -122,7 +130,14 @@ export interface RenderResultEvent {
   fileId: string
   pageIndex: number
   mode: 'thumbnail' | 'background'
-  blob: Blob
+  /**
+   * The whole page. `null` when the request only asked for `crops` — a
+   * figure-only export has no use for the page and should not pay to encode,
+   * clone and post it.
+   */
+  blob: Blob | null
+  /** The requested cut-outs; absent unless the request asked for them. */
+  crops?: PageCrop[]
 }
 
 export interface ClosedEvent {

@@ -20,6 +20,8 @@ import {
   tableGrid,
   textOf,
 } from './shared'
+import { figureAlt, figureArtMap, figureGoesBefore, figureKey } from './figureArt'
+import type { FigureArt } from './figureArt'
 import type { ExportBlock, ExportDocument } from './types'
 
 export interface MarkdownOptions {
@@ -29,6 +31,13 @@ export interface MarkdownOptions {
   includeOriginal: boolean
   /** Emit `## Page N` headings between pages. */
   includePageHeadings: boolean
+  /**
+   * Cropped figures keyed by `figureKey`, embedded as data-URI images on the
+   * side of their block where the page painted them. Markdown has no asset
+   * folder, so the pixels travel inside the document — a picture is worth a
+   * much larger file, and `includeImages: false` turns the whole thing off.
+   */
+  figures?: FigureArt[]
 }
 
 /**
@@ -66,6 +75,33 @@ function longestBacktickRun(text: string): number {
   let longest = 0
   for (const run of text.match(/`+/g) ?? []) longest = Math.max(longest, run.length)
   return longest
+}
+
+/**
+ * The `![alt](data:…)` lines for one block, split by the side of the block the
+ * page painted them on: `before` holds a picture that sat above its text (the
+ * usual captioned figure), `after` one that sat below it. A figure whose crop
+ * did not survive rendering is simply absent — the text around it is worth
+ * more than a broken image link.
+ */
+function blockFigures(
+  block: ExportBlock,
+  options: MarkdownOptions,
+): { before: string[]; after: string[] } {
+  const art = figureArtMap(options.figures)
+  if (art.size === 0 || block.figures.length === 0) return { before: [], after: [] }
+  const before: string[] = []
+  const after: string[] = []
+  block.figures.forEach((figure, index) => {
+    const found = art.get(figureKey(block.id, index))
+    if (!found) return
+    // Alt text is prose: `]` and `\` would end the label early, everything
+    // else is safe inside `![…]`.
+    const alt = figureAlt(block).replace(/([\\[\]])/g, '\\$&')
+    const line = `![${alt}](${found.dataUrl})`
+    ;(figureGoesBefore(block, figure.bbox) ? before : after).push(line)
+  })
+  return { before, after }
 }
 
 /**
@@ -161,8 +197,14 @@ export function buildMarkdown(doc: ExportDocument, options: MarkdownOptions): st
   for (const page of contentPages(doc)) {
     if (options.includePageHeadings) parts.push(`## Page ${page.index + 1}`)
     for (const block of pageBlocks(page)) {
+      // The figures ride with their block, on the side the page painted them:
+      // a picture above its caption stays above it, one below the paragraph it
+      // was paired with stays below. A block with no text at all still emits
+      // its figures — the artwork is the content there.
+      const { before, after } = blockFigures(block, options)
       const group = blockGroup(block, options.includeOriginal, levelsAbove)
-      if (group.length > 0) parts.push(group)
+      const sections = [...before, group, ...after].filter((part) => part.length > 0)
+      if (sections.length > 0) parts.push(sections.join('\n\n'))
     }
   }
   return `${parts.join('\n\n')}\n`

@@ -117,6 +117,7 @@ async function fontPayloads(
 
 async function build(request: ExportBuildRequest): Promise<ExportArtifact> {
   const { id, doc, options, fontFaces, images } = request
+  const figures = request.figures ?? []
   const issues: ExportIssue[] = []
 
   if (isDocumentEmpty(doc)) {
@@ -213,6 +214,7 @@ async function build(request: ExportBuildRequest): Promise<ExportArtifact> {
         title: doc.title,
         includeOriginal: options.includeOriginal,
         includePageHeadings: true,
+        figures: figures,
       })
       blob = new Blob([text], { type: WORKER_MIME.markdown })
       break
@@ -250,6 +252,7 @@ async function build(request: ExportBuildRequest): Promise<ExportArtifact> {
         font: dominantFamily(request),
         pageHeadings: false,
         pageBreaks: true,
+        figures,
       })
       blob = new Blob([bytes as BlobPart], { type: WORKER_MIME.docx })
       break
@@ -270,6 +273,7 @@ async function build(request: ExportBuildRequest): Promise<ExportArtifact> {
         includeOriginal: options.includeOriginal,
         fontStack: options.fontStack || DEFAULT_FONT_STACK,
         fonts: await fontPayloads(fontFaces, payloadFamilies),
+        figures,
       })
       blob = new Blob([bytes as BlobPart], { type: WORKER_MIME.epub })
       break

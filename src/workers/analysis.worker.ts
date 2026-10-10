@@ -38,7 +38,12 @@ import {
   type ExtractedPage,
   type ExtractPageOptions,
 } from '@/pdf/pdfExtract'
-import { isRenderCancelled, renderPage, type RenderHandle } from '@/pdf/pageRender'
+import {
+  isRenderCancelled,
+  renderPage,
+  type FigureCropTarget,
+  type RenderHandle,
+} from '@/pdf/pageRender'
 import { traceImagePlacements, type ImagePlacement } from '@/pdf/imageOps'
 import type { OpList } from '@/pdf/pdfOps'
 import { probeSidecarExtract, sidecarExtract } from '@/sidecar/sidecarClient'
@@ -89,15 +94,26 @@ interface RenderEntry {
   scale: number
   cancelled: boolean
   handle: RenderHandle | null
+  /** Figure cut-outs requested with this render; empty for an ordinary one. */
+  crops: FigureCropTarget[]
 }
 
 const renderQueue: RenderEntry[] = []
 const renderByKey = new Map<string, RenderEntry>()
 let rendering = false
 
-/** Supersede only an identical render — scale and mode identify the consumer. */
-const renderKey = (fileId: string, pageIndex: number, scale: number, mode: string): string =>
-  `${fileId}#${pageIndex}#${scale}#${mode}`
+/**
+ * Supersede only an identical render — scale, mode and "is this a figure
+ * render" together identify the consumer, so a thumbnail and a figure crop of
+ * the same page never cancel each other.
+ */
+const renderKey = (
+  fileId: string,
+  pageIndex: number,
+  scale: number,
+  mode: string,
+  crops: readonly FigureCropTarget[] = [],
+): string => `${fileId}#${pageIndex}#${scale}#${mode}#${crops.length > 0 ? 'figures' : 'page'}`
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -436,7 +452,8 @@ async function handleExtract(request: ExtractRequest): Promise<void> {
 }
 
 function handleRender(request: RenderRequest): void {
-  const key = renderKey(request.fileId, request.pageIndex, request.scale, request.mode)
+  const crops = request.crops ?? []
+  const key = renderKey(request.fileId, request.pageIndex, request.scale, request.mode, crops)
   const stale = renderByKey.get(key)
   if (stale) {
     // A newer request for the same page supersedes the older one.
@@ -451,6 +468,7 @@ function handleRender(request: RenderRequest): void {
     scale: request.scale,
     cancelled: false,
     handle: null,
+    crops,
   }
   renderByKey.set(key, entry)
   renderQueue.push(entry)
@@ -476,7 +494,7 @@ async function drainRenders(): Promise<void> {
 }
 
 async function runRender(entry: RenderEntry): Promise<void> {
-  const key = renderKey(entry.fileId, entry.pageIndex, entry.scale, entry.mode)
+  const key = renderKey(entry.fileId, entry.pageIndex, entry.scale, entry.mode, entry.crops)
   const open = requireDoc(entry.fileId)
   if (!open) {
     renderByKey.delete(key)
@@ -495,10 +513,11 @@ async function runRender(entry: RenderEntry): Promise<void> {
     const handle = renderPage(page, {
       scale: entry.scale,
       maskText: entry.mode === 'background',
+      ...(entry.crops.length > 0 ? { crops: entry.crops } : {}),
     })
     entry.handle = handle
     if (entry.cancelled) handle.cancel()
-    const blob = await handle.promise
+    const result = await handle.promise
     if (entry.cancelled) {
       post({ kind: 'cancelled', id: entry.id, fileId: entry.fileId })
       return
@@ -509,7 +528,8 @@ async function runRender(entry: RenderEntry): Promise<void> {
       fileId: entry.fileId,
       pageIndex: entry.pageIndex,
       mode: entry.mode,
-      blob,
+      blob: result.page,
+      ...(result.crops.length > 0 ? { crops: result.crops } : {}),
     })
   } catch (error) {
     if (entry.cancelled || isRenderCancelled(error)) {

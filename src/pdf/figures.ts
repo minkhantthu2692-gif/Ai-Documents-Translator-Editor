@@ -60,7 +60,7 @@ const MAX_FIGURES_PER_BLOCK = 12
  * required, because "Diagram of the process" is a heading about a picture, not
  * its label, and anchoring to it would move the picture under the wrong text.
  */
-const CAPTION_LABEL =
+export const CAPTION_LABEL =
   /^\s*(?:figure|fig\.?|image|plate|exhibit|diagram|chart|graph|illustration|picture|photo)\s*[.:\-–—]?\s*\d/i
 
 interface PageFrame {

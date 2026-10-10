@@ -866,6 +866,164 @@ function buildLinksPdf() {
   return writer.render()
 }
 
+function buildFormPdf() {
+  const writer = new PdfWriter()
+  const pagesNum = addPagesObject(writer)
+  const regular = writer.add(FONT_REGULAR)
+  const bold = writer.add(FONT_BOLD)
+  const resources = `/Font << /F1 ${regular} 0 R /F2 ${bold} 0 R >>`
+  const helv = writer.add(
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
+  )
+
+  /**
+   * A one-command appearance stream. Buttons are only recognised as buttons at
+   * all when they carry `/AP`, so every checkbox and radio gets two of these —
+   * one for the on state, one for off.
+   */
+  const ap = () => writer.addStream('', Buffer.from('q Q'))
+
+  const mk = '/MK << /BC [0.5 0.5 0.5] /BG [1 1 1] >>'
+  const textField = (name, tu, rect, extra = '') =>
+    writer.add(
+      `<< /Type /Annot /Subtype /Widget /FT /Tx /Rect [${rect}] /F 4 ` +
+        `/T (${escape(name)})${tu ? ` /TU (${escape(tu)})` : ''} ${extra}${mk} >>`,
+    )
+  const checkBox = (name, tu, rect) =>
+    writer.add(
+      `<< /Type /Annot /Subtype /Widget /FT /Btn /Rect [${rect}] /F 4 ` +
+        `/T (${escape(name)})${tu ? ` /TU (${escape(tu)})` : ''} /V /Off /AS /Off ` +
+        `/AP << /N << /Yes ${ap()} 0 R /Off ${ap()} 0 R >> >> >>`,
+    )
+  const choiceField = (name, tu, rect, options) =>
+    writer.add(
+      `<< /Type /Annot /Subtype /Widget /FT /Ch /Ff 131072 /Rect [${rect}] /F 4 ` +
+        `/T (${escape(name)})${tu ? ` /TU (${escape(tu)})` : ''} ` +
+        `/Opt [${options.map((option) => `(${escape(option)})`).join(' ')}] ${mk} >>`,
+    )
+  const signatureField = (name, tu, rect) =>
+    writer.add(
+      `<< /Type /Annot /Subtype /Widget /FT /Sig /Rect [${rect}] /F 4 ` +
+        `/T (${escape(name)})${tu ? ` /TU (${escape(tu)})` : ''} ${mk} >>`,
+    )
+  // Field-flag bits for `/FT /Btn` (PDF 32000-1 table 227): radio = 0x8000,
+  // pushbutton = 0x10000. They are adjacent and easy to transpose, and pdf.js
+  // reports the wrong widget kind outright when they are.
+  const pushButton = (name, rect) =>
+    writer.add(
+      `<< /Type /Annot /Subtype /Widget /FT /Btn /Ff 65536 /Rect [${rect}] /F 4 /T (${escape(name)}) >>`,
+    )
+
+  // The radio group is the one shape that is a *parent* field with one widget
+  // per option: the widgets carry no `/T` of their own, so a reader that
+  // flattens annotations without following `/Parent` sees two nameless boxes.
+  const radioGroup = writer.add('<< /FT /Btn /Ff 32768 /T (contact_method) /V /Off /Kids [] >>')
+  const radioWidget = (rect) =>
+    writer.add(
+      `<< /Type /Annot /Subtype /Widget /Parent ${radioGroup} 0 R /Rect [${rect}] /F 4 ` +
+        `/AS /Off /AP << /N << /Yes ${ap()} 0 R /Off ${ap()} 0 R >> >> >>`,
+    )
+
+  const text = (font, size, x, y, body) =>
+    `BT\n/${font} ${size} Tf\n0 0 0 rg\n${x} ${y} Td (${escape(body)}) Tj\nET\n`
+
+  // ── page 1: three printed labels, three fillable boxes, one checkbox ────
+  const nameField = textField(
+    'full_name',
+    'Full name of the applicant',
+    '180 570 400 586',
+    '/MaxLen 40 ',
+  )
+  const dobField = textField(
+    'dob',
+    'Date of birth, day month year',
+    '180 530 340 546',
+    '/MaxLen 10 ',
+  )
+  const countryField = choiceField('country', 'Country of residence', '180 490 340 506', [
+    'Myanmar',
+    'Thailand',
+    'Viet Nam',
+    'Lao PDR',
+  ])
+  const agreeField = checkBox('agree_terms', 'I have read and accept the terms', '72 452 84 464')
+  // `/F 2` is the hidden bit: a field every reader must ignore, and the one
+  // place a form author writes text nobody is meant to see.
+  const hiddenField = writer.add(
+    `<< /Type /Annot /Subtype /Widget /FT /Tx /F 2 /Rect [400 570 540 586] ` +
+      `/T (internal_ref) /TU (Internal reference number) >>`,
+  )
+
+  const page1 = addPage(
+    writer,
+    pagesNum,
+    resources,
+    writer.addStream(
+      '',
+      Buffer.from(
+        text('F2', 14, 72, 700, 'Application form') +
+          text(
+            'F1',
+            10,
+            72,
+            676,
+            'Complete every field in block capitals. Signed forms are kept for seven years.',
+          ) +
+          text('F1', 10, 72, 578, 'Full Name:') +
+          text('F1', 10, 72, 538, 'Date of Birth:') +
+          text('F1', 10, 72, 498, 'Country:') +
+          text('F1', 10, 92, 458, 'I agree to the terms'),
+        'latin1',
+      ),
+    ),
+    [nameField, dobField, countryField, agreeField, hiddenField],
+  )
+
+  // ── page 2: email, a two-option radio group, a bare button, a signature ─
+  const emailField = textField('email', 'Electronic mail address', '180 570 400 586')
+  const radioA = radioWidget('72 532 84 544')
+  const radioB = radioWidget('180 532 192 544')
+  writer.replaceBody(
+    radioGroup,
+    `<< /FT /Btn /Ff 32768 /T (contact_method) /TU (Preferred contact method) /V /Off ` +
+      `/Kids [${radioA} 0 R ${radioB} 0 R] >>`,
+  )
+  const submit = pushButton('submit', '72 492 152 512')
+  const signed = signatureField('signature', 'Signature of the applicant', '72 410 260 444')
+
+  const page2 = addPage(
+    writer,
+    pagesNum,
+    resources,
+    writer.addStream(
+      '',
+      Buffer.from(
+        text('F2', 14, 72, 700, 'Contact details') +
+          text('F1', 10, 72, 578, 'Email:') +
+          text('F1', 10, 92, 538, 'By post') +
+          text('F1', 10, 200, 538, 'By email') +
+          text('F1', 10, 72, 452, 'Signature'),
+        'latin1',
+      ),
+    ),
+    [emailField, radioA, radioB, submit, signed],
+  )
+
+  finalizePages(writer, pagesNum, [page1, page2])
+
+  // The catalog is object 1 and is written before anything it references, so
+  // the AcroForm dictionary is patched in once the field tree exists.
+  writer.replaceBody(
+    1,
+    `<< /Type /Catalog /Pages ${pagesNum} 0 R /AcroForm << ` +
+      `/Fields [${nameField} 0 R ${dobField} 0 R ${countryField} 0 R ${agreeField} 0 R ` +
+      `${hiddenField} 0 R ${radioGroup} 0 R ${submit} 0 R ${signed} 0 R ${emailField} 0 R] ` +
+      `/DR << /Font << /Helv ${helv} 0 R >> >> /DA (/Helv 10 Tf 0 g) /NeedAppearances true >> >>`,
+  )
+
+  return writer.render()
+}
+
 mkdirSync(OUT, { recursive: true })
 const outputs = [
   ['text-300p.pdf', buildTextPdf(300)],
@@ -876,6 +1034,7 @@ const outputs = [
   ['links.pdf', buildLinksPdf()],
   ['table.pdf', buildTablePdf()],
   ['figure.pdf', buildFigurePdf()],
+  ['form.pdf', buildFormPdf()],
 ]
 for (const [name, buffer] of outputs) {
   writeFileSync(join(OUT, name), buffer)

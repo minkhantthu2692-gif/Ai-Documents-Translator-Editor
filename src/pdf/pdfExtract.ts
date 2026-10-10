@@ -27,6 +27,7 @@ import { classifyPage, coverageOf, emptyTally, type ContentTally } from './pageC
 import { analyzeLayout, itemBoxesOf, type LayoutComplexity } from './layoutComplexity'
 import { headingTiers } from './headings'
 import { anchorFigures } from './figures'
+import { attachFieldLabels, fieldLabels } from './formFields'
 import { attachLinks, linkAnchors, linksFromAnnotations } from './links'
 import { traceImagePlacements, type ImagePlacement } from './imageOps'
 import {
@@ -197,10 +198,25 @@ export async function readDocumentInfo(doc: PDFDocumentProxy): Promise<PdfDocume
 /* Page reading                                                        */
 /* ------------------------------------------------------------------ */
 
-/** The subset of a pdf.js annotation the structure pass actually reads. */
+/**
+ * The subset of a pdf.js annotation the structure pass actually reads.
+ *
+ * `/Link` rectangles are read by `links.ts`; `/Widget` fields by
+ * `formFields.ts`. Everything else on a pdf.js annotation is ignored — the
+ * object is passed through whole rather than narrowed so that a future reader
+ * does not have to widen this list first.
+ */
 export interface AnnotationLike {
   subtype?: string
   fieldType?: string
+  /** `/T` — the partial field name (`full_name`). Machine-facing, never exported as text. */
+  fieldName?: string
+  /** `/TU` — the alternate field name: what a screen reader announces. */
+  alternativeText?: string
+  /** `/Opt` — a choice field's captions, in document order. */
+  options?: ReadonlyArray<{ exportValue?: string; displayValue?: string } | null> | null
+  /** `/F` hidden bit — a field shown and announced to nobody. */
+  hidden?: boolean
   url?: string
   unsafeUrl?: string
   rect?: number[]
@@ -675,6 +691,16 @@ export function assemblePage(
     pageWidth: source.width,
     pageHeight: source.height,
   })
+  // A widget's own words come after everything else because they are the only
+  // input here the page never printed — nothing above can have merged, linked
+  // or anchored against them, and the printed text beside them must come
+  // through untouched.
+  const withFields = attachFieldLabels(blocks, fieldLabels(source.annotations, source.height), {
+    pageIndex,
+    pageWidth: source.width,
+    pageHeight: source.height,
+    ctx: options.ctx,
+  })
   return {
     pageIndex,
     width: source.width,
@@ -685,7 +711,7 @@ export function assemblePage(
     // fallback has to be able to compare the two.
     charCount: itemCount(source.items),
     lineCount: lines.length,
-    blocks,
+    blocks: withFields,
   }
 }
 

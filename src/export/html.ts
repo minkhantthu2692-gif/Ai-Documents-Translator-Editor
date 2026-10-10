@@ -223,7 +223,9 @@ function blockHtml(block: ExportBlock, options: HtmlOptions, classes: string[]):
   const tag = level === null || block.kind === 'code' || table ? 'div' : `h${level}`
 
   return (
-    `<${tag} class="${classes.join(' ')}${block.kind === 'code' ? ' code' : ''}${table ? ' has-table' : ''}${flagged}"` +
+    `<${tag} class="${classes.join(' ')}${block.kind === 'code' ? ' code' : ''}${
+      block.kind === 'form-field' ? ' form-field' : ''
+    }${table ? ' has-table' : ''}${flagged}"` +
     ` data-block-id="${escapeHtml(block.id)}"${dir} style="${style}">${content}</${tag}>`
   )
 }
@@ -410,6 +412,15 @@ ${print ? '.page { border: none; }' : ''}
   font-family: ${CODE_FONT_STACK};
   tab-size: 4;
   white-space: pre-wrap;
+}
+/* A form field's tooltip and a dropdown's option captions are text the page
+   never printed (src/pdf/formFields.ts). The block already arrives italic and
+   grey, so this rule is the hook a reader of the document can reach for — and
+   the guarantee that a print stylesheet which resets colour does not put them
+   back among the labels they describe. */
+.form-field {
+  font-style: italic;
+  color: #6b7280;
 }
 /* A table draws its own grid. Cells keep the block's face and the block's
    line-height (they are regular text), so the only things added here are the

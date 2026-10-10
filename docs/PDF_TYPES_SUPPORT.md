@@ -73,7 +73,7 @@ same kinds, text, `tableCells`, link anchors and boxes within 3 pt.
 | 6  | PDF With Tables (simple/complex, merged cells, multi-page) | 🔶→⏳ | **Real table cells ✅** — a run of rows whose columns align becomes one `kind: 'table'` block carrying `tableCells` (rows × columns) as data, and HTML/EPUB draw a real `<table>`, DOCX a real `w:tbl`, Markdown a pipe table, JSON the grid (see below); table rows are explicitly exempt from the column split so merging cells stay one row; **merged cells and multi-page tables ❌**, and a gutter narrower than one em is not read as a column |
 | 7  | Academic / Research PDF (footnotes, refs, citations, equations) | 🔶→⏳ | 2-column papers classified `text` ✅ and read in column order ✅; footnote regions ✅ (see below); heading hierarchy ✅ — every heading carries a 1–6 level from a document-wide ladder (see below); equations ❌ (see #23) |
 | 8  | Business / Report PDF (reports, invoices, financial) | 🔶 | Paragraph/table extraction ✅; invoice form layout understanding ❌ |
-| 9  | Forms / Structured PDF (fillable, checkboxes, signatures) | 🔶 | Field detection/counted in probe ✅, password-style unlock flow ✅; translating labels in phase c; form filling ❌ (out of scope) |
+| 9  | Forms / Structured PDF (fillable, checkboxes, signatures) | ✅ | Field detection/counted in probe ✅, password-style unlock flow ✅, **field labels translated ✅** (a widget's `/TU` and a dropdown's `/Opt` captions become `kind: 'form-field'` blocks — see below); form filling ❌ (out of scope) |
 | 10 | Presentation PDF (slides, big headings, text boxes) | 🔶→⏳ | Size-spread/complexity signal ✅; per-slide text-box reading order in phase c |
 | 11 | Book / Document PDF (chapters, TOC, headers/footers, page numbers, long docs) | 🔶→⏳ | Header/footer bands, page labels, running heads ✅; long-document chunked translation ✅; footnote regions ✅ |
 | 12 | Magazine / Brochure (complex layouts, multi-column, text around images) | 🔶→⏳ | `complex` classification ✅ (columns, overlap, size spread); multi-column reading order ✅; figures anchored to their captions ✅ (same pass as type 5); text-around-image structure repair in phase c |
@@ -98,7 +98,7 @@ same kinds, text, `tableCells`, link anchors and boxes within 3 pt.
 | (a) Classification | `complex` class, complexity scoring, item-level column detection, wizard metadata | 4, 12, 22 classification ✅ |
 | (b) Extraction methods | Browser Tesseract OCR auto-runs per window (status lifecycle, confidence, cached recognition), hybrid merge with geometric dedup, run-OCR setting persisted per project, Python sidecar server (protocol v1, 20 tests) | 2, 3 extraction ✅ |
 | (b2) Sidecar wiring | `src/sidecar/sidecarClient.ts`: cached `GET /health` probe, `POST /ocr` with page/language/password, per-line confidence added to the server response, lazy render so a sidecar page never rasterises in the browser, automatic fall-back to browser Tesseract on any failure (22 client + 5 pipeline + 1 Python test) | 2 extraction ✅ with a native-OCR fast path |
-| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. `fixtures/complex.pdf` (3 columns + rotated watermark) now reads col 1 → col 2 → col 3 → watermark end-to-end. **Footnote regions ✅** — `src/pdf/footnotes.ts` marks them before any merging happens. **Heading hierarchy ✅** — `src/pdf/headings.ts` builds one document-wide ladder of heading font sizes during the probe and every page levels its headings against it; exporters render `h1`–`h6`, `HeadingLevel.HEADING_1–6` and ATX hashes. **Links ✅** — `src/pdf/links.ts` turns every external `/Link` rectangle into the words it covers and every exporter renders them as a real anchor (see below). **Code blocks ✅** — `src/pdf/codeBlocks.ts` calls a run of lines code when two independent readings agree: a monospaced face *and* statement punctuation; a monospaced face *and* nesting (which is what catches YAML and JSON, whose lines carry no punctuation to score); or punctuation alone across several lines with a brace somewhere. `structure.ts` gives it `kind: 'code'`, stamps `skipRule: 'code'` so the model never rewrites a program, and hands the indentation back — see below. **Table cells ✅** — `src/pdf/rowSplit.ts` reads a run of rows whose columns align as one `kind: 'table'` block with `tableCells` as data, and every format draws a real grid rather than tab-separated text — see below. **Figures ✅** — `src/pdf/imageOps.ts` rebuilds every painted image's rectangle from the operator list and `src/pdf/figures.ts` decides which of them are figures and which paragraph owns each one, recorded as `PageBlock.figures` — see below. Remaining in this phase: form labels | 4 ✅, reading order for 3 / 7 / 12 ✅, footnotes for 7 / 11 / 14 ✅, heading hierarchy for 7 ✅, links for 19 / 25 ✅, code blocks for 13 / 24 ✅, table cells for 6 ✅, figures for 5 / 12 ✅; then 9 |
+| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. `fixtures/complex.pdf` (3 columns + rotated watermark) now reads col 1 → col 2 → col 3 → watermark end-to-end. **Footnote regions ✅** — `src/pdf/footnotes.ts` marks them before any merging happens. **Heading hierarchy ✅** — `src/pdf/headings.ts` builds one document-wide ladder of heading font sizes during the probe and every page levels its headings against it; exporters render `h1`–`h6`, `HeadingLevel.HEADING_1–6` and ATX hashes. **Links ✅** — `src/pdf/links.ts` turns every external `/Link` rectangle into the words it covers and every exporter renders them as a real anchor (see below). **Code blocks ✅** — `src/pdf/codeBlocks.ts` calls a run of lines code when two independent readings agree: a monospaced face *and* statement punctuation; a monospaced face *and* nesting (which is what catches YAML and JSON, whose lines carry no punctuation to score); or punctuation alone across several lines with a brace somewhere. `structure.ts` gives it `kind: 'code'`, stamps `skipRule: 'code'` so the model never rewrites a program, and hands the indentation back — see below. **Table cells ✅** — `src/pdf/rowSplit.ts` reads a run of rows whose columns align as one `kind: 'table'` block with `tableCells` as data, and every format draws a real grid rather than tab-separated text — see below. **Figures ✅** — `src/pdf/imageOps.ts` rebuilds every painted image's rectangle from the operator list and `src/pdf/figures.ts` decides which of them are figures and which paragraph owns each one, recorded as `PageBlock.figures` — see below. **Form labels ✅** — `src/pdf/formFields.ts` reads the text a widget carries that the page never prints (its `/TU` tooltip and a choice field's `/Opt` captions) and makes one `kind: 'form-field'` block per described widget, hanging directly under its own box, so it reaches the model, the editor and every exporter like any other block — see below. Remaining in this phase: nothing | 4 ✅, reading order for 3 / 7 / 12 ✅, footnotes for 7 / 11 / 14 ✅, heading hierarchy for 7 ✅, links for 19 / 25 ✅, code blocks for 13 / 24 ✅, table cells for 6 ✅, figures for 5 / 12 ✅, form labels for 9 ✅ |
 | (d) Layout auto-adjust | **Translation-time auto-fit ✅** — `src/editor/layout.ts` re-measures a block the moment a translation lands and takes the largest size in `[6pt, originalFontSize]` whose wrapped text still fits the original bbox; never a size the reader pinned, and never below the floor — an unfittable block keeps the document's own size and is flagged rather than shrunk into illegibility. Runs on the bulk queue, on inline re-apply and on accept-suggestion, never on a person typing; `layout.autoFit` in Settings → General turns it off. **Reflow ✅** — `src/export/reflow.ts` pushes the blocks under one that outgrew its box down by exactly the growth, within their own column, stopping at the page edge; HTML emits `min-height` where it emitted `height`, so a box is a floor the translation may grow into | 1, 8, 10, 12 ✅ (translation-time layout + the absolute HTML/print export) |
 
 ### Why reading order needed two detectors
@@ -471,6 +471,63 @@ folder.
 image pack already carry the whole rendered page behind their text, so the
 figures are visible there and cropping them would only duplicate them; JSON
 carries the geometry and `text`/`csv`/`tsv` are not documents._
+
+### Why a form label is a block of its own
+
+A fillable PDF puts its instructions in two places. The words you can **see** —
+`Full Name:`, `Country:` — are ordinary content-stream text; they come through
+the normal line → block path with nothing done to them, and were never at risk.
+The words you cannot see live on the widget itself, and no other pass in the
+pipeline can reach them:
+
+- `/TU`, the alternate field name, is what a screen reader announces and what a
+  tooltip shows;
+- `/Opt`, a choice field's option captions are what a reader picks from, and they
+  are printed nowhere at all — you cannot open a dropdown in a PDF, so that list
+  is invisible until somebody extracts it.
+
+`src/pdf/formFields.ts` reads both off the annotations pdf.js already hands
+`assemblePage` and makes **one `kind: 'form-field'` block per described widget**.
+Because it is an ordinary block it needs no second translation path, no editor
+panel and no per-format code: it enters the queue like any other text, it is
+editable in the workspace, `json` emits its `kind` and its text, and every builder
+that renders a paragraph renders it.
+
+- **Nothing invisible prints by accident, and nothing printed is rewritten.**
+  Field labels are attached *after* links and figures, so a `/Link` never wraps a
+  tooltip and no figure is re-paired against one. The printed blocks keep their
+  text, their anchors and their geometry; only their `order` index moves to make
+  room.
+- **It hangs under its own box, not inside it.** A widget is an empty rectangle,
+  and a 12 pt checkbox is narrower than the caption already printed beside it —
+  printing *into* the box would strike through the label rather than describe the
+  field. The box grows right and down to hold every line, so a dropdown's four
+  captions are not squeezed into a 16 pt rectangle, and it moves above the widget
+  when the page has no room left below it.
+- **It is italic and grey in every format**, so a reader can tell a description
+  from the label printed above it instead of seeing what looks like a clumsy
+  duplicate of it.
+- **It obeys the same rules as printed text.** `classifyLine` and
+  `tokenizePlaceholders` run on it, so a `/TU` that is already Burmese, an
+  e-mail address or a formula is skipped exactly as it would have been if it had
+  been printed on the page.
+- **A widget with nothing to say contributes nothing**: a bare push button, a
+  hidden field (`/F` hidden), a text box that was never described, and a radio kid
+  whose label lives on its parent group.
+
+Two limits worth stating. pdf.js returns *widget* annotations only, so a radio
+group's own `/TU` — which sits on the parent field — never reaches this pass; the
+form's author printed the option captions on the page instead, which is what forms
+do anyway. And a description is wider than the row it belongs to whenever the
+option list is long: in the absolutely-positioned HTML and print exports that
+reaches the row below and is reported as `overflow`, exactly like any other block
+whose text grew. The flowing layouts (DOCX, EPUB, Markdown, reflow HTML) have no
+fixed rows and are unaffected.
+
+`fixtures/form.pdf` (generated by `scripts/make-fixtures.mjs`) carries a text
+field, a date field, a combo box with four options, a checkbox, a hidden field, a
+two-option radio group, a push button and a signature across two pages — ten
+widgets the probe counts, six blocks that come out.
 
 ### Why a grown block is pushed instead of clipped
 

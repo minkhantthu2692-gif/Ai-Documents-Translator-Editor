@@ -72,8 +72,14 @@ export function safeLinkUrl(raw: unknown): string | null {
   return SAFE_SCHEMES.has(`${scheme[1].toLowerCase()}:`) ? url : null
 }
 
-/** PDF rectangle (bottom-left origin) → top-left page points. */
-function rectToBBox(rect: unknown, pageHeight: number): BBox | null {
+/**
+ * PDF rectangle (bottom-left origin) → top-left page points.
+ *
+ * Shared with `formFields.ts`: a widget's `/Rect` and a link's `/Rect` are the
+ * same rectangle in the same space, and converting it twice would be two
+ * places for the flip to disagree.
+ */
+export function rectToBBox(rect: unknown, pageHeight: number): BBox | null {
   if (!Array.isArray(rect) || rect.length < 4) return null
   const [x1, y1, x2, y2] = rect as number[]
   if (![x1, y1, x2, y2].every((value) => Number.isFinite(value))) return null

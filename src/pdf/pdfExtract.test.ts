@@ -524,6 +524,98 @@ describe('figure.pdf', () => {
   })
 })
 
+describe('form.pdf', () => {
+  // A fillable form's *printed* labels — `Full Name:`, `Country:` — are
+  // ordinary content-stream text and were never at risk: they come through the
+  // normal line → block path with nothing done to them. What nothing else in
+  // the pipeline can reach is the text the **widget** carries: its `/TU`
+  // tooltip and a dropdown's option captions, neither of which is printed
+  // anywhere on the page.
+  const fieldsOn = async (doc: PDFDocumentProxy, pageIndex: number) => {
+    const { blocks } = await extractAt(doc, pageIndex)
+    return blocks.filter((block) => block.kind === 'form-field')
+  }
+
+  it('counts every widget in the probe, hidden ones included', async () => {
+    const doc = await open('form.pdf')
+    const probe = await probeDocument(doc)
+    expect(probe.summary.formFields).toBe(10)
+    expect(probe.summary.tally).toEqual({ text: 2, scanned: 0, mixed: 0, complex: 0, empty: 0 })
+  })
+
+  it('drops each description in directly after the label it describes', async () => {
+    const doc = await open('form.pdf')
+    const { blocks } = await extractAt(doc, 0)
+    expect(blocks.map((block) => block.text)).toEqual([
+      'Application form',
+      'Complete every field in block capitals. Signed forms are kept for seven years.',
+      'Full Name:',
+      'Full name of the applicant',
+      'Date of Birth:',
+      'Date of birth, day month year',
+      'Country:',
+      'Country of residence\nMyanmar\nThailand\nViet Nam\nLao PDR',
+      'I agree to the terms',
+      'I have read and accept the terms',
+    ])
+    expect(blocks.filter((block) => block.kind === 'form-field')).toHaveLength(4)
+  })
+
+  it("carries a dropdown's option captions as content, not as chrome", async () => {
+    const doc = await open('form.pdf')
+    const { blocks } = await extractAt(doc, 0)
+    const country = blocks.find((block) => block.text.startsWith('Country of residence'))
+    expect(country?.kind).toBe('form-field')
+    expect(country?.lines.map((line) => line.text)).toEqual([
+      'Country of residence',
+      'Myanmar',
+      'Thailand',
+      'Viet Nam',
+      'Lao PDR',
+    ])
+    // Long enough to hold every caption rather than squeezing five of them
+    // into the 16 pt box the dropdown actually occupies.
+    expect(country?.bbox.h).toBeGreaterThan(16)
+    // Everything the widget carries is content: it reaches the model.
+    expect(country?.skipRule).toBeNull()
+    expect(country?.italic).toBe(true)
+  })
+
+  it("hangs every description under its own widget, at that widget's width", async () => {
+    const doc = await open('form.pdf')
+    const { blocks } = await extractAt(doc, 1)
+    const email = blocks.find((block) => block.kind === 'form-field')
+    // The email widget is `[180 570 400 586]`: 792 − 586 = 206, +16 = 222.
+    expect(email?.text).toBe('Electronic mail address')
+    expect(email?.bbox).toEqual({ x: 180, y: 222, w: 220, h: 13.5 })
+    // Printed text is exactly where it was, in the same order.
+    expect(blocks.map((block) => block.text)).toEqual([
+      'Contact details',
+      'Email:',
+      'Electronic mail address',
+      'By post By email',
+      'Signature',
+      'Signature of the applicant',
+    ])
+  })
+
+  it('says nothing for a hidden field, a radio group or a push button', async () => {
+    const doc = await open('form.pdf')
+    const described = [...(await fieldsOn(doc, 0)), ...(await fieldsOn(doc, 1))].map(
+      (block) => block.text,
+    )
+
+    // `/F` hidden: shown to nobody and announced to nobody.
+    expect(described).not.toContain('Internal reference number')
+    // The radio group *does* carry a `/TU` — on its parent field — and pdf.js
+    // hands over widget annotations only, so a group's own caption never
+    // reaches this pass. Its options are printed on the page instead (`By
+    // post`, `By email`), which is what the form's author did here anyway.
+    // A push button with no `/TU` has nothing to say either.
+    expect(described).toHaveLength(6)
+  })
+})
+
 describe('needsSidecarFallback', () => {
   const page = (charCount: number, blocks: ExtractedPage['blocks']): ExtractedPage => ({
     pageIndex: 0,

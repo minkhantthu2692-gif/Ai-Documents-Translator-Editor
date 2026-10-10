@@ -990,22 +990,48 @@ try {
   // stack updates, so every state read has to wait for the async round trip —
   // and the fixture's first block may already be bold, so compare against the
   // captured starting value instead of hard-coding one.
-  const boldBefore = await evalJs(
-    `document.querySelector('[data-testid="style-bold"]')?.getAttribute('aria-pressed')`,
+  //
+  // The capture and the click share **one** round trip. `bold` is read from a
+  // Dexie live query, so a refresh landing in between (a stale value catching
+  // up with the store) leaves the snapshot describing a state the click then
+  // toggles *from*: the command lands exactly on the snapshot's own value and
+  // the check reads a working control as "nothing happened". Waiting for the
+  // button first keeps that window to a single expression.
+  const ready = await waitFor(
+    `(() => { const el = document.querySelector('[data-testid="style-bold"]'); return !!el && !el.disabled })()`,
+    30000,
   )
+  const clicked = String(
+    await evalJs(
+      `(() => { const el = document.querySelector('[data-testid="style-bold"]'); if (!el || el.disabled) return JSON.stringify({ ok: false, before: null }); const before = el.getAttribute('aria-pressed'); el.click(); return JSON.stringify({ ok: true, before }) })()`,
+    ),
+  )
+  const clickResult = JSON.parse(clicked)
+  const boldBefore = clickResult.before
   check(
     'bold indicator reflects the selected block',
     boldBefore === 'true' || boldBefore === 'false',
     String(boldBefore),
   )
-  check('bold toggle clickable', await clickWhenReady('[data-testid="style-bold"]'))
+  check('bold toggle clickable', Boolean(ready) && clickResult.ok, clicked)
+  // A single programmatic click does not always land, and `blocks` comes from a
+  // Dexie live query that has to re-emit before the indicator can move. Read
+  // first and click again *only* when nothing has moved — so a dropped click is
+  // retried, while a toggle that did happen is never undone by the retry.
+  let boldAfter = await evalJs(
+    `document.querySelector('[data-testid="style-bold"]')?.getAttribute('aria-pressed')`,
+  )
+  for (let attempt = 0; attempt < 3 && boldAfter === boldBefore; attempt += 1) {
+    await sleep(1000)
+    boldAfter = await evalJs(
+      `document.querySelector('[data-testid="style-bold"]')?.getAttribute('aria-pressed')`,
+    )
+    if (boldAfter === boldBefore) await clickWhenReady('[data-testid="style-bold"]')
+  }
   check(
     'bold toggles on the selected block',
-    await waitFor(
-      `document.querySelector('[data-testid="style-bold"]')?.getAttribute('aria-pressed') !== ${JSON.stringify(String(boldBefore))}`,
-      8000,
-    ),
-    `from ${boldBefore}`,
+    boldBefore !== null && boldAfter !== boldBefore,
+    `from ${boldBefore} to ${boldAfter}`,
   )
   check(
     'undo arms after a command',

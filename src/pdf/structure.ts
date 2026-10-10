@@ -30,7 +30,15 @@ import { rowCells, tableForLines } from './rowSplit'
 import { blockId, type BBox } from './stableId'
 
 export type BlockKind =
-  'heading' | 'paragraph' | 'list' | 'table' | 'caption' | 'footnote' | 'shape' | 'code'
+  | 'heading'
+  | 'paragraph'
+  | 'list'
+  | 'table'
+  | 'caption'
+  | 'footnote'
+  | 'shape'
+  | 'code'
+  | 'form-field'
 export type BlockRegion = 'body' | 'header' | 'footer'
 export type BlockAlignment = 'left' | 'center' | 'right' | 'justified'
 

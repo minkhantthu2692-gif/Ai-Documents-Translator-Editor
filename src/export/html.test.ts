@@ -29,6 +29,7 @@ function block(overrides: Partial<ExportDocument['pages'][number]['blocks'][numb
     listMarker: null,
     headingLevel: null,
     links: [],
+    figures: [],
     tableCells: null,
     sourceText: 'Hello world',
     translatedText: 'မြန်မာစာ စာသား',

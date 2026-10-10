@@ -142,6 +142,7 @@ function blockDefaults(): BlockLayoutFields {
     listMarker: null,
     headingLevel: null,
     links: [],
+    figures: [],
     translationConfidence: null,
     translationFlag: null,
     translatedAt: null,

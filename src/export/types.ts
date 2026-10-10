@@ -15,7 +15,7 @@ import type {
   PageContentClass,
 } from '@/db/types'
 import type { Placeholder } from '@/pdf/placeholders'
-import type { LinkRef } from '@/pdf/structure'
+import type { FigureRef, LinkRef } from '@/pdf/structure'
 import type { SkipRule } from '@/pdf/skipRules'
 
 /** Bump when the payload shape changes in a way old workers cannot read. */
@@ -93,6 +93,16 @@ export interface ExportBlock {
    * URL itself.
    */
   links: LinkRef[]
+  /**
+   * The figures this block carries, top to bottom — the pictures the page
+   * painted beside it, paired by `src/pdf/figures.ts`.
+   *
+   * Boxes, never pixels: a builder that can crop the page art crops through
+   * `bbox` and embeds what it finds, while a format with no artwork channel
+   * (JSON, plain text) simply emits the geometry. An empty array is the normal
+   * case and every builder falls straight through it.
+   */
+  figures: FigureRef[]
   /**
    * The extracted grid of a `kind === 'table'` block — rows × columns, every
    * row the same length, `null` otherwise. This is the **source** grid: the

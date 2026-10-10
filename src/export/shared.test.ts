@@ -44,6 +44,7 @@ function block(overrides: Partial<ExportBlock> = {}): ExportBlock {
     listMarker: null,
     headingLevel: null,
     links: [],
+    figures: [],
     tableCells: null,
     sourceText: 'Hello',
     translatedText: 'မင်္ဂလာပါ',

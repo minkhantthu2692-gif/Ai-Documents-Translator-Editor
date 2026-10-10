@@ -41,6 +41,7 @@ function block(order: number, x: number, y: number, w: number, h: number, text =
     tableCells: null,
     headingLevel: null,
     links: [],
+    figures: [],
     lineSpacing: 1.2,
     fontFamily: 'Helvetica',
     fontSize: 10,

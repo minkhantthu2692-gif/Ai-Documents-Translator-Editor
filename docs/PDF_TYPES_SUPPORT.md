@@ -69,14 +69,14 @@ same kinds, text, `tableCells`, link anchors and boxes within 3 pt.
 | 2  | Scanned PDF (image-only, rotated, low-res, OCR) | ✅ | Classification `scanned` + auto-OCR inside the parse window (browser Tesseract: `queued→running→done`, confidence + text blocks persisted, E2E-verified); local sidecar OCR ✅ preferred automatically when running; pre-flight warns and offers OCR; rotated scans still need OSD ❌ |
 | 3  | Mixed PDF (text + scanned pages/images) | 🔶 | Per-page classes + method selection ✅ (text / OCR / hybrid): hybrid keeps the text layer authoritative, OCRs the rest and drops blocks that overlap existing text (unit-tested); reading order across merged column lines ✅ |
 | 4  | Multi-Column PDF (2/3-col, newspaper, reading order) | ✅     | `complex` classification for ≥3 columns ✅ (item-level gutter detection); reading order ✅ — rows fused across a gutter are cut back into one line per column, columns are read left-to-right (2–4), and a title spanning the fold opens its own zone ahead of both columns |
-| 5  | PDF With Images (captions, diagrams, charts) | 🔶 | Images kept in the page render/background ✅; image-anchored extraction + caption linkage in phase c |
+| 5  | PDF With Images (captions, diagrams, charts) | 🔶→⏳ | Images kept in the page render/background ✅; **image-anchored extraction ✅** — every painted image's rectangle is traced from the operator list, filtered against page furniture and anchored to the block it illustrates as `PageBlock.figures` (see below); **embedding those figures in DOCX/EPUB/Markdown is phase 9b** ❌ (HTML/PDF already show them as page art) |
 | 6  | PDF With Tables (simple/complex, merged cells, multi-page) | 🔶→⏳ | **Real table cells ✅** — a run of rows whose columns align becomes one `kind: 'table'` block carrying `tableCells` (rows × columns) as data, and HTML/EPUB draw a real `<table>`, DOCX a real `w:tbl`, Markdown a pipe table, JSON the grid (see below); table rows are explicitly exempt from the column split so merging cells stay one row; **merged cells and multi-page tables ❌**, and a gutter narrower than one em is not read as a column |
 | 7  | Academic / Research PDF (footnotes, refs, citations, equations) | 🔶→⏳ | 2-column papers classified `text` ✅ and read in column order ✅; footnote regions ✅ (see below); heading hierarchy ✅ — every heading carries a 1–6 level from a document-wide ladder (see below); equations ❌ (see #23) |
 | 8  | Business / Report PDF (reports, invoices, financial) | 🔶 | Paragraph/table extraction ✅; invoice form layout understanding ❌ |
 | 9  | Forms / Structured PDF (fillable, checkboxes, signatures) | 🔶 | Field detection/counted in probe ✅, password-style unlock flow ✅; translating labels in phase c; form filling ❌ (out of scope) |
 | 10 | Presentation PDF (slides, big headings, text boxes) | 🔶→⏳ | Size-spread/complexity signal ✅; per-slide text-box reading order in phase c |
 | 11 | Book / Document PDF (chapters, TOC, headers/footers, page numbers, long docs) | 🔶→⏳ | Header/footer bands, page labels, running heads ✅; long-document chunked translation ✅; footnote regions ✅ |
-| 12 | Magazine / Brochure (complex layouts, multi-column, text around images) | 🔶→⏳ | `complex` classification ✅ (columns, overlap, size spread); multi-column reading order ✅; text-around-image structure repair in phase c |
+| 12 | Magazine / Brochure (complex layouts, multi-column, text around images) | 🔶→⏳ | `complex` classification ✅ (columns, overlap, size spread); multi-column reading order ✅; figures anchored to their captions ✅ (same pass as type 5); text-around-image structure repair in phase c |
 | 13 | Technical PDF (manuals, code snippets, diagrams) | 🔶→⏳ | Extracts as text ✅; **code blocks** ✅ — detected, kept as `kind: 'code'`, indentation rebuilt from the bounding boxes and rendered as code in every format; **blank lines inside a snippet are not recovered** ❌ — a line with no text has no bounding box to measure, so the gap between two statements closes up in the flow formats |
 | 14 | Legal PDF (contracts, numbered sections, footnotes) | 🔶→⏳ | Numbered-section/list handling ✅; footnote regions ✅ — `1.`, `1)`, `1` and `(a)` callouts are recognised, so numbered notes are not read as list items |
 | 15 | Password-Protected / Encrypted PDF | ✅     | Wizard password prompt, wrong-password explanation, unlocked pre-flight; graceful unsupported-encryption errors; fixture-tested (RC4) |
@@ -98,7 +98,7 @@ same kinds, text, `tableCells`, link anchors and boxes within 3 pt.
 | (a) Classification | `complex` class, complexity scoring, item-level column detection, wizard metadata | 4, 12, 22 classification ✅ |
 | (b) Extraction methods | Browser Tesseract OCR auto-runs per window (status lifecycle, confidence, cached recognition), hybrid merge with geometric dedup, run-OCR setting persisted per project, Python sidecar server (protocol v1, 20 tests) | 2, 3 extraction ✅ |
 | (b2) Sidecar wiring | `src/sidecar/sidecarClient.ts`: cached `GET /health` probe, `POST /ocr` with page/language/password, per-line confidence added to the server response, lazy render so a sidecar page never rasterises in the browser, automatic fall-back to browser Tesseract on any failure (22 client + 5 pipeline + 1 Python test) | 2 extraction ✅ with a native-OCR fast path |
-| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. `fixtures/complex.pdf` (3 columns + rotated watermark) now reads col 1 → col 2 → col 3 → watermark end-to-end. **Footnote regions ✅** — `src/pdf/footnotes.ts` marks them before any merging happens. **Heading hierarchy ✅** — `src/pdf/headings.ts` builds one document-wide ladder of heading font sizes during the probe and every page levels its headings against it; exporters render `h1`–`h6`, `HeadingLevel.HEADING_1–6` and ATX hashes. **Links ✅** — `src/pdf/links.ts` turns every external `/Link` rectangle into the words it covers and every exporter renders them as a real anchor (see below). **Code blocks ✅** — `src/pdf/codeBlocks.ts` calls a run of lines code when two independent readings agree: a monospaced face *and* statement punctuation; a monospaced face *and* nesting (which is what catches YAML and JSON, whose lines carry no punctuation to score); or punctuation alone across several lines with a brace somewhere. `structure.ts` gives it `kind: 'code'`, stamps `skipRule: 'code'` so the model never rewrites a program, and hands the indentation back — see below. **Table cells ✅** — `src/pdf/rowSplit.ts` reads a run of rows whose columns align as one `kind: 'table'` block with `tableCells` as data, and every format draws a real grid rather than tab-separated text — see below. Remaining in this phase: image-anchored extraction, form labels | 4 ✅, reading order for 3 / 7 / 12 ✅, footnotes for 7 / 11 / 14 ✅, heading hierarchy for 7 ✅, links for 19 / 25 ✅, code blocks for 13 / 24 ✅, table cells for 6 ✅; then 5, 9 |
+| (c) Structure preservation | **Reading order ✅** — `src/pdf/readingOrder.ts` cuts rows fused across a column gutter back into one line per column, orders 2–4 columns left to right, and gives a title that spans the fold its own zone ahead of both columns. `fixtures/complex.pdf` (3 columns + rotated watermark) now reads col 1 → col 2 → col 3 → watermark end-to-end. **Footnote regions ✅** — `src/pdf/footnotes.ts` marks them before any merging happens. **Heading hierarchy ✅** — `src/pdf/headings.ts` builds one document-wide ladder of heading font sizes during the probe and every page levels its headings against it; exporters render `h1`–`h6`, `HeadingLevel.HEADING_1–6` and ATX hashes. **Links ✅** — `src/pdf/links.ts` turns every external `/Link` rectangle into the words it covers and every exporter renders them as a real anchor (see below). **Code blocks ✅** — `src/pdf/codeBlocks.ts` calls a run of lines code when two independent readings agree: a monospaced face *and* statement punctuation; a monospaced face *and* nesting (which is what catches YAML and JSON, whose lines carry no punctuation to score); or punctuation alone across several lines with a brace somewhere. `structure.ts` gives it `kind: 'code'`, stamps `skipRule: 'code'` so the model never rewrites a program, and hands the indentation back — see below. **Table cells ✅** — `src/pdf/rowSplit.ts` reads a run of rows whose columns align as one `kind: 'table'` block with `tableCells` as data, and every format draws a real grid rather than tab-separated text — see below. **Figures ✅** — `src/pdf/imageOps.ts` rebuilds every painted image's rectangle from the operator list and `src/pdf/figures.ts` decides which of them are figures and which paragraph owns each one, recorded as `PageBlock.figures` — see below. Remaining in this phase: form labels | 4 ✅, reading order for 3 / 7 / 12 ✅, footnotes for 7 / 11 / 14 ✅, heading hierarchy for 7 ✅, links for 19 / 25 ✅, code blocks for 13 / 24 ✅, table cells for 6 ✅, figures for 5 / 12 ✅; then 9 |
 | (d) Layout auto-adjust | **Translation-time auto-fit ✅** — `src/editor/layout.ts` re-measures a block the moment a translation lands and takes the largest size in `[6pt, originalFontSize]` whose wrapped text still fits the original bbox; never a size the reader pinned, and never below the floor — an unfittable block keeps the document's own size and is flagged rather than shrunk into illegibility. Runs on the bulk queue, on inline re-apply and on accept-suggestion, never on a person typing; `layout.autoFit` in Settings → General turns it off. **Reflow ✅** — `src/export/reflow.ts` pushes the blocks under one that outgrew its box down by exactly the growth, within their own column, stopping at the page edge; HTML emits `min-height` where it emitted `height`, so a box is a floor the translation may grow into | 1, 8, 10, 12 ✅ (translation-time layout + the absolute HTML/print export) |
 
 ### Why reading order needed two detectors
@@ -356,6 +356,70 @@ or the URL; a page converted to Zawgyi before parsing reports different bytes
 than the annotation was cut from, so its anchors are missed; DOCX uses an
 explicit `0563C1` underline rather than the `Hyperlink` style, which exists only
 inside Word's own stylesheet._
+
+### Why a figure has to be anchored to text
+
+An image operator carries an **object id, not a rectangle**. The rectangle is
+whatever the current transformation matrix makes of the unit square at the
+moment `/Im1 Do` is executed, so the only way to know where a picture sits is to
+walk the operator list the way the renderer does — `save`, `transform`,
+`paint`, `restore`, keeping a stack of matrices and composing each `cm` with the
+newest transform on the left, which is the spec's `CTM' = M × CTM`. pdf.js
+publishes no API for any of this; `getOperatorList()` is the only place a page's
+graphics are handed over, which is why `src/pdf/imageOps.ts` exists at all. The
+boxes that come out are clipped to the sheet and rounded to 2 dp in the same
+top-left page space every block bbox already uses, so a figure and the paragraph
+beside it are measured with the same ruler. Form XObjects get their own frame on
+the same stack, fused `repeat` and mask-group operators yield one box per tile,
+and `paintSolidColorImageMask` is skipped — pdf.js also uses it to render stroked
+text, so honouring it would turn every such page into a wall of pictures.
+
+Once the rectangles exist, the question is **which paragraph a picture belongs
+to**, and the answer cannot be "make it a block": a figure has no words for the
+model to translate, so a block of its own would hand it something it cannot
+change while splitting the paragraph it sits next to. `src/pdf/figures.ts`
+therefore records each figure on the block it illustrates, as
+`PageBlock.figures: FigureRef[]` — geometry only, never pixels, which keeps a
+block row small enough to round-trip through IndexedDB and the sync sheet.
+
+Two filters decide what counts as a figure at all, and both are about telling a
+picture apart from page furniture. **Size**: thinner than 8pt in either direction
+is a rule or a bar, smaller than 600pt² is a dot or an icon nobody labels, and
+larger than 60% of the sheet is the page itself — a wash or a scan rather than
+something on it. A rectangle whose centre falls in the top or bottom 10% band is
+a running head or foot, which is what stops a letterhead logo being injected
+halfway down a flow export. **Coverage**: when body type sits on more than 70% of
+the rectangle, the picture is *behind* the page's text rather than next to it —
+a background texture drops, while a photo with one headline over it survives.
+
+Pairing is staged rather than scored, so a failure is always gentle (the figure
+is dropped, and HTML/PDF still show it as page art). A caption is looked for
+first — a line matching `Figure 1.`, `Fig. 2`, `Plate IV` and similar, *numbered*
+so that "Diagram of the process" cannot be mistaken for a label — directly below
+the picture within four times the caption's own font size, then directly above.
+Only if there is no such caption does proximity take over: the nearest body block
+below within half the page height, then the nearest above, each required to share
+at least a third of a column with the picture. `mixed.pdf`'s running head reads
+`Figure 1 - Deployment pipeline` and matches that pattern as happily as any real
+caption does; it loses because it is four hundred points away, and that distance
+rather than the name is what decided. The pass resets `figures` first, exactly as
+`attachLinks` does, so running it twice changes nothing, and each block carries at
+most twelve figures — a tiled pattern would otherwise pile every tile onto one
+paragraph and hand an exporter a hundred pictures for one caption.
+
+The local sidecar has no operator list to walk, so a recovered page would come
+back with a caption naming a picture nothing is attached to. `recoverWithSidecar`
+therefore reads pdf.js's `getOperatorList()` for the placements even though the
+*text* came from PyMuPDF, feeding both engines the same geometry — and
+`extractParity.test.ts` compares `figures` block for block because of it.
+
+_Figures carry these caveats: **DOCX, EPUB and Markdown still emit no artwork at
+all** — the crop-and-embed pass is phase 9b, so today only HTML/PDF/print show a
+picture, as page art rather than as a flow element; labels drawn by the PDF
+itself as vector art or text are not carried into a cropped image, while labels
+burned into the raster survive because they are part of the pixels; and a figure
+whose only neighbour is more than half a page away is dropped rather than
+guessed at._
 
 ### Why a grown block is pushed instead of clipped
 

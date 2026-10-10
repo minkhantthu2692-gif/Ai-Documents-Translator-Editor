@@ -57,6 +57,7 @@ function projectBlock(block: ExportBlock): BlockWithoutGeometry {
     translatedText: block.translatedText,
     characterCount: block.characterCount,
     skipRule: block.skipRule,
+    figures: block.figures,
     placeholders: block.placeholders,
     direction: block.direction,
     fittedFontSize: block.fittedFontSize,

@@ -26,7 +26,9 @@ import { estimateTokens } from '@/translate/tokenEstimate'
 import { classifyPage, coverageOf, emptyTally, type ContentTally } from './pageClassify'
 import { analyzeLayout, itemBoxesOf, type LayoutComplexity } from './layoutComplexity'
 import { headingTiers } from './headings'
+import { anchorFigures } from './figures'
 import { attachLinks, linkAnchors, linksFromAnnotations } from './links'
+import { traceImagePlacements, type ImagePlacement } from './imageOps'
 import {
   groupItemsIntoLines,
   type GroupedLine,
@@ -223,6 +225,13 @@ export interface PageSource {
   styles?: Array<Partial<LineStyle> | null> | undefined
   /** `/Link` rectangles; absent when there is no pdf.js page to ask. */
   annotations?: AnnotationLike[] | undefined
+  /**
+   * Image rectangles traced from the operator list; absent when the producer
+   * had no operator list to walk. `recoverWithSidecar` fills this for a page
+   * the browser re-reads, so a fallback page keeps the figures the browser
+   * would have found rather than losing them with the text run.
+   */
+  placements?: ImagePlacement[] | undefined
   width: number
   height: number
   rotation: number
@@ -234,6 +243,7 @@ interface PreparedPage {
   styles: Array<Partial<LineStyle> | null>
   ops: OpList
   annotations: AnnotationLike[]
+  view: number[]
   width: number
   height: number
   rotation: number
@@ -310,6 +320,7 @@ async function readPage(
     styles,
     ops,
     annotations,
+    view: [...view],
     width,
     height,
     rotation: page.rotate ?? 0,
@@ -608,12 +619,13 @@ export function needsSidecarFallback(page: ExtractedPage): boolean {
 }
 
 /**
- * The shared tail of extraction: runs → lines → ordered blocks → links.
+ * The shared tail of extraction: runs → lines → ordered blocks → links →
+ * figures.
  *
  * Exported because the sidecar fallback enters *here* rather than beside it —
  * a page recovered from `POST /extract` must go through the same grouping,
- * reading order, footnote, code, table and heading passes as any other, or the
- * document would change shape depending on which engine read it.
+ * reading order, footnote, code, table, heading and figure passes as any other,
+ * or the document would change shape depending on which engine read it.
  */
 export function assemblePage(
   pageIndex: number,
@@ -657,6 +669,12 @@ export function assemblePage(
   // merged line of text that never existed on the page.
   const pageLinks = linksFromAnnotations(source.annotations ?? [], source.height)
   attachLinks(blocks, linkAnchors(pageLinks, lines, source.items))
+  // Figures come last: they are the only input here that is not text, and the
+  // pairing depends on boxes every pass above has already settled.
+  anchorFigures(blocks, source.placements ?? [], {
+    pageWidth: source.width,
+    pageHeight: source.height,
+  })
   return {
     pageIndex,
     width: source.width,
@@ -684,6 +702,7 @@ export async function extractPage(
       colors: prepared.colors,
       styles: prepared.styles,
       annotations: prepared.annotations,
+      placements: traceImagePlacements(prepared.ops, prepared.view),
       width: prepared.width,
       height: prepared.height,
       rotation: prepared.rotation,

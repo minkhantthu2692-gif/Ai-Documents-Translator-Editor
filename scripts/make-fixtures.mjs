@@ -16,6 +16,10 @@
  *   fixtures/table.pdf       2 pages, two tables whose cells are each their
  *                            own positioned show-text operator — the shape a
  *                            real document uses — one row leaving a cell empty
+ *   fixtures/figure.pdf      2 pages: a captioned figure, an uncaptioned one,
+ *                            a texture under type, a full-bleed wash, an icon
+ *                            and a letterhead logo — five images, one of which
+ *                            should survive the figure pass
  *
  * Everything is written by hand (xref offsets computed exactly) so the script
  * only depends on node:crypto for MD5. Content is ASCII so a latin-1 stream
@@ -461,11 +465,144 @@ function buildMixedPdf() {
   return writer.render()
 }
 
+/**
+ * Figures: five images on two pages, of which exactly one should survive the
+ * figure pass.
+ *
+ * Page 1 is the happy path — a picture with `Figure 1.` set beneath it. Page 2
+ * is everything that must *not* become a figure: a texture the body text is
+ * printed on, a full-bleed wash, an icon too small to label and a letterhead
+ * logo sitting in the running-head band. The uncaptioned picture is the
+ * in-between case: no label, but a paragraph close enough to own it.
+ *
+ * One image object is reused by every draw. The figure pass reads geometry,
+ * not pixels, so there is nothing to gain from six copies of the same bytes.
+ */
+function buildFigurePdf() {
+  const writer = new PdfWriter()
+  const pagesNum = addPagesObject(writer)
+  const regular = writer.add(FONT_REGULAR)
+  const bold = writer.add(FONT_BOLD)
+  const fontResources = `/Font << /F1 ${regular} 0 R /F2 ${bold} 0 R >>`
+
+  const width = 90
+  const height = 110
+  const pixels = Buffer.alloc(width * height * 3, 0xff)
+  for (let y = 10; y < 100; y += 6) {
+    for (let x = 8; x < 82; x += 1) {
+      const offset = (y * width + x) * 3
+      pixels[offset] = 20
+      pixels[offset + 1] = 70
+      pixels[offset + 2] = 140
+    }
+  }
+  const image = writer.addStream(
+    `/Type /XObject /Subtype /Image /Width ${width} /Height ${height} ` +
+      '/ColorSpace /DeviceRGB /BitsPerComponent 8',
+    pixels,
+  )
+
+  const head = 'BT\n/F2 9 Tf\n1 0 0 rg\n72 770 Td (Annual Report 2026) Tj\nET\n'
+  const foot = (label) => `BT\n/F1 9 Tf\n0 0 0 rg\n72 58 Td (${label}) Tj\nET\n`
+  const paragraph = (lines, size, y, leading) =>
+    [
+      `BT\n/F1 ${size} Tf\n0 0 0 rg\n72 ${y} Td\n`,
+      ...lines.map(
+        (line, index) => `${index > 0 ? `0 -${leading} Td\n` : ''}(${escape(line)}) Tj\n`,
+      ),
+      'ET\n',
+    ].join('')
+
+  // --- page 1: one picture, its label, and prose either side -----------
+  const page1Text = writer.addStream(
+    '',
+    Buffer.from(
+      [
+        head,
+        paragraph(
+          [
+            'The diagram below summarises the deployment pipeline.',
+            'Each stage is validated before the next one may start.',
+          ],
+          11,
+          740,
+          16,
+        ),
+        // Two points smaller than the body: enough for `canMerge` to split it
+        // and for the block to read as a caption rather than a sentence.
+        'BT\n/F1 9 Tf\n0 0 0 rg\n156 500 Td (Figure 1. Stages of the pipeline.) Tj\nET\n',
+        paragraph(
+          [
+            'Rollback is automatic when a health check fails twice in a row.',
+            'Every stage reports its own status.',
+          ],
+          11,
+          476,
+          16,
+        ),
+        foot('Page 1 of 2'),
+      ].join(''),
+      'latin1',
+    ),
+  )
+  const page1Art = writer.addStream(
+    '',
+    Buffer.from('q\n300 0 0 140 156 520 cm\n/Im1 Do\nQ\n', 'latin1'),
+  )
+
+  // --- page 2: four images, none of which may become a figure ---------
+  // Drawn first so the text really is printed on top of the wash.
+  const page2Art = writer.addStream(
+    '',
+    Buffer.from(
+      [
+        'q\n612 0 0 792 0 0 cm\n/Im1 Do\nQ\n', // full-bleed wash: more than the page's share
+        'q\n40 0 0 40 72 740 cm\n/Im1 Do\nQ\n', // letterhead logo, inside the running-head band
+        'q\n240 0 0 160 72 560 cm\n/Im1 Do\nQ\n', // the uncaptioned figure
+        'q\n460 0 0 150 72 300 cm\n/Im1 Do\nQ\n', // texture under the paragraph
+        'q\n16 0 0 16 500 660 cm\n/Im1 Do\nQ\n', // an icon: below the area floor
+      ].join(''),
+      'latin1',
+    ),
+  )
+  const page2Text = writer.addStream(
+    '',
+    Buffer.from(
+      [
+        head,
+        paragraph(['The picture above lists the four stages of the pipeline.'], 11, 540, 14),
+        // Eleven lines wide enough to cover the texture's 460pt entirely: the
+        // coverage rule is what has to drop this one, not its size.
+        paragraph(SENTENCES.slice(0, 11), 11, 440, 14),
+        foot('Page 2 of 2'),
+      ].join(''),
+      'latin1',
+    ),
+  )
+
+  const page1 = addPage(writer, pagesNum, `${fontResources} /XObject << /Im1 ${image} 0 R >>`, [
+    page1Art,
+    page1Text,
+  ])
+  const page2 = addPage(writer, pagesNum, `${fontResources} /XObject << /Im1 ${image} 0 R >>`, [
+    page2Art,
+    page2Text,
+  ])
+  finalizePages(writer, pagesNum, [page1, page2])
+  writer.setInfo({
+    Title: 'Figures',
+    Creator: 'make-fixtures.mjs',
+    Producer: 'make-fixtures.mjs',
+    CreationDate: "D:20260115093000+06'30'",
+    ModDate: "D:20260320174500+06'30'",
+  })
+  return writer.render()
+}
+
 /* ------------------------------------------------------------------ */
 /* A "complex layout" page: three columns of text plus a rotated        */
 /* watermark crossing them — reading order cannot be trusted.           */
 /* ------------------------------------------------------------------ */
-
 function buildComplexPdf() {
   const writer = new PdfWriter()
   const pagesNum = addPagesObject(writer)
@@ -738,6 +875,7 @@ const outputs = [
   ['complex.pdf', buildComplexPdf()],
   ['links.pdf', buildLinksPdf()],
   ['table.pdf', buildTablePdf()],
+  ['figure.pdf', buildFigurePdf()],
 ]
 for (const [name, buffer] of outputs) {
   writeFileSync(join(OUT, name), buffer)

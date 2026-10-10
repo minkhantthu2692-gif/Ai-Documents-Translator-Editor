@@ -52,6 +52,23 @@ export interface LinkRef {
   url: string
 }
 
+/**
+ * One figure anchored to a block: an image the page painted, paired with the
+ * text it belongs to. Lives here rather than in `figures.ts` so the block shape
+ * does not have to import from the module that fills it.
+ *
+ * It records *where* the picture is and how big it was, never pixels — the
+ * exporter crops the page art through `bbox`, which keeps every block row
+ * small enough to round-trip through IndexedDB and the sync sheet.
+ */
+export interface FigureRef {
+  /** Rectangle in page space (top-left origin), identical to `bbox`'s frame. */
+  bbox: BBox
+  /** Native raster size in pixels, when the operator list reported it. */
+  pixelWidth: number | null
+  pixelHeight: number | null
+}
+
 export interface PageBlock {
   id: string
   kind: BlockKind
@@ -91,6 +108,17 @@ export interface PageBlock {
    * it without re-parsing the string.
    */
   links: LinkRef[]
+  /**
+   * The figures this block carries, top to bottom. Always an array (possibly
+   * empty) so a caller never tests for `undefined`.
+   *
+   * An empty array is the normal case: most pages have no figure, and the ones
+   * that do get matched to the paragraph they illustrate (`figures.ts`) rather
+   * than becoming blocks of their own — a picture has no words to translate, so
+   * giving it a block would hand the model something it cannot change while
+   * splitting the paragraph it sits next to.
+   */
+  figures: FigureRef[]
   /** Estimated line spacing as a multiple of the font size (≥ 1). */
   lineSpacing: number
   fontFamily: string
@@ -526,6 +554,7 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
       tableCells,
       headingLevel: null,
       links: [],
+      figures: [],
       lineSpacing: Number.isFinite(spacing) ? spacing : 1.4,
       fontFamily: first.style.fontFamily,
       fontSize: first.style.fontSize,

@@ -39,6 +39,8 @@ import {
   type ExtractPageOptions,
 } from '@/pdf/pdfExtract'
 import { isRenderCancelled, renderPage, type RenderHandle } from '@/pdf/pageRender'
+import { traceImagePlacements, type ImagePlacement } from '@/pdf/imageOps'
+import type { OpList } from '@/pdf/pdfOps'
 import { probeSidecarExtract, sidecarExtract } from '@/sidecar/sidecarClient'
 import type {
   AnalysisEvent,
@@ -311,17 +313,24 @@ async function recoverWithSidecar(
       // open — so links come from there while the text comes from here.
       // When the page object itself is what failed, there are no `/Link`
       // rectangles left to attach; the text still stands, which is the point.
+      //
+      // The operator list is a third thing only pdf.js can supply, and it is
+      // untouched by whatever went wrong with the *text* — so a recovered page
+      // keeps its figures instead of losing them along with the runs.
       let annotations: AnnotationLike[] = []
+      let placements: ImagePlacement[] = []
       try {
         const page = await open.doc.getPage(retry.pageIndex + 1)
         annotations = (await page.getAnnotations().catch(() => [])) as AnnotationLike[]
+        const ops = (await page.getOperatorList().catch(() => null)) as unknown as OpList | null
+        if (ops) placements = traceImagePlacements(ops, page.view)
         releasePage(page, open.pageCount)
       } catch (error) {
         if (isAbortError(error)) throw error
       }
       pages[retry.position] = assemblePage(
         retry.pageIndex,
-        { ...entry.source, annotations },
+        { ...entry.source, annotations, placements },
         pageOptions(retry.pageIndex),
       )
       continue

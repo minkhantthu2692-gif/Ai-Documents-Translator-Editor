@@ -153,6 +153,7 @@ function indexed(overrides: Partial<IndexedBlock> = {}): IndexedBlock {
     listMarker: null,
     headingLevel: null,
     links: [],
+    figures: [],
     translationConfidence: null,
     translationFlag: null,
     translatedAt: null,

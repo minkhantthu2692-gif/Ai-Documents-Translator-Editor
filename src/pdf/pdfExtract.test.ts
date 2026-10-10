@@ -44,6 +44,16 @@ afterAll(async () => {
   await Promise.all(tasks.map((task) => task.destroy().catch(() => undefined)))
 })
 
+/** Extracts one page with the options the worker sends for an ordinary run. */
+async function extractAt(doc: PDFDocumentProxy, pageIndex: number): Promise<ExtractedPage> {
+  return extractPage(await doc.getPage(pageIndex + 1), {
+    pageIndex,
+    ctx: { sourceLang: 'en', targetLang: 'my' },
+    headerTexts: [],
+    footerTexts: [],
+  })
+}
+
 describe('parsePdfDate', () => {
   it('parses a full PDF date with a zone', () => {
     expect(parsePdfDate("D:20260115093000+06'30'")).toBe('2026-01-15T03:00:00.000Z')
@@ -228,6 +238,21 @@ describe('mixed.pdf', () => {
     const extracted = await extractPage(page, { pageIndex: 0 })
     expect(extracted.blocks.length).toBeGreaterThan(1)
     expect(extracted.blocks.some((block) => block.text.includes('deployment pipeline'))).toBe(true)
+  })
+
+  it('gives the picture to the paragraph, not to a running head that reads like a label', async () => {
+    const doc = await open('mixed.pdf')
+    const { blocks } = await extractAt(doc, 0)
+
+    // The running head is `Figure 1 - …`, which matches the label pattern as
+    // well as any real caption does. It is four hundred points away from the
+    // picture, and that is what must decide — a name alone is not a pairing.
+    expect(blocks.find((block) => block.text.startsWith('Figure 1 -'))?.figures).toEqual([])
+    const owner = blocks.find((block) => block.figures.length > 0)
+    expect(owner?.text).toContain('The figure shows the stages')
+    expect(owner?.figures).toEqual([
+      { bbox: { x: 280, y: 432, w: 300, h: 300 }, pixelWidth: 90, pixelHeight: 110 },
+    ])
   })
 })
 
@@ -437,6 +462,65 @@ describe('table.pdf', () => {
       ['Gadget', '', 'clearance'],
       ['Gizmo', '80', 'backorder'],
     ])
+  })
+})
+
+describe('figure.pdf', () => {
+  // Six images are painted across the two pages; only two of them are figures.
+  // The rest are page furniture — a wash, a logo, an icon — or texture the
+  // body text is printed on, and a flow export must not drag any of them in.
+  const figuresOn = async (doc: PDFDocumentProxy, pageIndex: number) => {
+    const { blocks } = await extractAt(doc, pageIndex)
+    return blocks.flatMap((block) => block.figures)
+  }
+
+  it('reports every image the fixture paints, so the two survivors are a choice', async () => {
+    const doc = await open('figure.pdf')
+    const probe = await probeDocument(doc)
+    expect(probe.summary.tally).toEqual({ text: 0, scanned: 0, mixed: 2, complex: 0, empty: 0 })
+    expect(probe.summary.totalImages).toBe(6)
+    expect((await figuresOn(doc, 0)).length + (await figuresOn(doc, 1)).length).toBe(2)
+  })
+
+  it('anchors a figure to the caption that labels it', async () => {
+    const doc = await open('figure.pdf')
+    const { blocks } = await extractAt(doc, 0)
+
+    const caption = blocks.find((block) => block.text.startsWith('Figure 1.'))
+    expect(caption).toBeDefined()
+    expect(caption?.figures).toEqual([
+      { bbox: { x: 156, y: 132, w: 300, h: 140 }, pixelWidth: 90, pixelHeight: 110 },
+    ])
+    // Exactly one block owns a picture, so an exporter emitting `<figure>` per
+    // block cannot duplicate it.
+    expect(blocks.filter((block) => block.figures.length > 0)).toHaveLength(1)
+    // The prose above the picture and the paragraph below the caption are not
+    // the caption, however much closer to the image they may be.
+    expect(blocks.find((block) => block.text.startsWith('Rollback'))?.figures).toEqual([])
+  })
+
+  it('falls back to the nearest paragraph when a figure has no label', async () => {
+    const doc = await open('figure.pdf')
+    const { blocks } = await extractAt(doc, 1)
+
+    const owner = blocks.find((block) => block.figures.length > 0)
+    expect(owner?.text).toContain('The picture above lists the four stages')
+    expect(owner?.figures).toEqual([
+      { bbox: { x: 72, y: 72, w: 240, h: 160 }, pixelWidth: 90, pixelHeight: 110 },
+    ])
+  })
+
+  it('passes over texture under type, a wash, a logo and an icon', async () => {
+    const doc = await open('figure.pdf')
+    const { blocks } = await extractAt(doc, 1)
+
+    // The paragraph printed on the 460 × 150 texture must not carry it: it is
+    // background, and it covers the whole of the picture.
+    expect(blocks.find((block) => block.text.startsWith('The quarterly review'))?.figures).toEqual(
+      [],
+    )
+    expect(blocks.every((block) => block.figures.length <= 1)).toBe(true)
+    expect(await figuresOn(doc, 1)).toHaveLength(1)
   })
 })
 

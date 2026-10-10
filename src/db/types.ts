@@ -10,7 +10,7 @@ import type { ReasonCode, Severity } from '@/core/reasonCodes'
 import type { BBox } from '@/pdf/stableId'
 import type { LineStyle } from '@/pdf/lineGrouping'
 import type { SkipRule } from '@/pdf/skipRules'
-import type { LinkRef } from '@/pdf/structure'
+import type { FigureRef, LinkRef } from '@/pdf/structure'
 import type { Placeholder } from '@/pdf/placeholders'
 
 export interface BaseRecord {
@@ -153,6 +153,14 @@ export interface BlockRecord extends BaseRecord {
    * an old row renders — just through the text fallback rather than the grid.
    */
   tableCells?: string[][] | null
+  /**
+   * Figures anchored to this block — where the page painted a picture this
+   * paragraph illustrates. Optional for the same reason `headingLevel`,
+   * `links` and `tableCells` are: a row parsed before figures were traced has
+   * none, and every reader must default it. Boxes only, never pixels — that
+   * keeps a block row small enough to round-trip through the sync sheet.
+   */
+  figures?: FigureRef[]
   /** 0..1 heuristic quality of the last successful translation (null = none). */
   translationConfidence: number | null
   /** Flag from the last translation pass (null = clean). */

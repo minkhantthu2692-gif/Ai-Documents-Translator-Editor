@@ -31,6 +31,8 @@ import {
   type ExtractedPage,
 } from '@/pdf/pdfExtract'
 import type { PageBlock } from '@/pdf/structure'
+import { traceImagePlacements } from '@/pdf/imageOps'
+import type { OpList } from '@/pdf/pdfOps'
 import { normaliseExtract, type SidecarExtractPage } from './sidecarClient'
 
 const recorded = (name: string): unknown =>
@@ -50,7 +52,17 @@ function optionsFor(pageIndex: number): ExtractPageOptions {
   }
 }
 
-/** What a block *says*, as opposed to where it happened to be measured. */
+/**
+ * What a block *says* and what it owns, as opposed to where it happened to be
+ * measured.
+ *
+ * `figures` belongs here because the pairing — which paragraph carries which
+ * picture — is a decision `assemblePage` makes, and it is exactly the one a
+ * sidecar page would lose if the runtime did not hand it the pdf.js
+ * placements. The rectangles inside are identical on both sides only because
+ * `recovered` traces them from the same operator list the browser read; that
+ * is the property under test, not a convenience.
+ */
 function shape(blocks: readonly PageBlock[]) {
   return blocks.map((block) => ({
     kind: block.kind,
@@ -62,6 +74,7 @@ function shape(blocks: readonly PageBlock[]) {
     listMarker: block.listMarker,
     skipRule: block.skipRule,
     links: block.links,
+    figures: block.figures,
     alignment: block.alignment,
     lineCount: block.lines.length,
   }))
@@ -88,8 +101,12 @@ async function open(name: string): Promise<PDFDocumentProxy> {
 }
 
 /**
- * The fallback as the worker drives it: sidecar runs, pdf.js annotations,
- * then the one shared `assemblePage`.
+ * The fallback as the worker drives it: sidecar runs, pdf.js annotations and
+ * operator list, then the one shared `assemblePage`.
+ *
+ * The operator list is what `recoverWithSidecar` reads for placements — text
+ * came from PyMuPDF, but the rectangles a picture occupies are geometry the
+ * browser can still recover even when the text stream was what failed.
  */
 async function recovered(
   doc: PDFDocumentProxy,
@@ -100,7 +117,13 @@ async function recovered(
   expect(entry?.decline).toBeNull()
   const page = await doc.getPage(pageIndex + 1)
   const annotations = (await page.getAnnotations().catch(() => [])) as AnnotationLike[]
-  return assemblePage(pageIndex, { ...entry!.source, annotations }, optionsFor(pageIndex))
+  const ops = (await page.getOperatorList().catch(() => null)) as unknown as OpList | null
+  const placements = ops ? traceImagePlacements(ops, page.view) : []
+  return assemblePage(
+    pageIndex,
+    { ...entry!.source, annotations, placements },
+    optionsFor(pageIndex),
+  )
 }
 
 /**
@@ -177,6 +200,21 @@ describe('sidecar fallback parity', () => {
       ['East', '75', '80'],
     ])
     expect(cells(sidecar)).toEqual(cells(browser))
+  })
+
+  it('keeps the figure a recovered page carries, on both paths', async () => {
+    const doc = await open('mixed.pdf')
+    const sidecar = await recovered(doc, recordings['mixed.pdf'], 0)
+    const browser = await extractPage(await doc.getPage(1), optionsFor(0))
+
+    const owner = (page: ExtractedPage) => page.blocks.find((block) => block.figures.length > 0)
+    // Without the placements the runtime hands over, the sidecar page comes
+    // back with a caption naming a picture nothing is attached to — and every
+    // `figures` comparison in `shape` would pass for having no opinion at all.
+    expect(owner(sidecar)?.figures).toEqual([
+      { bbox: { x: 280, y: 432, w: 300, h: 300 }, pixelWidth: 90, pixelHeight: 110 },
+    ])
+    expect(owner(sidecar)?.text).toBe(owner(browser)?.text)
   })
 
   it('anchors a link on the words it covers, on both paths', async () => {

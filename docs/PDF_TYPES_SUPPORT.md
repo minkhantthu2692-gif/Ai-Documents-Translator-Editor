@@ -82,7 +82,7 @@ same kinds, text, `tableCells`, link anchors and boxes within 3 pt.
 | 15 | Password-Protected / Encrypted PDF | ✅     | Wizard password prompt, wrong-password explanation, unlocked pre-flight; graceful unsupported-encryption errors; fixture-tested (RC4) |
 | 16 | Large PDF (hundreds/thousands of pages) | ✅     | 300-page fixture: worker-side probe/parse, main thread stays responsive, resumable queue, progress UI, chunked translation |
 | 17 | Unicode / Multilingual (Burmese, CJK, Arabic, Devanagari, Cyrillic) | 🔶→⏳ | Language detection + Zawgyi/Unicode handling ✅, Myanmar rendering ✅; OCR validated for English end-to-end, other scripts need their tesseract traineddata (mya available, untested) |
-| 18 | RTL PDF (Arabic, Hebrew, mixed) | 🔶     | RTL line ordering in grouping ✅; bidi/visual-order edge cases ❌ |
+| 18 | RTL PDF (Arabic, Hebrew, mixed) | 🔶     | RTL line ordering in grouping ✅; mixed-direction lines settled by a character-weighted vote ✅ — an Arabic sentence that quotes a number or borrows a Latin word keeps its logical order instead of falling back to visual order; shaped presentation forms resolved to base letters ✅ (searchable, joinable, glossary-matchable — see below); full bidi reordering inside a single pdf.js run ❌ |
 | 19 | PDF With Annotations (comments, highlights, stamps, links) | 🔶→✅ | Annotation/link counting in probe ✅; `/Annots` `/Link` rectangles now become anchored `<a>` / `[text](url)` / docx `ExternalHyperlink` ✅ (external only — see below); a note's own words — a sticky note's message, the reason a passage was highlighted, a `/FreeText` callout's body, a stamp's legend — become one `kind: 'annotation'` block each ✅ (see below); the annotation's **author** (`/T`) and date (`/M`) stay out of it ❌ — a name is not for translating |
 | 20 | Damaged / Invalid PDF | 🔶     | Load/probe failures surface as actionable errors ✅; structural repair ✅ (rebuilt xref/trailer, append-only) |
 | 21 | PDF With Embedded Fonts (subset/custom/fallback) | ✅     | Font inventory (embedded/standard/other) in metadata ✅, subset-prefix cleaning ✅, Myanmar fallback stack in export ✅ |
@@ -893,4 +893,20 @@ than `$$`), a same-size mark is caught only by its raise, prose that itself
 carries maths glyphs directly under a formula can still join the run (it stays
 verbatim — only a translation is lost), and the tests are synthetic geometry —
 the shapes a TeX- or Cambria-set page produces — with no real academic PDF
-reviewed. Matrix 23: ❌ → 🔶, and with it type 7's last ❌._
+reviewed. Matrix 23: ❌ → 🔶, and with it type 7's last ❌. RTL bidi (type 18) is settled
+heuristically at the line level, by two rules in `lineGrouping.ts`. First, a line's
+direction is a character-weighted vote across its runs, not an all-or-nothing test: one
+`ltr` run used to send a whole Arabic sentence back to left-to-right order — visual order
+for an RTL line, so the Arabic came out reversed around whatever number or Latin word it
+quoted, while the mirror case (an English sentence borrowing one Arabic word) stayed
+correct only by luck of the majority. Second, shaped *presentation forms* — the same
+letters pre-shaped for their neighbours, which pdf.js reads straight back out of the
+font's encoding — are decomposed to base letters as the line is built, so a search for
+`لا` finds the text, the glossary can match it, the model is not handed one-codepoint
+tokens, and exports do not carry a form for every join; the decomposition touches only
+the three presentation-form blocks, never a blanket `normalize('NFKC')` on every document.
+What remains: no bidi reordering *inside* a single pdf.js run (a chunk whose internal
+characters arrive in visual order stays that way), the direction flag is pdf.js's own
+font-based guess, table-cell order for RTL follows the row detector's reading, and no real
+Arabic or Hebrew PDF has been reviewed — the tests are hand-built items with `dir` flags,
+which proves the rules but not a foreign font's behaviour._

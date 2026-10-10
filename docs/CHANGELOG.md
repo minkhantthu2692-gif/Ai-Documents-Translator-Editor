@@ -446,6 +446,26 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   emitted, no real academic PDF reviewed. Matrix 23: ❌ → 🔶, and with it type
   7's last ❌.
 
+- **Phase (e) — RTL bidi (types 18, the last 🔶 row with an active ❌)**. Two
+  rules in `lineGrouping.ts`, both about what pdf.js hands back for Arabic
+  and Hebrew pages. A line's direction is now a character-weighted vote
+  across its runs instead of an all-or-nothing `every(dir === "rtl")`: one
+  `ltr` run — a quoted number, a borrowed Latin word — used to send the whole
+  line back to left-to-right order, which is *visual* order for an RTL
+  line, so the Arabic came out reversed around it; the mirror case (an
+  English sentence borrowing one Arabic word) now keeps its own order by
+  the same vote rather than by luck. And shaped presentation forms — the
+  same letters pre-shaped for their neighbours, which pdf.js reads straight
+  out of the font's encoding (`ﻻ` instead of `لا`) — are decomposed back
+  to base letters as each line is built: the text becomes searchable,
+  glossary-matchable, and tokenizable by the model, and exports stop
+  growing a form for every join. The decomposition is compatibility
+  (NFKC) applied to the three presentation-form blocks only — never a
+  blanket normalize that would rewrite micro signs and fractions in every
+  LTR document. Three direction tests + one normalization test; what stays
+  out of scope: bidi reordering inside a single pdf.js run, and any
+  review against a real Arabic or Hebrew PDF.
+
 ### Security
 
 - Settings rows whose id or field looks like a credential (`key`, `token`, `secret`,

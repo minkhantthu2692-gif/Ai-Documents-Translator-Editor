@@ -160,6 +160,59 @@ describe('groupItemsIntoLines', () => {
     expect(lines[0].text).toBe('שלום עולם')
   })
 
+  it('keeps an RTL sentence that quotes a number in logical order', () => {
+    // The number is its own run and its `dir` is `ltr`, but it is four
+    // characters of a twenty-character line: the sentence reads right-to-left,
+    // so its logical first word sits at the rightmost x. An all-or-nothing
+    // direction test saw that one `ltr` member and returned the whole line to
+    // left-to-right order — visual order for an RTL line — so the Arabic came
+    // out reversed.
+    const lines = groupItemsIntoLines(
+      [
+        item('مرحبا', { x: 240, width: 40, dir: 'rtl' }),
+        item('2026', { x: 200, width: 24, dir: 'ltr' }),
+        item('بالعالم', { x: 140, width: 50, dir: 'rtl' }),
+        item('أهلا', { x: 80, width: 50, dir: 'rtl' }),
+      ],
+      { pageIndex: 0, pageHeight: 800 },
+    )
+    expect(lines).toHaveLength(1)
+    // Descending x is logical order here: the rightmost run reads first, and
+    // the number stays where it sits in the sentence.
+    expect(lines[0].text).toBe('مرحبا 2026 بالعالم أهلا')
+  })
+
+  it('keeps an LTR sentence that borrows one Arabic word in its own order', () => {
+    // The mirror case: the borrow is a single shaped run, so the English
+    // sentence still reads left to right and the word stays where it was
+    // written.
+    const lines = groupItemsIntoLines(
+      [
+        item('The sign said', { x: 60, width: 120, dir: 'ltr' }),
+        item('مرحبا', { x: 190, width: 40, dir: 'rtl' }),
+        item('and then we left', { x: 240, width: 130, dir: 'ltr' }),
+      ],
+      { pageIndex: 0, pageHeight: 800 },
+    )
+    expect(lines).toHaveLength(1)
+    expect(lines[0].text).toBe('The sign said مرحبا and then we left')
+  })
+
+  it('resolves presentation forms to base letters', () => {
+    // Shaped runs arrive pre-joined from the font's encoding: لا (lam-alef),
+    // which no search for the two base letters would ever match, and which
+    // the model would be handed one codepoint per token.
+    const lines = groupItemsIntoLines(
+      [
+        item('ﻻﻡﻭﺍﻡ', { x: 60, width: 90, dir: 'rtl' }),
+        item('2026', { x: 160, width: 24, dir: 'ltr' }),
+      ],
+      { pageIndex: 0, pageHeight: 800 },
+    )
+    expect(lines[0].text).toContain('لا')
+    expect(lines[0].text).not.toContain('ﻻ')
+  })
+
   it('ignores empty and non-finite items', () => {
     const broken: TextItemLike = {
       str: 'x',

@@ -86,6 +86,10 @@ export interface GroupOptions {
 interface Candidate {
   index: number
   item: TextItemLike
+  /** The item's text with presentation forms resolved to base letters. */
+  str: string
+  /** The item's direction as pdf.js reported it (`rtl` / `ltr`). */
+  dir: string | undefined
   x: number
   baselineY: number
   width: number
@@ -97,6 +101,47 @@ interface Candidate {
 }
 
 const SUBSET_PREFIX = /^[A-Z]{6}\+/
+
+/**
+ * Arabic and Hebrew are written with *presentation forms* — the same letters,
+ * pre-shaped for the neighbours they will meet. pdf.js reads them back through
+ * the font's own encoding, so a joined run arrives as `ﻻ` (one codepoint)
+ * rather than the base letters `لا` that any reader, search box or tokenizer
+ * expects. The text still looks right on screen, but it is not the language: a
+ * search for `لا` misses it, the glossary never matches it, the model is handed
+ * characters its tokenizer splits one per codepoint, and re-exporting grows the
+ * file with a form for every join. Compatibility decomposition is exactly the
+ * inverse of the shaping, and it lives here rather than in a blanket
+ * `normalize('NFKC')` because that would also rewrite `µ` (micro sign) to `µ`
+ * (Greek mu) and `½` to `1/2` in every LTR document that never asked for it.
+ */
+const BIDI_PRESENTATION = /[\uFB1D-\uFDFF\uFE70-\uFEFF]/g
+
+/** Base letters for shaped Hebrew/Arabic runs; every other string is untouched. */
+export function normalizeBidiForms(text: string): string {
+  return text.replace(BIDI_PRESENTATION, (form) => form.normalize('NFKC'))
+}
+
+/**
+ * Whether a line reads right-to-left, settled by how much of it does.
+ *
+ * An all-or-nothing test looked correct on a pure Arabic page and broke on the
+ * sentence that carried one Latin word or a number: a single `ltr` member sent
+ * the whole line back to left-to-right order, which is visual order for an RTL
+ * line — the Arabic came out reversed. Weighting by characters keeps a
+ * right-to-left sentence right-to-left however many digits it quotes, and keeps
+ * an English sentence that borrows one Arabic word in its own order, because
+ * the borrow is a single shaped run whose characters are already logical.
+ */
+export function readsRtl(members: Array<{ str: string; dir?: string }>): boolean {
+  let rtl = 0
+  let ltr = 0
+  for (const member of members) {
+    if (member.dir === 'rtl') rtl += member.str.length
+    else ltr += member.str.length
+  }
+  return rtl > ltr
+}
 
 /** Removes pdf.js subset prefixes and leading slashes from a font name. */
 export function cleanFontName(name: string | undefined): string {
@@ -120,6 +165,8 @@ function rgbToHex(color: number | string | null | undefined): string | null {
 
 function analyzeItem(item: TextItemLike, index: number): Candidate | null {
   if (!item.str || !item.str.trim()) return null
+  const str = normalizeBidiForms(item.str)
+  if (!str.trim()) return null
   const [a, b, c, d, e, f] = item.transform ?? []
   if (![a, b, c, d, e, f].every((value) => Number.isFinite(value))) return null
 
@@ -135,6 +182,8 @@ function analyzeItem(item: TextItemLike, index: number): Candidate | null {
   return {
     index,
     item,
+    str,
+    dir: item.dir,
     x: e,
     baselineY: f,
     width: item.width || 0,
@@ -237,7 +286,7 @@ export function groupItemsIntoLines(items: TextItemLike[], options: GroupOptions
   const pageHeight = options.pageHeight
 
   for (const cluster of clusters) {
-    const rtl = cluster.members.every((member) => member.item.dir === 'rtl')
+    const rtl = readsRtl(cluster.members)
     const members = [...cluster.members].sort((a, b) =>
       rtl ? b.x - a.x : a.x - b.x || a.index - b.index,
     )
@@ -255,7 +304,7 @@ export function groupItemsIntoLines(items: TextItemLike[], options: GroupOptions
       const member = members[i]
       const spaced = i > 0 && needsSpace(members[i - 1], member)
       if (spaced) text += ' '
-      text += member.item.str
+      text += member.str
 
       const corners: Array<[number, number]> = [
         [0, 0],
@@ -278,7 +327,7 @@ export function groupItemsIntoLines(items: TextItemLike[], options: GroupOptions
       runs.push({
         x: runMinX,
         w: runMaxX - runMinX,
-        text: (spaced ? ' ' : '') + member.item.str,
+        text: (spaced ? ' ' : '') + member.str,
       })
     }
 

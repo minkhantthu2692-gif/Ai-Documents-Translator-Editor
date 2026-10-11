@@ -527,6 +527,107 @@ function buildTableContinuationPdf() {
   return writer.render()
 }
 
+/**
+ * A one-page invoice — the layout type 8 turns on.
+ *
+ * Every region an invoicing program draws, and every shape that used to
+ * break one:
+ *
+ *  - a letterhead (bold name left, small address block right-aligned — two
+ *    text regions sharing baselines across the page);
+ *  - metadata pairs (`Invoice No:` / `INV-2026-041`) — label in a second
+ *    column, all runs cell-sized, three rows aligned;
+ *  - a `Bill To:` block over an address;
+ *  - the line-items table, which is the row this fixture exists for: a
+ *    *clause-width* first cell ("Consulting hours, September" is thirteen
+ *    ems) followed by three figures. Width alone reads that as prose beside
+ *    a gutter, and the reading-order pass used to cut the row down the
+ *    middle — one paragraph per column, every row lost. What saves it is
+ *    recurrence: the column starts repeat on all four rows, which is the
+ *    grid reading (`gridRowIds`) and nothing the line could show alone;
+ *  - totals with the label at the margin and the amount flush right, one of
+ *    them carrying a percentage — the shape whose flattened text read as a
+ *    single short formula and sent the whole block out untranslated.
+ */
+function buildInvoicePdf() {
+  const writer = new PdfWriter()
+  const pagesNum = addPagesObject(writer)
+  const regular = writer.add(FONT_REGULAR)
+  const bold = writer.add(FONT_BOLD)
+  const resources = `/Font << /F1 ${regular} 0 R /F2 ${bold} 0 R >>`
+
+  const parts = []
+  // Letterhead.
+  parts.push(cell(72, 742, 16, 'F2', 'Northwind Trading Co.'))
+  parts.push(cell(380, 750, 9, 'F1', '1200 Harbor Street'))
+  parts.push(cell(380, 738, 9, 'F1', 'Suite 400, Bay City'))
+  parts.push(cell(380, 726, 9, 'F1', 'accounts@northwind.example'))
+  parts.push(cell(72, 712, 20, 'F2', 'INVOICE'))
+
+  // Metadata: label left, value in a second column.
+  parts.push(cell(72, 676, 11, 'F2', 'Invoice No:'))
+  parts.push(cell(220, 676, 11, 'F1', 'INV-2026-041'))
+  parts.push(cell(72, 660, 11, 'F2', 'Invoice Date:'))
+  parts.push(cell(220, 660, 11, 'F1', '2026-09-14'))
+  parts.push(cell(72, 644, 11, 'F2', 'Payment Terms:'))
+  parts.push(cell(220, 644, 11, 'F1', 'Net 30'))
+
+  // Bill To block.
+  parts.push(cell(72, 612, 11, 'F2', 'Bill To:'))
+  parts.push(cell(72, 596, 11, 'F1', 'Contoso Retail Ltd.'))
+  parts.push(cell(72, 580, 11, 'F1', '88 River Road, Suite 12'))
+  parts.push(cell(72, 564, 11, 'F1', 'Mandalay'))
+
+  // Line items: the clause-width first cell is the point of the fixture.
+  const top = 528
+  parts.push(cell(72, top, 10, 'F2', 'Description'))
+  parts.push(cell(300, top, 10, 'F2', 'Qty'))
+  parts.push(cell(370, top, 10, 'F2', 'Unit Price'))
+  parts.push(cell(470, top, 10, 'F2', 'Amount'))
+  const rows = [
+    ['Consulting hours, September', '12', '$85.00', '$1,020.00'],
+    ['Licence renewal, 10 seats', '1', '$180.00', '$180.00'],
+    ['On-site training day', '1', '$40.00', '$40.00'],
+  ]
+  rows.forEach((row, index) => {
+    const y = top - 16 * (index + 1)
+    parts.push(cell(72, y, 10, 'F1', row[0]))
+    parts.push(cell(300, y, 10, 'F1', row[1]))
+    parts.push(cell(370, y, 10, 'F1', row[2]))
+    parts.push(cell(470, y, 10, 'F1', row[3]))
+  })
+
+  // Totals: label at the margin, amount flush right, one percentage.
+  const totalTop = top - 16 * (rows.length + 2)
+  parts.push(cell(72, totalTop, 11, 'F1', 'Subtotal'))
+  parts.push(cell(500, totalTop, 11, 'F1', '$1,240.00'))
+  parts.push(cell(72, totalTop - 16, 11, 'F1', 'Tax (8.5%)'))
+  parts.push(cell(500, totalTop - 16, 11, 'F1', '$105.40'))
+  parts.push(cell(72, totalTop - 32, 11, 'F2', 'Total Due'))
+  parts.push(cell(500, totalTop - 32, 11, 'F2', '$1,345.40'))
+
+  // Footer note.
+  parts.push(cell(72, totalTop - 72, 9, 'F1', 'Please quote the invoice number on your payment.'))
+
+  const page = addPage(
+    writer,
+    pagesNum,
+    resources,
+    writer.addStream('', Buffer.from(parts.join(''), 'latin1')),
+  )
+  finalizePages(writer, pagesNum, [page])
+  writer.setInfo({
+    Title: 'Invoice',
+    Author: 'Northwind Trading Co.',
+    Subject: 'Clause-width table cells, key-value pairs and totals',
+    Creator: 'make-fixtures.mjs',
+    Producer: 'make-fixtures.mjs',
+    CreationDate: "D:20260115093000+06'30'",
+    ModDate: "D:20260320174500+06'30'",
+  })
+  return writer.render()
+}
+
 /** An image-only "scan": no text operators anywhere. */
 function buildScannedPdf(pageCount) {
   const width = 120
@@ -1563,6 +1664,7 @@ const outputs = [
   ['table.pdf', buildTablePdf()],
   ['table-spans.pdf', buildTableSpansPdf()],
   ['table-continued.pdf', buildTableContinuationPdf()],
+  ['invoice.pdf', buildInvoicePdf()],
   ['figure.pdf', buildFigurePdf()],
   ['form.pdf', buildFormPdf()],
   ['annotations.pdf', buildAnnotationsPdf()],

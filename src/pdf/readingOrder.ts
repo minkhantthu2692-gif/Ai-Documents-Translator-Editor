@@ -30,7 +30,7 @@
  */
 
 import type { GroupedLine, LineRun } from './lineGrouping'
-import { looksLikeTableRow } from './rowSplit'
+import { gridRowIds, looksLikeTableRow } from './rowSplit'
 import { lineId, type BBox } from './stableId'
 
 /** Lines required on *both* sides of a gutter before it is believed. */
@@ -332,7 +332,12 @@ export function gutterBands(
  * Guarantees: a line either survives untouched or is replaced by parts that
  * together reproduce its text and cover its extent. Nothing is dropped,
  * duplicated or reordered — except a **table row**, whose cells are cells
- * *because* they ride one baseline, and which is therefore left whole.
+ * *because* they ride one baseline, and which is therefore left whole. A row
+ * whose first cell is a clause ("Consulting hours, September | 12 | $85.00")
+ * cannot prove that alone — width reads it as prose — so a line is also left
+ * whole when the page repeats its column starts: the grid reading
+ * (`gridRowIds`) that keeps an invoice's line items from being cut into one
+ * paragraph per column.
  */
 export function splitMergedLines(
   lines: GroupedLine[],
@@ -349,18 +354,28 @@ export function splitMergedLines(
   const bands = gutterBands(boxes, options.pageWidth)
   if (bands.length === 0) return lines
 
+  // The third reading of `looksLikeTableRow`, and the only one that needs
+  // neighbours: computed once here because this is the one place that holds
+  // the whole page's lines.
+  const gridRows = gridRowIds(lines)
+
   const split: GroupedLine[] = []
   for (const line of lines) {
-    split.push(...cutAtBands(line, bands, options.pageIndex))
+    split.push(...cutAtBands(line, bands, gridRows, options.pageIndex))
   }
   return split
 }
 
 /** Replaces one line by its column parts, or by itself when it must stay whole. */
-function cutAtBands(line: GroupedLine, bands: GutterBand[], pageIndex: number): GroupedLine[] {
+function cutAtBands(
+  line: GroupedLine,
+  bands: GutterBand[],
+  gridRows: ReadonlySet<string>,
+  pageIndex: number,
+): GroupedLine[] {
   const runs = line.runs
   if (!runs || runs.length < 2) return [line]
-  if (looksLikeTableRow(line)) return [line]
+  if (looksLikeTableRow(line) || gridRows.has(line.id)) return [line]
   // Runs and itemIndexes are built in the same pass and same order. Without a
   // 1:1 map, slicing one and not the other would silently repeat or lose an
   // item reference — so an inconsistent line is left alone instead.

@@ -72,7 +72,7 @@ same kinds, text, `tableCells`, link anchors and boxes within 3 pt.
 | 5  | PDF With Images (captions, diagrams, charts) | 🔶→⏳ | Images kept in the page render/background ✅; **image-anchored extraction ✅** — every painted image's rectangle is traced from the operator list, filtered against page furniture and anchored to the block it illustrates as `PageBlock.figures` (see below); **cropped and embedded in DOCX / EPUB / Markdown ✅** (phase 9b, see "How a figure reaches DOCX, EPUB and Markdown") |
 | 6  | PDF With Tables (simple/complex, merged cells, multi-page) | 🔶→⏳ | **Real table cells ✅** — a run of rows whose columns align becomes one `kind: 'table'` block carrying `tableCells` (rows × columns) as data, and HTML/EPUB draw a real `<table>`, DOCX a real `w:tbl`, Markdown a pipe table, JSON the grid (see below); table rows are explicitly exempt from the column split so merging cells stay one row; **Merged cells ✅** — a cell drawn across a column boundary becomes `tableSpans` beside the grid, and HTML/EPUB emit `colspan`, DOCX `w:gridSpan` (see below); **multi-page tables ✅** — the row a break orphaned joins the table it was cut from, by a geometry hint read from the page above and a mark read across the document at export (see below), with a cross-window rescue not attempted; and a gutter narrower than one em is not read as a column |
 | 7  | Academic / Research PDF (footnotes, refs, citations, equations) | 🔶→⏳ | 2-column papers classified `text` ✅ and read in column order ✅; footnote regions ✅ (see below); heading hierarchy ✅ — every heading carries a 1–6 level from a document-wide ladder (see below); equations ✅ (see #23) |
-| 8  | Business / Report PDF (reports, invoices, financial) | 🔶 | Paragraph/table extraction ✅; invoice form layout understanding ❌ |
+| 8  | Business / Report PDF (reports, invoices, financial) | 🔶→✅ | Paragraph/table extraction ✅; **invoice form layout ✅** — a row whose first cell is a *clause* (`Consulting hours, September | 12 | $85.00`) is kept whole when the page repeats its column starts (the grid reading, see below), so line items arrive as one rows×columns grid instead of one paragraph per column; metadata pairs and totals read as 2-column grids; totals are classified **cell by cell**, so `Tax (8.5%)` no longer reads as one short formula that sends the labels out untranslated, and a table of pure figures skips as `number` (source stands, no round trip spent echoing digits); residuals: the letterhead's right-aligned address is read after the left block and its pieces are kinded by size (a caption where a line of an address is), and the fixture is synthetic (`fixtures/invoice.pdf`) — no PDF from an invoicing program reviewed |
 | 9  | Forms / Structured PDF (fillable, checkboxes, signatures) | ✅ | Field detection/counted in probe ✅, password-style unlock flow ✅, **field labels translated ✅** (a widget's `/TU` and a dropdown's `/Opt` captions become `kind: 'form-field'` blocks — see below); form filling ❌ (out of scope) |
 | 10 | Presentation PDF (slides, big headings, text boxes) | ✅ | Size-spread/complexity signal ✅; per-slide text-box reading order ✅ — a wide title above two free-floating text boxes whose lines share baselines comes out title → left box → right box, each box whole, never row-by-row across both boxes (`fixtures/slide.pdf`, `pdfExtract.test.ts`) |
 | 11 | Book / Document PDF (chapters, TOC, headers/footers, page numbers, long docs) | 🔶→⏳ | Header/footer bands, page labels, running heads ✅; long-document chunked translation ✅; footnote regions ✅ |
@@ -152,7 +152,10 @@ accepts the whole-line whitespace form (what a fixture or an OCR line has) or,
 when there is none, geometry restricted to runs narrower than eight ems. Get
 that wrong in the generous direction and columns stop being cut apart, which
 costs types 3, 7 and 12; get it wrong in the strict direction and a real table
-flattens into one paragraph per column.
+flattens into one paragraph per column. A third reading exists for the one
+shape width cannot settle — a row whose first cell is a *clause* — and it is
+asked of the page rather than the line ("Why an invoice's rows are kept by
+their neighbours" below).
 
 `fixtures/table.pdf` is the end of this: two pages whose cells are each their
 own positioned show-text operator — the shape a document processor writes —
@@ -213,10 +216,13 @@ moved, the table is drawn flat: a table without its merges is still a table.
 
 Reading order is the gate in front of all of this. It cuts a line at a column
 gutter whenever a run is wider than eight ems, because that is how it tells a
-cell from a span of prose, so a merged header *past* eight ems is cut in two
-before the table detector ever sees it and the table falls back to a paragraph.
-Short merges (`Total`, `First half 2026`) reach the detector; long ones do not,
-and that is a limit of the guard rather than of the spans.
+cell from a span of prose, so a merged header *past* eight ems whose row does
+not recur beside it is cut in two before the table detector ever sees it and
+the table falls back to a paragraph. Short merges (`Total`, `First half 2026`)
+reach the detector always; a long merge reaches it when its row keeps a third
+run and the page repeats the column starts (the grid reading below); a merge
+covering all but one column of the row is still cut, and that is a limit of
+the guard rather than of the spans.
 
 ### Why a table cut by a page break stays one table
 
@@ -275,6 +281,47 @@ continuation that first appears in another window is not rescued back. And
 two tables of the same width either side of a break are indistinguishable
 from one — the join then lands, mild in every format (rows together, one
 header fewer).
+
+### Why an invoice's rows are kept by their neighbours
+
+An invoice is the one document where a *cell* is a clause. `Consulting hours,
+September | 12 | $85.00` puts thirteen ems of prose on the same baseline as two
+figures, and the eight-ems guard reads exactly what it was built to read: a
+column line crossing a gutter. The cut then lands mid-row — one paragraph per
+column, every row of the line items lost, quantities no longer paired with
+what they quantify. That was the whole of type 8's ❌: the geometry says
+"prose", the document says "table", and the line alone cannot break the tie.
+
+What the line cannot show alone, its neighbours can, and that is the third
+reading `rowSplit.ts` makes — `gridRowIds`, asked of the page rather than the
+line, because a table's columns *recur* down it and a clause's word gaps do
+not. A line enters it when it has at least two cell boundaries, at most one
+run wider than eight ems (prose in N columns carries N−1 clause spans, so a
+magazine line never reaches the recurrence test), and some other line starts
+runs at two of those boundary positions. The invoice's rows share all three
+column starts; a two-column prose line shares one gutter position, which is
+one, not a grid. Getting it wrong in the generous direction costs the column
+reading of the one page where two adjacent columns both end their paragraphs
+on one baseline with short tails — one line reads across instead of down,
+bounded and visible. `fixtures/invoice.pdf` is the fixture: letterhead,
+metadata pairs, a `Bill To:` block, line items whose first cell is a clause,
+and totals with a percentage in them.
+
+The percentage is the second half of the story. Skips used to be decided off
+the block's flattened text, and an invoice's totals — `Subtotal | Tax (8.5%) |
+Total Due` over three amounts — flattened into five words and a `%`, which
+`looksLikeFormula` correctly calls a mathematical expression: the block,
+labels and all, went out untranslated. A table is a grid of independent
+fragments, so it is now judged cell by cell (`tableDecision`): the block keeps
+its place in the model unless *every* cell would be left out anyway, and a
+table of pure figures skips as `number` — the same visible result the model
+used to produce, without the round trip that only echoed the digits back.
+
+Two residuals stay, both honest: the letterhead's right-aligned address block
+is read after the left one and its pieces are kinded by size (a caption where
+a line of an address is), so the words translate and the labels around them
+are odd; and the fixture is synthetic — no PDF an invoicing program actually
+wrote has been reviewed.
 
 ### Why a snippet's indentation has to be measured back
 

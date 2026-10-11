@@ -20,6 +20,7 @@ import { describe, expect, it } from 'vitest'
 import {
   cellBoundaries,
   cellGapThreshold,
+  gridRowIds,
   looksLikeTableRow,
   rowCells,
   tableForLines,
@@ -544,5 +545,73 @@ describe('looksLikeTableRow', () => {
 
   it('never protects a line with no runs and no cell gaps', () => {
     expect(looksLikeTableRow(plain('A sentence that just runs on.'))).toBe(false)
+  })
+})
+
+describe('gridRowIds', () => {
+  /** The invoice's line items: one clause-width cell, three figures a row. */
+  const invoiceRow = (y: number) =>
+    row(y, [
+      ['Consulting hours, September', 72, 130],
+      ['12', 300, 15],
+      ['$85.00', 370, 40],
+      ['$1,020.00', 470, 55],
+    ])
+
+  it('protects rows whose first cell is a clause, once the columns recur', () => {
+    // Width alone reads `Consulting hours, September` as prose beside a
+    // gutter — that is how an invoice lost every row to the cut. What the
+    // line cannot show alone, the page can: the same three column starts on
+    // the row above and below.
+    const ids = gridRowIds([invoiceRow(100), invoiceRow(116), invoiceRow(132)])
+    expect(ids.size).toBe(3)
+  })
+
+  it('leaves a two-run gutter line out — recurrence means nothing below two columns', () => {
+    const line = (y: number) =>
+      row(y, [
+        ['Revenue rose across the', 72, 150],
+        ['northern region last year', 330, 150],
+      ])
+    expect(gridRowIds([line(100), line(116)]).size).toBe(0)
+  })
+
+  it('leaves multi-column prose out: N columns carry N-1 wide clause spans', () => {
+    // Three columns, two of them spans — the line never reaches the
+    // recurrence test, even though its column starts repeat down the page,
+    // which is exactly the magazine fixture the reading order must keep cutting.
+    const line = (y: number) =>
+      row(y, [
+        ['Revenue rose across the northern', 72, 160],
+        ['region last year, and the board', 330, 150],
+        ['noted', 500, 35],
+      ])
+    expect(gridRowIds([line(100), line(116), line(132)]).size).toBe(0)
+  })
+
+  it('needs two shared column starts — one is the gutter prose already knows', () => {
+    // The neighbour shares only the first boundary; the second start of the
+    // candidate is incidental word spacing, not a column.
+    const candidate = row(100, [
+      ['A clause that runs wide', 72, 130],
+      ['one', 300, 20],
+      ['two', 400, 30],
+    ])
+    const neighbour = row(116, [
+      ['Another wide clause', 72, 120],
+      ['shares one start', 300, 70],
+    ])
+    expect(gridRowIds([candidate, neighbour]).size).toBe(0)
+  })
+
+  it('needs a neighbour at all: one row is not yet a grid', () => {
+    // A table with a single row may exist, but this pass cannot prove it —
+    // `tableForLines` needs two lines either way, so the line goes to the
+    // cut and its row survives only if its cells are cell-sized.
+    expect(gridRowIds([invoiceRow(100)]).size).toBe(0)
+  })
+
+  it('ignores lines without geometry — OCR and hand-built fixtures', () => {
+    expect(gridRowIds([plain('Col0  Col1  Col2'), plain('Val0  100  200')]).size).toBe(0)
   })
 })

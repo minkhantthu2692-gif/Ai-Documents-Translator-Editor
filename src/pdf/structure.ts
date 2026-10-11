@@ -14,7 +14,7 @@
  * Pure functions: the worker feeds them pdf.js output, tests feed them literals.
  */
 
-import { classifyLine, type SkipContext, type SkipRule } from './skipRules'
+import { classifyLine, type SkipContext, type SkipDecision, type SkipRule } from './skipRules'
 import { tokenizePlaceholders, type Placeholder } from './placeholders'
 import { headingLevelFor, sizeLadder } from './headings'
 import { medianFontSize, type GroupedLine, type LineStyle } from './lineGrouping'
@@ -421,6 +421,31 @@ function canMerge(
 }
 
 /**
+ * The skip decision for a table: judged cell by cell, never off the
+ * flattened text.
+ *
+ * The flattened text lies about a grid — an invoice's totals
+ * (`Subtotal | Tax (8.5%) | Total Due` over three amounts) reads as one
+ * short mathematical line and used to go out untranslated, labels and all,
+ * while a table of figures reads as a run of numbers. Each cell is its own
+ * fragment with its own fate, and the block keeps its place in the model
+ * unless *every* cell would be left out anyway; the rule recorded is the
+ * first one met, in reading order, so the log names the most specific
+ * reason.
+ */
+function tableDecision(rows: readonly string[][], ctx: SkipContext): SkipDecision {
+  let rule: SkipRule | null = null
+  for (const row of rows) {
+    for (const cell of row) {
+      const cellDecision = classifyLine(cell, ctx)
+      if (!cellDecision.skip) return { skip: false, rule: null, detail: 'translatable' }
+      rule ??= cellDecision.rule
+    }
+  }
+  return { skip: true, rule: rule ?? 'empty', detail: 'every cell skipped' }
+}
+
+/**
  * Builds ordered blocks from the lines of one page.
  */
 export function structurePage(lines: GroupedLine[], options: StructureOptions): PageBlock[] {
@@ -606,7 +631,15 @@ export function structurePage(lines: GroupedLine[], options: StructureOptions): 
     else if (sizeRatio <= 0.82 && text.replace(/\s+/g, ' ').length <= 220) kind = 'caption'
     else if (sizeRatio >= 1.05 && text.replace(/\s+/g, ' ').length <= 60) kind = 'heading'
 
-    const decision = classifyLine(text.replace(/\n/g, ' ').trim(), options.ctx ?? {})
+    // A table is a grid of independent fragments, and its flattened text
+    // lies about the block: an invoice's totals — `Subtotal | Tax (8.5%) |
+    // Total Due` over three amounts — reads as one short mathematical line
+    // and used to go out untranslated, labels and all. So a table is judged
+    // cell by cell, and only a block whose every cell would be left out
+    // anyway is left out of the model.
+    const decision = grid
+      ? tableDecision(grid.rows, options.ctx ?? {})
+      : classifyLine(text.replace(/\n/g, ' ').trim(), options.ctx ?? {})
     const placeholderResult = tokenizePlaceholders(text)
     const rawSpacing =
       open.lines.length > 1 && first.style.fontSize > 0

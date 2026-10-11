@@ -801,6 +801,28 @@ describe('structurePage tables drawn cell by cell', () => {
     expect(blocks[0].text).toBe('Region \t Q1 \t Q2\nNorth \t 120 \t 150\nSouth \t 90 \t 110')
   })
 
+  it('skips a table only when every cell would be left out anyway', () => {
+    const blocks = structurePage(
+      [
+        cellRow(612, [
+          ['120', 72, 30],
+          ['150', 260, 18],
+        ]),
+        cellRow(628, [
+          ['90', 72, 30],
+          ['110', 260, 18],
+        ]),
+      ],
+      options(),
+    )
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].kind).toBe('table')
+    // Every cell is a figure, so the block keeps out of the model — the rule
+    // recorded is the first one met, in reading order. Flattened, the same
+    // text used to read as a run of digits the model would only echo back.
+    expect(blocks[0].skipRule).toBe('number')
+  })
+
   it('keeps the paragraphs either side of a table out of it', () => {
     const blocks = structurePage(
       [

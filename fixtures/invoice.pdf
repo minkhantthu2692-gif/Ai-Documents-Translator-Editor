@@ -1,0 +1,231 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [6 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Length 2001 >>
+stream
+BT
+/F2 16 Tf
+1 0 0 1 72 742 Tm
+(Northwind Trading Co.) Tj
+ET
+BT
+/F1 9 Tf
+1 0 0 1 380 750 Tm
+(1200 Harbor Street) Tj
+ET
+BT
+/F1 9 Tf
+1 0 0 1 380 738 Tm
+(Suite 400, Bay City) Tj
+ET
+BT
+/F1 9 Tf
+1 0 0 1 380 726 Tm
+(accounts@northwind.example) Tj
+ET
+BT
+/F2 20 Tf
+1 0 0 1 72 712 Tm
+(INVOICE) Tj
+ET
+BT
+/F2 11 Tf
+1 0 0 1 72 676 Tm
+(Invoice No:) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 220 676 Tm
+(INV-2026-041) Tj
+ET
+BT
+/F2 11 Tf
+1 0 0 1 72 660 Tm
+(Invoice Date:) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 220 660 Tm
+(2026-09-14) Tj
+ET
+BT
+/F2 11 Tf
+1 0 0 1 72 644 Tm
+(Payment Terms:) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 220 644 Tm
+(Net 30) Tj
+ET
+BT
+/F2 11 Tf
+1 0 0 1 72 612 Tm
+(Bill To:) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 72 596 Tm
+(Contoso Retail Ltd.) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 72 580 Tm
+(88 River Road, Suite 12) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 72 564 Tm
+(Mandalay) Tj
+ET
+BT
+/F2 10 Tf
+1 0 0 1 72 528 Tm
+(Description) Tj
+ET
+BT
+/F2 10 Tf
+1 0 0 1 300 528 Tm
+(Qty) Tj
+ET
+BT
+/F2 10 Tf
+1 0 0 1 370 528 Tm
+(Unit Price) Tj
+ET
+BT
+/F2 10 Tf
+1 0 0 1 470 528 Tm
+(Amount) Tj
+ET
+BT
+/F1 10 Tf
+1 0 0 1 72 512 Tm
+(Consulting hours, September) Tj
+ET
+BT
+/F1 10 Tf
+1 0 0 1 300 512 Tm
+(12) Tj
+ET
+BT
+/F1 10 Tf
+1 0 0 1 370 512 Tm
+($85.00) Tj
+ET
+BT
+/F1 10 Tf
+1 0 0 1 470 512 Tm
+($1,020.00) Tj
+ET
+BT
+/F1 10 Tf
+1 0 0 1 72 496 Tm
+(Licence renewal, 10 seats) Tj
+ET
+BT
+/F1 10 Tf
+1 0 0 1 300 496 Tm
+(1) Tj
+ET
+BT
+/F1 10 Tf
+1 0 0 1 370 496 Tm
+($180.00) Tj
+ET
+BT
+/F1 10 Tf
+1 0 0 1 470 496 Tm
+($180.00) Tj
+ET
+BT
+/F1 10 Tf
+1 0 0 1 72 480 Tm
+(On-site training day) Tj
+ET
+BT
+/F1 10 Tf
+1 0 0 1 300 480 Tm
+(1) Tj
+ET
+BT
+/F1 10 Tf
+1 0 0 1 370 480 Tm
+($40.00) Tj
+ET
+BT
+/F1 10 Tf
+1 0 0 1 470 480 Tm
+($40.00) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 72 448 Tm
+(Subtotal) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 500 448 Tm
+($1,240.00) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 72 432 Tm
+(Tax \(8.5%\)) Tj
+ET
+BT
+/F1 11 Tf
+1 0 0 1 500 432 Tm
+($105.40) Tj
+ET
+BT
+/F2 11 Tf
+1 0 0 1 72 416 Tm
+(Total Due) Tj
+ET
+BT
+/F2 11 Tf
+1 0 0 1 500 416 Tm
+($1,345.40) Tj
+ET
+BT
+/F1 9 Tf
+1 0 0 1 72 376 Tm
+(Please quote the invoice number on your payment.) Tj
+ET
+
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Title (Invoice) /Author (Northwind Trading Co.) /Subject (Clause-width table cells, key-value pairs and totals) /Creator (make-fixtures.mjs) /Producer (make-fixtures.mjs) /CreationDate (D:20260115093000+06'30') /ModDate (D:20260320174500+06'30') >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000218 00000 n 
+0000000320 00000 n 
+0000002373 00000 n 
+0000002509 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R /Info 7 0 R >>
+startxref
+2777
+%%EOF

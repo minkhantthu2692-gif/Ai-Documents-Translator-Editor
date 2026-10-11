@@ -460,3 +460,58 @@ function cellSizedRuns(line: GroupedLine): boolean {
   const limit = cellGapThreshold(line.style.fontSize) * 8
   return runs.every((run) => run.w <= limit)
 }
+
+/**
+ * Lines that are rows of an aligned grid the page repeats — the third
+ * reading, and the one `looksLikeTableRow` cannot make on its own.
+ *
+ * It judges one line, and what separates a table row from a fused column
+ * line *when the row's first cell is a clause* is not the line but its
+ * neighbours: `Consulting hours, September | 12 | $85.00` is thirteen ems of
+ * prose followed by two figures, and by width alone it is prose that happens
+ * to sit beside a gutter — so the reading-order pass cut it straight down the
+ * middle and the invoice it came from lost every row to one paragraph per
+ * column. What the line cannot show alone, the page can: a table's columns
+ * *recur* down it. The two facts that pin this apart from prose are the same
+ * axis `tableForLines` already trusts at the block level:
+ *
+ *  - at most one run wider than eight ems — prose in N columns carries N-1
+ *    clause spans (a 3-column line has two wide runs and never reaches the
+ *    recurrence test), while a row carries its clauses as the *one* wide cell
+ *    and its figures as the rest;
+ *  - at least two cell boundaries whose left edges some other line also
+ *    starts runs at — a fused prose line shares its single gutter position
+ *    with its neighbours, which is one, not two.
+ *
+ * Getting it wrong in the generous direction costs the column reading of a
+ * page where two adjacent columns both end their paragraphs on one baseline
+ * with short tails — one line reads across instead of down, bounded and
+ * visible. Getting it wrong in the strict direction is the invoice above.
+ * Recurrence anywhere on the page counts, not just below: a one-row table is
+ * evidence enough for `tableForLines` to gather, and two tables that share
+ * column positions are still tables.
+ */
+export function gridRowIds(lines: readonly GroupedLine[]): Set<string> {
+  const ids = new Set<string>()
+  const measured = lines.filter((line) => (line.runs?.length ?? 0) >= 2)
+  for (const line of measured) {
+    const runs = runsInOrder(line)
+    // Two runs is the fused-column shape itself; a grid needs a third before
+    // recurrence means anything beyond the gutter the reading order already
+    // knows about.
+    if (runs.length < 3) continue
+    const limit = cellGapThreshold(line.style.fontSize) * 8
+    if (runs.filter((run) => run.w > limit).length > 1) continue
+    const boundaries = cellBoundaries(line)
+    if (boundaries.length < 2) continue
+    const tolerance = Math.max(2, line.style.fontSize * 0.5)
+    const sibling = measured.some(
+      (other) =>
+        other !== line &&
+        boundaries.filter((x) => runsInOrder(other).some((run) => Math.abs(run.x - x) <= tolerance))
+          .length >= 2,
+    )
+    if (sibling) ids.add(line.id)
+  }
+  return ids
+}

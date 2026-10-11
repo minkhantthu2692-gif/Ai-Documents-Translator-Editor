@@ -465,6 +465,30 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   LTR document. Three direction tests + one normalization test; what stays
   out of scope: bidi reordering inside a single pdf.js run, and any
   review against a real Arabic or Hebrew PDF.
+- **Phase (e) — invoice form layout (type 8, the row that said ❌ and had no
+  code behind it)**. The probe first: an invoice fixture written the way an
+  invoicing program writes one — every cell its own show-text operator —
+  driven through the real `extractPage`, and it showed the line-items table
+  shattered: `Consulting hours, September` is thirteen ems, the eight-ems
+  guard read a column line crossing a gutter, and the cut landed mid-row —
+  one paragraph per column, quantities parted from what they quantify. The
+  tie the line cannot break alone is broken by its neighbours
+  (`gridRowIds` in `rowSplit.ts`): a line with at most one clause-width run
+  and two or more cell boundaries whose left edges another line also starts
+  runs at is a row of a grid, because a table's columns recur down the page
+  and a clause's word gaps do not — prose in N columns carries N−1 clause
+  spans and never reaches the recurrence test, which is the magazine
+  fixture's protection. The totals carried a second defect: flattened,
+  `Subtotal | Tax (8.5%) | Total Due` over its amounts reads as one short
+  mathematical line, so the whole block skipped as `formula` and its labels
+  went out untranslated — a table is now judged cell by cell
+  (`tableDecision`), kept in the model unless every cell would be left out
+  anyway, and a table of pure figures skips as `number` rather than costing
+  a round trip that only echoed the digits back. Six grid tests, one
+  structure test, and `fixtures/invoice.pdf` end to end through pdf.js;
+  residuals: the letterhead's right-aligned address is kinded by size, and
+  no PDF an invoicing program actually wrote has been reviewed. Matrix 8:
+  ❌ → ✅ (with those limits).
 
 ### Security
 

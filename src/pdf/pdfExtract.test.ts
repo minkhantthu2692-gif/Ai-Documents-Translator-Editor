@@ -732,6 +732,63 @@ describe('table-continued.pdf', () => {
   })
 })
 
+describe('invoice.pdf', () => {
+  const extract = async (doc: PDFDocumentProxy, pageIndex: number) => {
+    const page = await doc.getPage(pageIndex + 1)
+    return extractPage(page, {
+      pageIndex,
+      ctx: { sourceLang: 'en', targetLang: 'my' },
+      headerTexts: [],
+      footerTexts: [],
+    })
+  }
+
+  it('keeps a clause-width line-item row whole instead of cutting it down the middle', async () => {
+    const doc = await open('invoice.pdf')
+    const { blocks } = await extract(doc, 0)
+
+    const items = blocks.find((block) => block.tableCells?.[0][0] === 'Description')
+    expect(items?.kind).toBe('table')
+    // Four columns, every row on its own line: `Consulting hours, September`
+    // is thirteen ems of prose beside a gutter, and width alone reads it as
+    // prose — only the page's repeated column starts save it from the cut.
+    expect(items?.tableCells).toEqual([
+      ['Description', 'Qty', 'Unit Price', 'Amount'],
+      ['Consulting hours, September', '12', '$85.00', '$1,020.00'],
+      ['Licence renewal, 10 seats', '1', '$180.00', '$180.00'],
+      ['On-site training day', '1', '$40.00', '$40.00'],
+    ])
+    // The rows stay translatable: nothing here is a fragment to skip.
+    expect(items?.skipRule).toBeNull()
+  })
+
+  it('pairs metadata labels with their values and translates the totals', async () => {
+    const doc = await open('invoice.pdf')
+    const { blocks } = await extract(doc, 0)
+
+    const meta = blocks.find((block) => block.tableCells?.[0][0] === 'Invoice No:')
+    expect(meta?.tableCells).toEqual([
+      ['Invoice No:', 'INV-2026-041'],
+      ['Invoice Date:', '2026-09-14'],
+      ['Payment Terms:', 'Net 30'],
+    ])
+
+    // The totals carry `Tax (8.5%)`. Flattened, that text is a five-word
+    // mathematical line and used to be classified as a formula — labels and
+    // amounts alike then went out untranslated. A table is judged cell by
+    // cell now, so the block keeps its place in the model and only the
+    // prompt protects the figures.
+    const totals = blocks.find((block) => block.tableCells?.[0][0] === 'Subtotal')
+    expect(totals?.kind).toBe('table')
+    expect(totals?.tableCells).toEqual([
+      ['Subtotal', '$1,240.00'],
+      ['Tax (8.5%)', '$105.40'],
+      ['Total Due', '$1,345.40'],
+    ])
+    expect(totals?.skipRule).toBeNull()
+  })
+})
+
 describe('continuationHintFor', () => {
   function block(order: number, extra: Partial<PageBlock> = {}): PageBlock {
     return {

@@ -489,6 +489,27 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   residuals: the letterhead's right-aligned address is kinded by size, and
   no PDF an invoicing program actually wrote has been reviewed. Matrix 8:
   ❌ → ✅ (with those limits).
+- **Hardening: the workspace’s missing test floor**. `BlockLayer`,
+  `SplitView` and `WorkspaceEditor` had no component tests, and
+  `compositePage` — the paint half of every raster export — had none
+  either. The block layer is pinned for positioning, translation-first
+  text, click and additive selection, the inline editor’s commit and
+  Escape, and its badges, with blocks seeded through the repository so
+  the layer sees exactly what the app builds; the split view for its
+  grouping, view modes, zoomed pane geometry, artwork fallback and
+  gesture routing; the editor end to end — a click reaching the store,
+  an inline edit travelling through the command stack into Dexie and
+  back out under Ctrl+Z, Ctrl+F, the zoom keys, and the session’s own
+  lifecycle on unmount. `react-virtuoso` renders its items flat in
+  these tests: its windowing is its library’s contract and jsdom has
+  no layout to measure it with. And `compositePage` now paints
+  against a fake `OffscreenCanvas` that records every call — the
+  white sheet, the background blit, one `fillText` per wrapped line,
+  right/RTL anchoring, the list marker on the first line, jpeg
+  options through to the blob, a background that will not decode, one
+  unrenderable block not taking the page with it — plus both paths of
+  `workerMeasurer` (canvas when one exists, the 0.52em estimate
+  when it does not, which is jsdom’s own). Suite: 1468/1468.
 
 ### Security
 

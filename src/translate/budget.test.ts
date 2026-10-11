@@ -139,9 +139,12 @@ describe('maxOutputForWindow', () => {
 describe('maxOutputFor', () => {
   const profile = computeBudget({ ...BASE, provider: 'openai', models: ['gpt-4o-mini'] })
 
-  it('scales with what is actually being sent', () => {
-    expect(maxOutputFor(profile, batchOf(100))).toBe(256)
-    expect(maxOutputFor(profile, batchOf(1_500))).toBe(2_400)
+  it('leaves room for reasoning before the answer', () => {
+    // gpt-oss-120b burned a 256-token single-line cap entirely on reasoning
+    // and answered with an empty body (live sweep, Oct 2026); the cap now
+    // covers thinking + translation, still clamped by the model's window.
+    expect(maxOutputFor(profile, batchOf(100))).toBe(2_208) // 100×1.6 + 2_048
+    expect(maxOutputFor(profile, batchOf(1_500))).toBe(4_096) // wanted 4_448 → clamped
   })
 
   it('stops at the model instead of a flat constant', () => {

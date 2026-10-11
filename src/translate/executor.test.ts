@@ -253,6 +253,38 @@ describe('credential failures', () => {
     expect(error.kind).toBe('unauthorized')
   })
 
+  it('a 403 walks the model chain before condemning the key', async () => {
+    const clock = { now: T0 }
+    const pool = new KeyPool({ now: () => clock.now, random: () => 0.5 })
+    pool.setKeys([seed('key-a')])
+
+    // OpenRouter 403s free models it gates to agentic harnesses while the key
+    // itself is healthy — the run must fall through to the next model instead
+    // of poisoning the only key (that bug killed a whole live run, Oct 2026).
+    const transport: BatchTransport = async (input) => {
+      if (input.model === 'model-gated') {
+        throw new ProviderError('forbidden', '403 only available on agentic harnesses', {
+          status: 403,
+        })
+      }
+      return ok('{"items":[]}')
+    }
+
+    const fallbacks: string[] = []
+    const result = await executeWithRotation(() => promptFor(['only-id']), {
+      pool,
+      models: ['model-gated', 'model-ok'],
+      transport,
+      now: () => clock.now,
+      sleep: async () => undefined,
+      hooks: { onModelFallback: (model) => fallbacks.push(model) },
+    })
+
+    expect(result.model).toBe('model-ok')
+    expect(fallbacks).toEqual(['model-ok'])
+    expect(pool.health('key-a', T0)).toBe('healthy')
+  })
+
   it('all keys invalid → throws ProviderError(unauthorized) instead of waiting', async () => {
     const clock = { now: T0 }
     const pool = new KeyPool({ now: () => clock.now, random: () => 0.5 })

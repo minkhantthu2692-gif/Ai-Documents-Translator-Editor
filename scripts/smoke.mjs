@@ -124,12 +124,22 @@ try {
   }
 
   const goto = async (path) => {
-    await send('Page.navigate', { url: BASE + path })
-    for (let i = 0; i < 120; i++) {
+    const url = BASE + path
+    await send('Page.navigate', { url })
+    for (let i = 0; i < 180; i++) {
       const state = await evalJs(
-        `JSON.stringify({ready: document.readyState, n: document.querySelector('#main-content')?.childElementCount ?? -1, text: document.querySelector('#main-content')?.innerText?.length ?? 0})`,
+        `JSON.stringify({ready: document.readyState, welcome: !!document.querySelector('[data-testid="welcome-get-started"]'), n: document.querySelector('#main-content')?.childElementCount ?? -1, text: document.querySelector('#main-content')?.innerText?.length ?? 0})`,
       )
       const parsed = typeof state === 'string' ? JSON.parse(state) : state
+      if (parsed?.welcome) {
+        // First-run welcome/setup screen takes over `/` until dismissed:
+        // click Get started (sets onboarded, persists it), then reload the
+        // originally requested path. No-op when the screen is absent.
+        await evalJs(`document.querySelector('[data-testid="welcome-get-started"]')?.click()`)
+        await sleep(400)
+        await send('Page.navigate', { url })
+        continue
+      }
       if (parsed?.ready === 'complete' && parsed.n > 0 && parsed.text > 0) {
         await sleep(200)
         return parsed
@@ -290,8 +300,21 @@ try {
       true,
     )
 
-  const dbBefore = await readDb()
+  let dbBefore = await readDb()
   check('IndexedDB database present', dbBefore?.ok === true, JSON.stringify(dbBefore))
+  // The route pass writes settings/events fire-and-forget; under heavy CPU
+  // load a single-shot read races those writes (0 rows with a healthy app —
+  // observed live). Poll briefly for the rows before judging.
+  for (
+    let attempt = 0;
+    attempt < 10 &&
+    dbBefore?.ok === true &&
+    !((dbBefore?.rows?.settings ?? 0) > 0 && (dbBefore?.rows?.events ?? 0) > 0);
+    attempt += 1
+  ) {
+    await sleep(500)
+    dbBefore = await readDb()
+  }
   check(
     'settings + events tables have rows',
     (dbBefore?.rows?.settings ?? 0) > 0 && (dbBefore?.rows?.events ?? 0) > 0,
@@ -1138,6 +1161,18 @@ try {
     ),
     `back to ${boldBefore}`,
   )
+  // The bold-toggle retry above can leave several entries on the stack when
+  // clicks land but the Dexie live query lags (load-sensitive — observed
+  // once). Drain whatever is there, bounded: the invariant under test is
+  // "undo empties the stack", not "the stack held exactly one entry".
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const drained = await waitFor(
+      `!!document.querySelector('[data-testid="undo"]') && document.querySelector('[data-testid="undo"]').disabled`,
+      3000,
+    )
+    if (drained) break
+    await clickWhenReady('[data-testid="undo"]', 3000)
+  }
   check(
     'undo stack drains back to empty',
     await waitFor(
@@ -1718,8 +1753,23 @@ try {
   }
   chrome.kill()
   await sleep(300)
-  rmSync(profile, { recursive: true, force: true })
-  rmSync(DL_DIR, { recursive: true, force: true })
+  // Chrome needs a moment to release the profile's file handles; retry the
+  // removal instead of throwing out of `finally` (an EPERM here once crashed
+  // an otherwise-passing run). A leftover temp dir warns — it never fails.
+  for (const target of [profile, DL_DIR]) {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      try {
+        rmSync(target, { recursive: true, force: true })
+        break
+      } catch (e) {
+        if (attempt === 7) {
+          console.warn(`cleanup: ${target} left behind (${e.code || e.message})`)
+        } else {
+          await sleep(500)
+        }
+      }
+    }
+  }
 }
 
 const failed = results.filter((r) => !r.pass)

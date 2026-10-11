@@ -19,6 +19,16 @@ export interface RateLimitInfo {
   /** Token ceiling / remaining for the window, when exposed. */
   tokensLimit: number | null
   tokensRemaining: number | null
+  /**
+   * Epoch ms when the **token** window resets (Groq `x-ratelimit-reset-tokens`).
+   *
+   * Deliberately kept apart from `resetAt`, which reads the *requests* family.
+   * Groq stamps both on every response and their deadlines differ wildly
+   * (requests `1h6m14.4s`, tokens `1.027s` — measured live, Oct 2026): feeding
+   * the requests deadline into the token bucket parks a healthy key for over
+   * an hour after a routine TPM 429.
+   */
+  tokensResetAt: number | null
 }
 
 export const EMPTY_RATE_LIMIT: RateLimitInfo = {
@@ -28,6 +38,7 @@ export const EMPTY_RATE_LIMIT: RateLimitInfo = {
   retryAfterMs: null,
   tokensLimit: null,
   tokensRemaining: null,
+  tokensResetAt: null,
 }
 
 export function emptyRateLimit(): RateLimitInfo {
@@ -150,6 +161,10 @@ export function parseRateLimitHeaders(headers: Headers, now: number): RateLimitI
   const tokensRemaining = number(
     header(headers, 'x-ratelimit-remaining-tokens', 'x-ratelimit-remaining-tpm'),
   )
+  const tokensResetAt = parseResetAt(
+    header(headers, 'x-ratelimit-reset-tokens', 'x-ratelimit-reset-tpm'),
+    now,
+  )
 
   return {
     limit,
@@ -158,6 +173,7 @@ export function parseRateLimitHeaders(headers: Headers, now: number): RateLimitI
     retryAfterMs: retryAfter,
     tokensLimit,
     tokensRemaining,
+    tokensResetAt,
   }
 }
 
@@ -170,5 +186,6 @@ export function mergeRateLimit(a: RateLimitInfo, b: RateLimitInfo): RateLimitInf
     retryAfterMs: a.retryAfterMs ?? b.retryAfterMs,
     tokensLimit: a.tokensLimit ?? b.tokensLimit,
     tokensRemaining: a.tokensRemaining ?? b.tokensRemaining,
+    tokensResetAt: a.tokensResetAt ?? b.tokensResetAt,
   }
 }

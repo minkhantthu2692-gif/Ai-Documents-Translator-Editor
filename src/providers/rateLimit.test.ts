@@ -129,7 +129,28 @@ describe('parseRateLimitHeaders', () => {
       retryAfterMs: null,
       tokensLimit: 100_000,
       tokensRemaining: 99_500,
+      tokensResetAt: null,
     })
+  })
+
+  it("keeps Groq's requests and token windows apart (live header shape)", () => {
+    const parsed = parseRateLimitHeaders(
+      headers({
+        'x-ratelimit-limit-requests': '1000',
+        'x-ratelimit-remaining-requests': '954',
+        'x-ratelimit-reset-requests': '1h6m14.4s',
+        'x-ratelimit-limit-tokens': '8000',
+        'x-ratelimit-remaining-tokens': '7863',
+        'x-ratelimit-reset-tokens': '1.027s',
+      }),
+      NOW,
+    )
+    // The requests window is over an hour away; the token window resets in
+    // ~1s. Conflating them parked healthy keys for the hour (live, Oct 2026).
+    expect(parsed.resetAt).toBe(NOW + (3974 * 1000 + 400))
+    expect(parsed.tokensResetAt).toBe(NOW + 1_027)
+    expect(parsed.tokensLimit).toBe(8_000)
+    expect(parsed.tokensRemaining).toBe(7_863)
   })
 
   it('parses the unsuffixed x-ratelimit and google x-rate-limit spellings', () => {
@@ -202,6 +223,7 @@ describe('mergeRateLimit', () => {
       retryAfterMs: null,
       tokensLimit: 40_000,
       tokensRemaining: 900,
+      tokensResetAt: null,
     })
   })
 

@@ -200,11 +200,67 @@ describe('reportRateLimit', () => {
         retryAfterMs: null,
         tokensLimit: null,
         tokensRemaining: null,
+        tokensResetAt: null,
       },
       now: T0,
     })
 
     expect(deadline).toBe(T0 + 10 * MINUTE)
+  })
+
+  it('paces the token bucket by the token reset, not the requests reset', () => {
+    const { pool } = harness()
+    pool.setKeys([seed('key-a')])
+
+    // Groq's live header set: the requests window resets in ~66 minutes while
+    // the token window resets in ~1s. Once real usage crosses the TPM ceiling,
+    // the key must be usable again after the *token* window — not an hour.
+    pool.reportSuccess('key-a', {
+      tokensIn: 100,
+      tokensOut: 400,
+      rate: {
+        limit: 1000,
+        remaining: 954,
+        resetAt: T0 + 3_974_400,
+        retryAfterMs: null,
+        tokensLimit: 8_000,
+        tokensRemaining: 6_500,
+        tokensResetAt: T0 + 1_027,
+      },
+      now: T0,
+    })
+
+    // 6500 used → a 7000-token batch does not fit this minute…
+    expect(pool.pick(7_000, T0)).toBeNull()
+    expect(pool.availableAt(7_000, T0)).toBe(T0 + 1_027)
+    // …and fits as soon as the token window rolls.
+    expect(pool.pick(7_000, T0 + 1_027)?.keyId).toBe('key-a')
+  })
+
+  it('a server token-window deadline caps an over-grown backoff', () => {
+    const { pool } = harness()
+    pool.setKeys([seed('key-a')])
+
+    // A streak of 429s grows the exponential backoff into the minutes…
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      pool.reportRateLimit('key-a', { now: T0 + attempt * 10 })
+    }
+    // …but the server's token window (live Groq headers: ~1s) says the tokens
+    // reset far sooner; without the cap a healthy key sat idle for minutes.
+    const deadline = pool.reportRateLimit('key-a', {
+      now: T0 + 100,
+      rate: {
+        limit: 1000,
+        remaining: 900,
+        resetAt: T0 + 3_974_400,
+        retryAfterMs: null,
+        tokensLimit: 8_000,
+        tokensRemaining: 0,
+        tokensResetAt: T0 + 1_127,
+      },
+    })
+
+    expect(deadline).toBe(T0 + 100 + 1_027)
   })
 })
 

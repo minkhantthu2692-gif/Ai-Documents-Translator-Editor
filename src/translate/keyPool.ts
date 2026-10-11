@@ -494,7 +494,18 @@ export class KeyPool {
     // ±25% jitter so parallel workers do not stampede back onto the key.
     const jitter = 0.75 + this.randomFn() * 0.5
     cooldown = Math.round(cooldown * jitter)
+    // The server's own deadlines beat our guess, in order of authority:
+    //  1. `Retry-After` — an explicit mandate, never shortened;
+    //  2. the token-window reset — Groq stamps `x-ratelimit-reset-tokens`
+    //     (~1s) even while a streak of 429s inflates our backoff into the
+    //     minutes; the token bucket, not the backoff, paces the retry, so the
+    //     window deadline caps the guess (floor 1s so a deadline already past
+    //     cannot become a hot loop);
+    //  3. the requests-window reset — only for a quota, whose window is the day.
     if (retryAfter !== null && retryAfter > 0) cooldown = Math.max(cooldown, retryAfter)
+    else if (!quota && rate?.tokensResetAt) {
+      cooldown = Math.min(cooldown, Math.max(rate.tokensResetAt - now, 1_000))
+    }
     if (quota && rate?.resetAt) cooldown = Math.max(cooldown, rate.resetAt - now)
 
     key.cooldownUntil = now + cooldown
@@ -564,7 +575,10 @@ export class KeyPool {
       key.buckets.rpm.resetAt = window
     }
     if (rate.tokensRemaining !== null && rate.tokensLimit !== null) {
-      const window = Math.max(rate.resetAt ?? now + MINUTE_MS, now)
+      // The token window carries its own reset header; the requests reset
+      // (Groq stamps ~1h on every response) must never pace the token bucket —
+      // doing so parked a healthy key for over an hour after a routine TPM 429.
+      const window = Math.max(rate.tokensResetAt ?? now + MINUTE_MS, now)
       key.buckets.tpm.used = Math.max(0, rate.tokensLimit - rate.tokensRemaining)
       key.buckets.tpm.resetAt = window
     }

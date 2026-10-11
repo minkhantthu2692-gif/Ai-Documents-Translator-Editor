@@ -205,6 +205,11 @@ export async function runBatch(
       user,
       temperature: temperatureFor(options.quality),
       maxOutputTokens: maxOutputFor(budget, target),
+      // Keep the think bounded: reasoning tokens share the completion cap, and
+      // an unbounded medium-effort pass starved gpt-oss answers entirely
+      // (empty bodies at every ladder rung, live sweep Oct 2026). Basic and
+      // medium quality translate fine with a low-effort pass; High keeps more.
+      reasoningEffort: options.quality === 'high' ? 'medium' : 'low',
     }
     const outcome = await executeWithRotation(() => call, {
       pool: options.pool,
@@ -349,6 +354,7 @@ export async function runBatch(
         }),
         temperature: temperatureFor(options.quality),
         maxOutputTokens: maxOutputFor(budget, batch),
+        reasoningEffort: options.quality === 'high' ? 'medium' : 'low',
       }
       const outcome = await executeWithRotation(() => reviewCall, {
         pool: options.pool,

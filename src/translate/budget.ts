@@ -146,9 +146,21 @@ export function computeBudget(input: BudgetInput): BudgetProfile {
 /**
  * Completion cap for one batch: proportional to what is actually being sent,
  * clamped by the model instead of by a flat 4000.
+ *
+ * The allowance covers the model's *thinking* as well as its answer: reasoning
+ * models (gpt-oss-120b on Groq, the nvidia free routes on OpenRouter) spend
+ * completion tokens on reasoning before a single answer token exists. With the
+ * old proportional floor, a single-line ladder rung asked for 256 tokens — the
+ * model burned all 256 reasoning and answered with an empty body, validation
+ * saw `empty` at every rung, the ladder gave up, and 60 of 64 live-translated
+ * lines kept their English source (live sweep, Oct 2026). A non-reasoning
+ * model simply stops at EOS and never spends the allowance, so the extra room
+ * costs nothing on models that do not think.
  */
+export const REASONING_HEADROOM_TOKENS = 2_048
+
 export function maxOutputFor(profile: BudgetProfile, batch: TranslationBatch): number {
-  const wanted = Math.round(batch.tokens * OUTPUT_RATIO)
+  const wanted = Math.round(batch.tokens * OUTPUT_RATIO) + REASONING_HEADROOM_TOKENS
   return Math.min(profile.maxOutputTokens, Math.max(256, wanted))
 }
 

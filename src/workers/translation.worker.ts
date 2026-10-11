@@ -32,9 +32,8 @@ import type {
   WaitingReason,
 } from '@/translate/protocol'
 import { resetTokenScale } from '@/translate/tokenEstimate'
+import { reasonFor } from '@/translate/reasons'
 import { getAdapter } from '@/providers'
-import { ProviderError } from '@/providers/types'
-import type { ReasonCode } from '@/core/reasonCodes'
 
 const scope = self as unknown as DedicatedWorkerGlobalScope
 
@@ -52,41 +51,6 @@ function poolStates(): PersistedKeyState[] {
 
 function isAbort(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError'
-}
-
-/** Maps a terminal failure onto the reason code the Status Panel explains. */
-function reasonFor(error: unknown): { reasonCode: ReasonCode; message: string } {
-  if (error instanceof ProviderError) {
-    const message = error.message
-    switch (error.kind) {
-      case 'unauthorized':
-        return {
-          reasonCode: /no api key/i.test(message) ? 'NO_API_KEY' : 'INVALID_KEY',
-          message,
-        }
-      case 'forbidden':
-        return { reasonCode: 'INVALID_KEY', message }
-      case 'quota':
-        return { reasonCode: 'QUOTA_EXHAUSTED', message }
-      case 'rate_limit':
-        return { reasonCode: 'ALL_KEYS_COOLING_DOWN', message }
-      case 'server':
-        return { reasonCode: 'ALL_KEYS_COOLING_DOWN', message }
-      case 'network':
-      case 'timeout':
-        return { reasonCode: 'NETWORK_OFFLINE', message }
-      case 'model_missing':
-        return { reasonCode: 'MODEL_UNAVAILABLE', message }
-      case 'bad_request':
-      case 'unknown':
-      default:
-        return { reasonCode: 'BAD_JSON_RESPONSE', message }
-    }
-  }
-  return {
-    reasonCode: 'BAD_JSON_RESPONSE',
-    message: error instanceof Error ? error.message : String(error),
-  }
 }
 
 async function seedFromRow(

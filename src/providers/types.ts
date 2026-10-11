@@ -24,6 +24,16 @@ export interface TranslateCall {
   temperature: number
   /** Upper bound for the completion (protects the free tier). */
   maxOutputTokens?: number
+  /**
+   * How hard the model may think before answering — forwarded only to models
+   * flagged `reasoning` in the model registry (the adapter filters the rest,
+   * because providers 400 on unknown parameters: Groq rejects a bare
+   * `reasoning` property, live-checked Oct 2026). Reasoning tokens share the
+   * completion cap, so an unbounded think can starve the answer entirely —
+   * gpt-oss-120b spent 3042 tokens reasoning with no content left (live
+   * sweep, Oct 2026).
+   */
+  reasoningEffort?: 'low' | 'medium' | 'high'
 }
 
 export interface TranslateResult {

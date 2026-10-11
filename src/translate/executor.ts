@@ -191,7 +191,21 @@ export async function executeWithRotation(
 
         switch (providerError.kind) {
           case 'unauthorized':
+            // 401 = the provider did not accept the credential: a dead key.
+            pool.markInvalid(lease.keyId, providerError.message, now())
+            break
           case 'forbidden':
+            // 403 = "authenticated but denied", and providers also use it for
+            // *model*-level gates (OpenRouter restricts some free models to
+            // agentic harnesses) where the key itself is fine. Live evidence
+            // (Oct 2026): poisoning the key on a gated model's 403 killed a
+            // whole run with healthy keys. Walk the chain first, like 404, and
+            // only condemn the key once every model was refused.
+            if (modelIndex < models.length - 1) {
+              modelIndex += 1
+              hooks.onModelFallback?.(models[modelIndex])
+              break
+            }
             pool.markInvalid(lease.keyId, providerError.message, now())
             break
           case 'rate_limit':

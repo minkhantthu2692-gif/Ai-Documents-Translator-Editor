@@ -10,7 +10,7 @@
  * URL, and every error string passes through `redactSecret` first.
  */
 
-import type { ProviderId, ProviderMeta } from '@/config/models.config'
+import { modelSpec, type ProviderId, type ProviderMeta } from '@/config/models.config'
 import { DEFAULT_TIMEOUT_MS, requestJson, textFromChatBody, usageOf } from './http'
 import { emptyRateLimit, parseRateLimitHeaders, type RateLimitInfo } from './rateLimit'
 import {
@@ -31,6 +31,22 @@ export interface OpenAiCompatConfig {
   extraHeaders?: (baseUrl: string) => Record<string, string>
   /** Provider-specific interpretation of the `/models` payload. */
   parseModels: (body: unknown, baseUrl: string) => DiscoveredModel[]
+  /**
+   * Authenticated endpoint hit before `/models` to prove the key works.
+   *
+   * OpenRouter answers `GET /models` without any credential, so that call
+   * alone blesses revoked keys ("ok, 458 models" for a dead key — observed
+   * live, Oct 2026); its `GET /auth/key` requires the key and costs nothing.
+   * Groq/OpenAI already authenticate `/models`, so they need no probe.
+   */
+  authProbePath?: string
+  /**
+   * How this provider spells a reasoning-effort knob: `reasoning_effort`
+   * (Groq — verified live 11 Oct 2026) or the OpenRouter-style
+   * `reasoning: {effort}` (OpenRouter normalises unsupported parameters per
+   * route). Absent = the provider takes no effort parameter.
+   */
+  reasoningShape?: 'effort' | 'object'
 }
 
 function trimSlash(value: string): string {
@@ -149,6 +165,19 @@ export function createOpenAiCompatAdapter(config: OpenAiCompatConfig): ProviderA
     ): Promise<TranslateResult> {
       const base = baseUrlFor(config, options)
       const extra = config.extraHeaders?.(base) ?? {}
+      // The effort knob goes only to models flagged `reasoning` in the
+      // registry — providers 400 on unknown parameters (Groq rejects a bare
+      // `reasoning` property, live-checked Oct 2026), so the registry decides,
+      // never a guess. OpenRouter takes the object form and normalises it per
+      // route; Groq takes the flat `reasoning_effort`.
+      const effort = modelSpec(config.id, call.model)?.reasoning ? call.reasoningEffort : undefined
+      const reasoningField =
+        effort === undefined
+          ? {}
+          : config.reasoningShape === 'object'
+            ? { reasoning: { effort } }
+            : { reasoning_effort: effort }
+
       const response = await requestJson(`${base}/chat/completions`, {
         method: 'POST',
         headers: authHeaders(key, extra),
@@ -160,6 +189,7 @@ export function createOpenAiCompatAdapter(config: OpenAiCompatConfig): ProviderA
           ],
           temperature: call.temperature,
           ...(call.maxOutputTokens ? { max_tokens: call.maxOutputTokens } : {}),
+          ...reasoningField,
           stream: false,
         },
         signal: options.signal,
@@ -193,12 +223,26 @@ export function createOpenAiCompatAdapter(config: OpenAiCompatConfig): ProviderA
     async testKey(key: string, options: AdapterOptions = {}): Promise<TestKeyResult> {
       const started = Date.now()
       try {
+        // Prove the *credential* first when the model list is public (see
+        // `authProbePath`); a 401 here fails fast through `testFailure`.
+        let probed = ''
+        if (config.authProbePath) {
+          const base = baseUrlFor(config, options)
+          await requestJson(`${base}${config.authProbePath}`, {
+            method: 'GET',
+            headers: authHeaders(key, config.extraHeaders?.(base) ?? {}),
+            signal: options.signal,
+            timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+            secrets: [key],
+          })
+          probed = `GET ${config.authProbePath} → 200 · `
+        }
         const models = await this.listModels(key, options)
         return {
           ok: true,
           kind: 'ok',
           latencyMs: Date.now() - started,
-          detail: `GET /models → ${models.length} models`,
+          detail: `${probed}GET /models → ${models.length} models`,
           rate: emptyRateLimit(),
           modelsAvailable: models.length,
         }
@@ -251,6 +295,8 @@ export function adapterConfigFor(meta: ProviderMeta): OpenAiCompatConfig {
       label: meta.label,
       defaultBaseUrl: meta.baseUrl,
       parseModels: (body) => modelsFromOpenRouter(body),
+      authProbePath: '/auth/key',
+      reasoningShape: 'object',
     }
   }
   if (meta.id === 'groq') {
@@ -259,6 +305,7 @@ export function adapterConfigFor(meta: ProviderMeta): OpenAiCompatConfig {
       label: meta.label,
       defaultBaseUrl: meta.baseUrl,
       parseModels: (body, base) => modelsFromGroq(body, base),
+      reasoningShape: 'effort',
     }
   }
   return {

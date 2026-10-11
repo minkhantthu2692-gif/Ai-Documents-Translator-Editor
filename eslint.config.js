@@ -65,4 +65,11 @@ export default tseslint.config(
       'no-restricted-globals': 'off',
     },
   },
+  {
+    // The live verify harness's stdout report is its deliverable.
+    files: ['src/verify/**/*.test.ts'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
 )

@@ -67,6 +67,17 @@ export interface ModelSpec {
   recommendedForPdf?: boolean
   /** Bundled fallback entry — availability is checked at runtime. */
   verifyAvailability?: boolean
+  /**
+   * The model reasons before it answers and honours an effort knob —
+   * `reasoning_effort` on Groq (live-checked 11 Oct 2026: gpt-oss-120b/20b
+   * and qwen3.8-27b answer 200 with `low`), `reasoning: {effort}` on
+   * OpenRouter. Only flagged models receive the parameter: Groq 400s on an
+   * unknown `reasoning` property, so guessing per request is not an option.
+   * Unbounded thinking is what starved the answer — reasoning tokens share
+   * the completion cap, and gpt-oss spent 3042 of them with no content left
+   * (live sweep, Oct 2026).
+   */
+  reasoning?: boolean
   notes?: string
 }
 
@@ -271,7 +282,8 @@ export const MODELS: ModelSpec[] = [
   /* Groq                                                                */
   /* ------------------------------------------------------------------ */
   /* Groq's free plan (checked Oct 2026): gpt-oss-120b / gpt-oss-20b /
-   * qwen3.6-27b / qwen3.8-27b only — 30 RPM,1K RPD,8K TPM,200K TPD.
+   * qwen3.6-27b / qwen3.8-27b only — 30 RPM,1K RPD,8K TPM,200K TPD
+   * (qwen3.6-27b answered 404 on 11 Oct 2026 and left the chain).
    * Llama 3.1/3.3 left the free + Developer tiers on16 Aug2026 and
    * Llama4 Scout / Qwen3-32B were shut down in Jul2026 (enterprise-only
    * now), so they answer404 and must not appear in the chain. */
@@ -290,6 +302,7 @@ export const MODELS: ModelSpec[] = [
     qualityTier: 'premium',
     free: true,
     recommendedForPdf: true,
+    reasoning: true,
     notes: 'Groq free-tier flagship — best free translation quality on Groq.',
   },
   {
@@ -304,6 +317,7 @@ export const MODELS: ModelSpec[] = [
     quotaScope: 'per-provider',
     qualityTier: 'basic',
     free: true,
+    reasoning: true,
     notes: 'Fastest free option — half the token cost of120B.',
   },
   {
@@ -319,7 +333,8 @@ export const MODELS: ModelSpec[] = [
     qualityTier: 'standard',
     free: true,
     verifyAvailability: true,
-    notes: 'Preview model on the free tier — Groq retires previews at short notice.',
+    notes:
+      'Preview model — answered 404 on 11 Oct 2026 (Groq retires previews at short notice); kept out of the fallback chain.',
   },
   {
     id: 'qwen/qwen3.8-27b',
@@ -334,6 +349,7 @@ export const MODELS: ModelSpec[] = [
     qualityTier: 'standard',
     free: true,
     verifyAvailability: true,
+    reasoning: true,
     notes: 'Newer preview sibling — same free-tier limits as Qwen3.6.',
   },
 
@@ -371,6 +387,7 @@ export const MODELS: ModelSpec[] = [
     qualityTier: 'premium',
     free: true,
     verifyAvailability: true,
+    reasoning: true,
     notes: 'Very large MoE on the free pool — 1M context.',
   },
   {
@@ -386,6 +403,7 @@ export const MODELS: ModelSpec[] = [
     free: true,
     recommendedForPdf: true,
     verifyAvailability: true,
+    reasoning: true,
     notes: 'Balanced size and speed on the free pool.',
   },
   {
@@ -414,6 +432,7 @@ export const MODELS: ModelSpec[] = [
     qualityTier: 'standard',
     free: true,
     verifyAvailability: true,
+    reasoning: true,
     notes: 'Speed-optimised free route with 1M context.',
   },
   {
@@ -526,13 +545,17 @@ export const FALLBACK_CHAINS: Record<ProviderId, string[]> = {
     'gemini-2.0-flash',
     'gemma-3-27b-it',
   ],
-  groq: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.6-27b', 'qwen/qwen3.8-27b'],
+  groq: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'],
+  // `thinkingmachines/inkling:free` used to lead this chain; OpenRouter gates
+  // it to agentic harnesses (403 for any other app), so the nvidia routes that
+  // answered 200 on a live probe lead instead. The gemma entries stay last:
+  // their free pool rate-limits upstream sometimes, which the 429 path rides
+  // out.
   openrouter: [
-    'thinkingmachines/inkling:free',
     'nvidia/nemotron-3-super-120b-a12b:free',
     'nvidia/nemotron-3-ultra-550b-a55b:free',
-    'google/gemma-4-31b-it:free',
     'nvidia/nemotron-3.5-lightning:free',
+    'google/gemma-4-31b-it:free',
     'google/gemma-4-26b-a4b-it:free',
   ],
   openai: ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4.1', 'gpt-4-turbo', 'gpt-3.5-turbo'],

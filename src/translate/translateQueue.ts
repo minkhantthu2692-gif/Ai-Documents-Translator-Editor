@@ -227,17 +227,6 @@ export async function buildTranslatePlan(
   epoch: number,
   glossary?: GlossarySpec[],
 ): Promise<TranslatePlan> {
-  // Assistant / settings can lower the batch size (rate limits, quota) — the
-  // value lives in `translate.batchMaxLines` and is clamped to a sane range.
-  const storedMaxLines = await settingsRepo.get<number>(
-    SETTING_KEYS.batchMaxLines,
-    BATCH_DEFAULTS.maxLines,
-  )
-  const maxLines =
-    typeof storedMaxLines === 'number' && Number.isFinite(storedMaxLines) && storedMaxLines >= 1
-      ? Math.floor(storedMaxLines)
-      : BATCH_DEFAULTS.maxLines
-
   // How much content one request may carry, taken from the *model* instead of
   // a flat constant. The narrowest window in the fallback chain wins, so a
   // batch can never outgrow a model that may end up serving it.
@@ -250,6 +239,22 @@ export async function buildTranslatePlan(
     terminologyScope: config.terminologyScope,
     glossary: glossary ?? (await loadGlossary(projectId)),
   })
+
+  // Assistant / settings can lower the batch size (rate limits, quota) — the
+  // value lives in `translate.batchMaxLines`. It is a ceiling the user may pull
+  // *down*, never a licence to exceed the model: the run batches to the
+  // narrower of the two, so a stored value from a much smaller-context era can
+  // never ask for more than the completion could return.
+  const storedMaxLines = await settingsRepo.get<number>(
+    SETTING_KEYS.batchMaxLines,
+    BATCH_DEFAULTS.maxLines,
+  )
+  const maxLines = Math.min(
+    typeof storedMaxLines === 'number' && Number.isFinite(storedMaxLines) && storedMaxLines >= 1
+      ? Math.floor(storedMaxLines)
+      : BATCH_DEFAULTS.maxLines,
+    budget.maxLines,
+  )
 
   const pages = (await pageRepo.listByProject(projectId)).sort((a, b) => a.index - b.index)
   const blocks = await blockRepo.listByProject(projectId)
@@ -1117,10 +1122,17 @@ export async function restoreTranslate(projectId: string, resume = true): Promis
   // after an explicit cancel never restarts the API spend by itself.
   if (!snapshot || snapshot.phase === 'done') return 0
 
+  // A live queue knows the real phase; the persisted snapshot is written when a
+  // batch settles and can therefore lag an explicit cancel by a few
+  // milliseconds. Trusting it handed a cancelled run its auto-start back — the
+  // run quietly resumed spending quota the user had just stopped. The
+  // snapshot's phase is what a cold start has, and all it is good for.
+  const phase = queue && active?.projectId === projectId ? queue.phase : snapshot.phase
+
   try {
     const outcome = await startTranslate(projectId, config, {
-      autoStart: resume && snapshot.phase === 'running',
-      forcedPhase: snapshot.phase === 'paused' ? 'paused' : null,
+      autoStart: resume && phase === 'running',
+      forcedPhase: phase === 'paused' ? 'paused' : null,
     })
     return outcome.pending
   } catch (error) {

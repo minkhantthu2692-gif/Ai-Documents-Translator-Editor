@@ -6,8 +6,9 @@
  * costs tokens), so it is worth pinning exactly what leaves the machine.
  */
 import { describe, expect, it } from 'vitest'
-import { GLOSSARY_CAP, systemPrompt, userPrompt } from './prompts'
-import type { BatchLine, PromptContext, TranslationBatch } from './types'
+import { GLOSSARY_CAP, selectGlossary, systemPrompt, userPrompt } from './prompts'
+import { estimateTokens } from './tokenEstimate'
+import type { BatchLine, GlossarySpec, PromptContext, TranslationBatch } from './types'
 
 function batch(texts: string[]): TranslationBatch {
   const lines: BatchLine[] = texts.map((text, index) => ({
@@ -119,5 +120,113 @@ describe('systemPrompt', () => {
     expect(prompt).toContain('- "term0" = "t0"')
     expect(prompt).toContain(`- "term${GLOSSARY_CAP - 1}" = "t${GLOSSARY_CAP - 1}"`)
     expect(prompt).not.toContain(`- "term${GLOSSARY_CAP}"`)
+  })
+})
+
+/**
+ * Which glossary terms travel with a batch.
+ *
+ * This is the largest single lever on how much a free-tier key can translate:
+ * the glossary is re-sent on every request, so sending the whole document
+ * glossary to every batch was spending ~3,000 tokens per request on terms the
+ * batch never contained.
+ */
+describe('selectGlossary', () => {
+  const term = (index: number): GlossarySpec => ({
+    sourceTerm: `alpha${index}`,
+    targetTerm: `အေလဗာ${index}`,
+    caseSensitive: false,
+  })
+
+  function many(count: number): GlossarySpec[] {
+    return Array.from({ length: count }, (_, index) => term(index))
+  }
+
+  it('sends a small glossary whole — filtering it would risk a term for no saving', () => {
+    const glossary = [term(0), term(1)]
+
+    expect(selectGlossary(glossary, 'nothing relevant here')).toEqual(glossary)
+  })
+
+  it('cuts a large glossary down to the terms the batch actually contains', () => {
+    const glossary = many(120)
+    const kept = selectGlossary(glossary, 'Etching uses alpha7 as a mask.')
+
+    expect(kept.map((entry) => entry.sourceTerm)).toEqual(['alpha7'])
+  })
+
+  it('returns the survivors in document order, however the batch orders them', () => {
+    const glossary = many(120)
+    const kept = selectGlossary(glossary, 'alpha5 and alpha3 and alpha9 appear here.')
+
+    expect(kept.map((entry) => entry.sourceTerm)).toEqual(['alpha3', 'alpha5', 'alpha9'])
+  })
+
+  it('matches case-insensitively and through inflected forms', () => {
+    const glossary = many(120)
+    const kept = selectGlossary(glossary, 'The ALPHA11 mask; alpha12s were etched.')
+
+    expect(kept.map((entry) => entry.sourceTerm)).toEqual(['alpha11', 'alpha12'])
+  })
+
+  it('does not mistake a shorter term for a prefix of a longer one', () => {
+    const glossary = many(120)
+    const kept = selectGlossary(glossary, 'Only alpha11 appears in this line.')
+
+    // `alpha1` is a substring of `alpha11`; keeping it would mean a full
+    // glossary matches every batch and the filter saves nothing.
+    expect(kept.map((entry) => entry.sourceTerm)).toEqual(['alpha11'])
+  })
+
+  it('tests terms in a script written without spaces by substring alone', () => {
+    const stem = 'စကားလုံး'
+    const before = '၎င်း'
+    const after = 'ကို သုံးသည်'
+    const burmese: GlossarySpec[] = many(120).map((entry, index) => ({
+      sourceTerm: `${stem}${index}`,
+      targetTerm: entry.targetTerm,
+      caseSensitive: false,
+    }))
+    // Burmese has no word spaces, so a boundary test would reject every term.
+    const kept = selectGlossary(burmese, `${before}${stem}7${after}`)
+
+    expect(kept.map((entry) => entry.sourceTerm)).toEqual([`${stem}7`])
+  })
+  it('drops everything when the batch names no term', () => {
+    expect(selectGlossary(many(120), 'A page about something else entirely.')).toEqual([])
+  })
+
+  it('honours the token ceiling instead of sending every match', () => {
+    const glossary = many(120)
+    const text = Array.from({ length: 40 }, (_, index) => `alpha${index}`).join(' ')
+
+    const kept = selectGlossary(glossary, text, 60)
+
+    expect(kept.length).toBeGreaterThan(0)
+    expect(kept.length).toBeLessThan(40)
+  })
+
+  it('saves most of the prompt once a real glossary exists', () => {
+    const glossary = many(200)
+    const whole = estimateTokens(
+      systemPrompt({
+        sourceLang: 'English',
+        targetLang: 'Myanmar',
+        quality: 'medium',
+        terminologyScope: 'document',
+        glossary,
+      }),
+    )
+    const trimmed = estimateTokens(
+      systemPrompt({
+        sourceLang: 'English',
+        targetLang: 'Myanmar',
+        quality: 'medium',
+        terminologyScope: 'document',
+        glossary: selectGlossary(glossary, 'Only alpha3 matters here.'),
+      }),
+    )
+
+    expect(trimmed).toBeLessThan(whole / 3)
   })
 })

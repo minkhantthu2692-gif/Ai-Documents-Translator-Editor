@@ -31,6 +31,7 @@ import {
   qualitySpec,
   REPAIR_SUFFIX,
   reviewPrompt,
+  selectGlossary,
   systemPrompt,
   temperatureFor,
   userPrompt,
@@ -167,11 +168,15 @@ export async function runBatch(
   }
 
   const spec = qualitySpec(options.quality)
+  // Only the glossary terms this batch can actually contain: sending the whole
+  // document glossary on every request was the largest per-request cost, and
+  // free tiers meter tokens per day.
+  const batchText = batch.lines.map((line) => line.text).join('\n')
   const system = systemPrompt({
     quality: options.quality,
     sourceLang: options.sourceLang,
     targetLang: options.targetLang,
-    glossary: options.glossary,
+    glossary: selectGlossary(options.glossary, batchText),
     terminologyScope: options.terminologyScope,
   })
   const budget =
@@ -350,7 +355,7 @@ export async function runBatch(
         user: reviewPrompt(batch, draft, {
           sourceLang: options.sourceLang,
           targetLang: options.targetLang,
-          glossary: options.glossary,
+          glossary: selectGlossary(options.glossary, batchText),
         }),
         temperature: temperatureFor(options.quality),
         maxOutputTokens: maxOutputFor(budget, batch),

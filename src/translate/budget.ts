@@ -47,6 +47,19 @@ export const USER_PROMPT_OVERHEAD_TOKENS = 256
  * of the review request silently overflowing.
  */
 export const REVIEW_COST_MULTIPLIER = 2.05
+/**
+ * Tokens the completion must hold besides the answer.
+ *
+ * Reasoning models (gpt-oss-120b on Groq, the nvidia free routes on
+ * OpenRouter) spend completion tokens thinking before a single answer token
+ * exists. With too little headroom a one-line rung asked for 256 tokens, the
+ * model burned all 256 reasoning and answered with an empty body, validation
+ * saw `empty` at every rung, the ladder gave up, and 60 of 64 live-translated
+ * lines kept their English source (live sweep, Oct 2026). A non-reasoning
+ * model simply stops at EOS and never spends the allowance, so the room costs
+ * nothing on models that do not think.
+ */
+export const REASONING_HEADROOM_TOKENS = 2_048
 /** Assumed tokens per visual line — only used to bound the line-count guard. */
 export const AVG_LINE_TOKENS = 60
 
@@ -86,25 +99,42 @@ function isWindow(value: unknown): value is number {
 }
 
 /**
- * Completion cap derived from the window: a large share of it, but never more
- * than the model could possibly hold alongside the prompt and a minimal body.
+ * Completion cap for a model with this window.
+ *
+ * The flat 4k cap was the biggest single lever against the whole pipeline: the
+ * content budget is derived from it, so on a 1M-window model it reduced a
+ * window of a million tokens to about 1,280 usable source tokens per request —
+ * a handful of lines at a time, and (before the budget was tied to the cap at
+ * all) batches far larger than any completion could return.
+ *
+ * A model that accepts a very large window also allows a large completion, so
+ * the cap now scales with the window. The steps are deliberately conservative:
+ * a provider that clamps our request costs nothing, one that rejects it fails
+ * the batch, so nothing is asked for that a model with that window could not
+ * plausibly return. `ModelSpec.maxOutputTokens` overrides the derivation for a
+ * model whose real cap is known.
  */
+export const MEDIUM_CONTEXT_WINDOW = 60_000
+export const MEDIUM_MAX_OUTPUT = 8_192
+export const WIDE_CONTEXT_WINDOW = 200_000
+export const WIDE_MAX_OUTPUT = 16_384
+
 export function maxOutputForWindow(contextWindow: number): number {
-  return Math.max(
-    256,
-    Math.min(
-      DEFAULT_MAX_OUTPUT,
-      Math.round(contextWindow * 0.4),
-      contextWindow - MIN_CONTENT_BUDGET,
-    ),
-  )
+  const derived =
+    contextWindow >= WIDE_CONTEXT_WINDOW
+      ? WIDE_MAX_OUTPUT
+      : contextWindow >= MEDIUM_CONTEXT_WINDOW
+        ? MEDIUM_MAX_OUTPUT
+        : DEFAULT_MAX_OUTPUT
+  return Math.max(256, Math.min(derived, contextWindow - MIN_CONTENT_BUDGET))
 }
 
 export function computeBudget(input: BudgetInput): BudgetProfile {
-  const known = input.models
+  const specs = input.models
     .map((model) => (input.provider ? modelSpec(input.provider, model) : undefined))
-    .map((spec) => spec?.contextWindow)
-    .filter(isWindow)
+    .filter((spec) => spec !== undefined)
+
+  const known = specs.map((spec) => spec.contextWindow).filter(isWindow)
 
   const contextWindow = isWindow(input.contextWindow)
     ? input.contextWindow
@@ -112,10 +142,17 @@ export function computeBudget(input: BudgetInput): BudgetProfile {
       ? Math.min(...known)
       : UNKNOWN_CONTEXT_WINDOW
 
-  const maxOutputTokens = maxOutputForWindow(contextWindow)
+  // A model that publishes its own cap overrides the derived one, and the
+  // narrowest model in the fallback chain still wins overall — a batch may be
+  // served by any model that could end up serving it.
+  const declared = specs.map((spec) => spec.maxOutputTokens).filter(isWindow)
+  const maxOutputTokens =
+    declared.length > 0 ? Math.min(...declared) : maxOutputForWindow(contextWindow)
 
-  // The real prompt, measured: it already embeds the glossary when the quality
-  // level uses one, so a 200-entry glossary is accounted for automatically.
+  // The real prompt, measured. It embeds the whole glossary, which is *more*
+  // than any single request now sends (`selectGlossary` trims a large one to
+  // the terms a batch contains) — deliberately, so the budget never plans a
+  // batch the fullest possible prompt would not leave room for.
   const promptOverheadTokens =
     estimateTokens(
       systemPrompt({
@@ -129,7 +166,27 @@ export function computeBudget(input: BudgetInput): BudgetProfile {
 
   const usable = contextWindow - promptOverheadTokens - maxOutputTokens
   const divisor = qualitySpec(input.quality).review ? REVIEW_COST_MULTIPLIER : 1
-  const contentBudgetTokens = Math.max(MIN_CONTENT_BUDGET, Math.round(usable / divisor))
+  const windowBudget = Math.round(usable / divisor)
+  /**
+   * The *completion*, not the window, is what actually binds. Whatever a batch
+   * carries has to come back translated inside `maxOutputTokens`, and Burmese
+   * grows on the way out, so the most content a request can usefully hold is
+   * what the allowance minus the reasoning headroom can express.
+   *
+   * Sized from the window alone this was ~885k tokens for a 1M-window model —
+   * a number no completion could ever hold against a flat 4k cap. Dense pages
+   * then came back as JSON cut off mid-array, failed validation, and paid for a
+   * repair retry with the same oversized payload: quota spent on answers that
+   * could not exist.
+   */
+  const expressible = Math.max(
+    0,
+    Math.floor((maxOutputTokens - REASONING_HEADROOM_TOKENS) / OUTPUT_RATIO),
+  )
+  const contentBudgetTokens = Math.max(
+    MIN_CONTENT_BUDGET,
+    Math.round(Math.min(windowBudget, expressible) / divisor),
+  )
   const fillTargetTokens = Math.ceil(contentBudgetTokens * FILL_RATIO)
 
   return {
@@ -142,22 +199,6 @@ export function computeBudget(input: BudgetInput): BudgetProfile {
     unknown: known.length === 0 && !isWindow(input.contextWindow),
   }
 }
-
-/**
- * Completion cap for one batch: proportional to what is actually being sent,
- * clamped by the model instead of by a flat 4000.
- *
- * The allowance covers the model's *thinking* as well as its answer: reasoning
- * models (gpt-oss-120b on Groq, the nvidia free routes on OpenRouter) spend
- * completion tokens on reasoning before a single answer token exists. With the
- * old proportional floor, a single-line ladder rung asked for 256 tokens — the
- * model burned all 256 reasoning and answered with an empty body, validation
- * saw `empty` at every rung, the ladder gave up, and 60 of 64 live-translated
- * lines kept their English source (live sweep, Oct 2026). A non-reasoning
- * model simply stops at EOS and never spends the allowance, so the extra room
- * costs nothing on models that do not think.
- */
-export const REASONING_HEADROOM_TOKENS = 2_048
 
 export function maxOutputFor(profile: BudgetProfile, batch: TranslationBatch): number {
   const wanted = Math.round(batch.tokens * OUTPUT_RATIO) + REASONING_HEADROOM_TOKENS

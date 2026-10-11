@@ -14,9 +14,13 @@ import {
   fallbackBudget,
   maxOutputFor,
   maxOutputForWindow,
+  MEDIUM_MAX_OUTPUT,
   MIN_CONTENT_BUDGET,
+  OUTPUT_RATIO,
+  REASONING_HEADROOM_TOKENS,
   UNKNOWN_CONTEXT_WINDOW,
   USER_PROMPT_OVERHEAD_TOKENS,
+  WIDE_MAX_OUTPUT,
 } from './budget'
 import { resetTokenScale } from './tokenEstimate'
 import type { BudgetInput } from './budget'
@@ -49,7 +53,10 @@ describe('computeBudget — window resolution', () => {
 
     expect(budget.contextWindow).toBe(1_048_576)
     expect(budget.unknown).toBe(false)
-    expect(budget.maxOutputTokens).toBe(DEFAULT_MAX_OUTPUT)
+    // The completion cap scales with the window: a model that will take a
+    // million tokens will return far more than the flat 4k that used to
+    // throttle every batch to a handful of lines.
+    expect(budget.maxOutputTokens).toBe(WIDE_MAX_OUTPUT)
   })
 
   it('falls back to a conservative window for an imported model', () => {
@@ -105,12 +112,45 @@ describe('computeBudget — the window invariant', () => {
     expect(budget.fillTargetTokens).toBe(Math.ceil(budget.contentBudgetTokens * FILL_RATIO))
   })
 
-  it('accounts for the glossary it is actually going to send', () => {
+  it('prices the glossary into the prompt it is actually going to send', () => {
     const without = computeBudget(BASE)
     const withGlossary = computeBudget({ ...BASE, glossary: GLOSSARY })
 
     expect(withGlossary.promptOverheadTokens).toBeGreaterThan(without.promptOverheadTokens)
-    expect(withGlossary.contentBudgetTokens).toBeLessThan(without.contentBudgetTokens)
+
+    // The glossary no longer *decides* the content budget — the completion cap
+    // does (next test) — and it should not: a prompt a few hundred tokens
+    // fatter cannot outgrow a window of thousands, and pretending it could made
+    // the budget look like it had room it never had.
+    expect(withGlossary.contentBudgetTokens).toBe(without.contentBudgetTokens)
+  })
+
+  it('never plans more content than the completion could return', () => {
+    // The bug this pins: the budget was derived from the context window alone,
+    // so a 1M-window model was handed an ~885k-token content budget against a
+    // flat 4k completion cap. Dense pages then came back as JSON truncated
+    // mid-array, failed validation, and paid for a repair retry with the same
+    // payload that could not have fit — quota spent on answers that could not
+    // exist. Whatever the window, a batch may not carry more source than the
+    // completion, minus its reasoning headroom, can express.
+    for (const models of [['gemini-2.5-flash'], ['openai/gpt-oss-120b'], []]) {
+      const budget = computeBudget({ ...BASE, models })
+      const expressible = Math.floor(
+        (budget.maxOutputTokens - REASONING_HEADROOM_TOKENS) / OUTPUT_RATIO,
+      )
+      expect(budget.contentBudgetTokens).toBeLessThanOrEqual(expressible)
+
+      // And the chunker's target sits below the budget it was derived from.
+      expect(budget.fillTargetTokens).toBeLessThanOrEqual(budget.contentBudgetTokens)
+    }
+  })
+
+  it('a batch inside the budget still gets a completion that fits it', () => {
+    const budget = computeBudget(BASE)
+
+    expect(maxOutputFor(budget, batchOf(budget.fillTargetTokens))).toBeLessThanOrEqual(
+      budget.maxOutputTokens,
+    )
   })
 
   it('shrinks the content budget for High quality, whose review pass doubles the payload', () => {
@@ -128,11 +168,20 @@ describe('computeBudget — the window invariant', () => {
 })
 
 describe('maxOutputForWindow', () => {
-  it('caps the completion at the model budget and the window', () => {
-    expect(maxOutputForWindow(1_048_576)).toBe(DEFAULT_MAX_OUTPUT)
+  it('scales the completion with the window, but never beyond it', () => {
+    expect(maxOutputForWindow(1_048_576)).toBe(WIDE_MAX_OUTPUT)
+    expect(maxOutputForWindow(128_000)).toBe(MEDIUM_MAX_OUTPUT)
+    // Below the medium threshold nothing changes: an unknown or narrow-window
+    // model still gets the conservative flat cap it always got.
     expect(maxOutputForWindow(16_385)).toBe(DEFAULT_MAX_OUTPUT)
     expect(maxOutputForWindow(8_192)).toBeLessThan(8_192)
     expect(maxOutputForWindow(1_500)).toBeLessThanOrEqual(1_500 - MIN_CONTENT_BUDGET)
+  })
+
+  it('never asks a window for a completion it could not hold', () => {
+    for (const window of [1_500, 8_192, 16_385, 128_000, 1_048_576]) {
+      expect(maxOutputForWindow(window)).toBeLessThanOrEqual(window - MIN_CONTENT_BUDGET)
+    }
   })
 })
 
@@ -142,9 +191,13 @@ describe('maxOutputFor', () => {
   it('leaves room for reasoning before the answer', () => {
     // gpt-oss-120b burned a 256-token single-line cap entirely on reasoning
     // and answered with an empty body (live sweep, Oct 2026); the cap now
-    // covers thinking + translation, still clamped by the model's window.
+    // covers thinking + translation, still clamped by the model's own limit.
     expect(maxOutputFor(profile, batchOf(100))).toBe(2_208) // 100×1.6 + 2_048
-    expect(maxOutputFor(profile, batchOf(1_500))).toBe(4_096) // wanted 4_448 → clamped
+    // A 128k-window model now allows an 8k completion, so the 4_448 this batch
+    // needs is granted in full. It used to be cut back to 4_096 — the flat
+    // cap — which is exactly how a dense batch came back as JSON truncated
+    // mid-array and paid for a repair retry with a payload that could not fit.
+    expect(maxOutputFor(profile, batchOf(1_500))).toBe(4_448)
   })
 
   it('stops at the model instead of a flat constant', () => {

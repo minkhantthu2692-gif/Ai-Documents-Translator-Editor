@@ -14,6 +14,7 @@
  * requirement, the post-processor is the guarantee.
  */
 
+import { estimateTokens } from './tokenEstimate'
 import type {
   GlossarySpec,
   QualityLevel,
@@ -93,6 +94,96 @@ function glossaryBlock(glossary: GlossarySpec[]): string {
   return `Glossary (use these exact target terms whenever the source term appears):
 ${lines}
 `
+}
+
+/**
+ * Token ceiling for the glossary a single request may carry.
+ */
+export const GLOSSARY_PROMPT_TOKENS = 384
+
+const STARTS_LATIN = /^[a-z0-9]/i
+const isWordChar = (character: string): boolean => /[\p{L}\p{N}]/u.test(character)
+
+/**
+ * Which entries a batch could actually use, claimed longest match first.
+ *
+ * A plain `includes` is not enough: `alpha1` "occurs" inside `alpha11`, so on a
+ * real glossary most entries appear to match most batches, the filter keeps
+ * almost everything, and it saves nothing. Occurrences are therefore claimed
+ * longest-first, so a shorter term survives only where no longer one already
+ * covers its characters — which keeps the inflected form (`alpha12` inside
+ * `alpha12s`) while dropping the false friend.
+ *
+ * Latin-ish terms additionally need a left word boundary, so `etch` is not
+ * found inside `kitchen`. Terms in a script written without spaces — Burmese,
+ * Thai, Chinese — get no such test, because there every neighbour is a letter
+ * and the test would reject every one of them.
+ */
+function relevantEntries(glossary: GlossarySpec[], haystack: string): Set<number> {
+  const claimed: Array<[number, number]> = []
+  const keep = new Set<number>()
+
+  const candidates = glossary
+    .map((entry, index) => ({ index, term: entry.sourceTerm.trim().toLowerCase() }))
+    .filter((candidate) => candidate.term.length > 0)
+    .sort((a, b) => b.term.length - a.term.length)
+
+  for (const candidate of candidates) {
+    const { index, term } = candidate
+    const needsBoundary = STARTS_LATIN.test(term)
+    let from = 0
+    for (;;) {
+      const at = haystack.indexOf(term, from)
+      if (at < 0) break
+      const before = at === 0 ? '' : haystack[at - 1]
+      const overlaps = claimed.some(([start, end]) => at < end && start < at + term.length)
+      if (!overlaps && (!needsBoundary || !isWordChar(before))) {
+        claimed.push([at, at + term.length])
+        keep.add(index)
+        break
+      }
+      from = at + 1
+    }
+  }
+  return keep
+}
+
+/**
+ * The glossary entries worth sending with *this* batch.
+ *
+ * `glossaryBlock` sends the whole document glossary, and once a project has a
+ * real one that is the largest cost in the prompt: 200 entries is ~1,900
+ * tokens against a fixed prompt of ~511. Measured on the bundled models, a
+ * request therefore spent 2,658 tokens of preamble to carry ~3,600 of content
+ * — 42% of everything sent, repeated on every request, whether or not the batch
+ * contained a single glossary term. On a free tier that meters tokens per day,
+ * that share is the difference between a book and several books per key.
+ *
+ * A batch only needs the terms that occur in it. Small glossaries are still
+ * sent whole — they fit the ceiling, so filtering them buys nothing and would
+ * only risk dropping a term the matcher missed through inflection. A large one
+ * is cut to the entries the batch can use, in document order, until the ceiling
+ * is reached.
+ */
+export function selectGlossary(
+  glossary: GlossarySpec[],
+  batchText: string,
+  tokenBudget: number = GLOSSARY_PROMPT_TOKENS,
+): GlossarySpec[] {
+  if (glossary.length === 0) return glossary
+  if (estimateTokens(glossaryBlock(glossary)) <= tokenBudget) return glossary
+
+  const keep = relevantEntries(glossary, batchText.toLowerCase())
+  const kept: GlossarySpec[] = []
+  let used = 0
+  for (let index = 0; index < glossary.length; index += 1) {
+    if (!keep.has(index)) continue
+    const cost = estimateTokens(glossaryBlock([glossary[index]]))
+    if (used + cost > tokenBudget) break
+    kept.push(glossary[index])
+    used += cost
+  }
+  return kept
 }
 
 function scopeSentence(scope: 'first' | 'document' | 'every'): string {

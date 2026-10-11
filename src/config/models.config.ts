@@ -47,6 +47,14 @@ export interface ModelSpec {
   provider: ProviderId
   /** Maximum context window in tokens. */
   contextWindow: number
+  /**
+   * Largest completion the model accepts, when it is known to differ from what
+   * `maxOutputForWindow` derives from `contextWindow`. Providers reject a
+   * request that asks for more than the model allows, so the derived value is
+   * deliberately conservative; this field is the escape hatch for a model whose
+   * real cap is known and lower.
+   */
+  maxOutputTokens?: number
   /** Requests per minute on the free tier (estimate). */
   rpm: number
   /** Requests per day on the free tier (estimate). */

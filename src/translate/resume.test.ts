@@ -310,6 +310,11 @@ describe('translate resume', () => {
 
     const pending = await restoreTranslate(PROJECT_ID)
     expect(pending).toBe(1)
+    // Rebuilding a cancelled run must not resume it: an explicit cancel followed
+    // by a reload has to leave the remaining blocks waiting for the user, not
+    // quietly spend the quota again.
+    expect(fake.produced).toHaveLength(25)
+    expect(translateSnapshot()?.phase).not.toBe('running')
     resumeTranslate()
 
     await waitUntil(

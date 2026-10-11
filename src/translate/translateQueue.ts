@@ -1110,7 +1110,12 @@ export async function restoreTranslate(projectId: string, resume = true): Promis
   const config = await settingsRepo.get<TranslateRunConfig | null>(configKey(projectId), null)
   if (!config) return 0
   const snapshot = await settingsRepo.get<QueueSnapshot | null>(runKey(projectId), null)
-  if (!snapshot || snapshot.phase === 'cancelled' || snapshot.phase === 'done') return 0
+  // Only a finished run has nothing left to rebuild. A cancelled one is rebuilt
+  // too — Dexie, not the snapshot, decides what is still pending, and the
+  // remaining blocks deserve a run they can resume from. It is rebuilt *idle*,
+  // because `autoStart` is granted to a `running` snapshot only, so a reload
+  // after an explicit cancel never restarts the API spend by itself.
+  if (!snapshot || snapshot.phase === 'done') return 0
 
   try {
     const outcome = await startTranslate(projectId, config, {

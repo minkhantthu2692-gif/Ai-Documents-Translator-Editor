@@ -556,6 +556,29 @@ Phase 5 — cloud sync and the troubleshooting assistant.
 
 ### Fixed
 
+- **A page no longer draws as a wall of empty squares at 100 %** (Oct 2026): pdf.js paints every
+  page inside the analysis worker, and a worker has no `document`, so it could not register a
+  `FontFace` for an embedded font and fell back to `ctx.font` set to that font's own name — which
+  the browser does not have. Every glyph the system fallback lacked came out a hollow box.
+  Reproduced against a real 8-page PDF: a page dense with readable text was drawn entirely as
+  squares at full size, while the same page looked fine at thumbnail scale (the squares are two
+  pixels there) and pages set in a common face looked fine everywhere. Fixed by rendering with
+  `disableFontFace`, which makes pdf.js emit each glyph as a canvas *path*, so painting depends on
+  no font installation at all — and, by forcing `useSystemFonts` off, base-14 fonts are drawn from
+  the `standard_fonts` data we ship instead of whatever the machine happens to have installed, so
+  a page looks the same everywhere. Text extraction is untouched: `tools/extract-parity.mjs`
+  compares both settings against the two real documents that reproduced this and gets
+  byte-identical `getTextContent()` on every page. Pinned by `src/pdf/pdfAssets.test.ts`.
+- **A cancelled translation no longer restarts itself on the next visit, and no longer strands the
+  blocks it had left** (Oct 2026): `JobQueue.cancel()` now persists the `cancelled` phase it has
+  always entered (see the Pages fix below), which exposed a contradiction that had shipped in
+  Phase 3. `restoreTranslate` returned nothing for a cancelled run, so the blocks it had not
+  reached were never offered again — while the suite expected them to be, and passed only because
+  the stale snapshot still claimed `running`. Worse, that same staleness meant a reload after an
+  *explicit* cancel silently resumed the run and spent the quota the user had just stopped.
+  A cancelled run is now rebuilt like a failed one — Dexie decides what is still pending — but is
+  left **idle**, because `autoStart` is granted to a `running` snapshot only, so it is the user's
+  Resume that spends the quota. `resume.test.ts` pins both halves, and is no longer racy.
 - **"You are offline" is no longer claimed while the device is online** (Oct 2026): that copy
   was attached to every failure that could not be classified, so one rejected `fetch` - DNS, a
   captive portal, a firewall rule, a browser extension, the provider briefly down, or the

@@ -48,7 +48,9 @@ export default tseslint.config(
     },
   },
   {
-    files: ['scripts/**/*.mjs'],
+    // Offline diagnostics run under plain Node: `scripts/` is the shipped
+    // harness, `tools/` the one-off document probes they print results with.
+    files: ['scripts/**/*.mjs', 'tools/**/*.mjs'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'module',

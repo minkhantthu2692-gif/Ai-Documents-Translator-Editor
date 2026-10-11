@@ -717,6 +717,26 @@ const REASON_EXTRAS: Partial<Record<ReasonCode, { explanation: Localized; steps:
       },
     ],
   },
+  PROVIDER_UNREACHABLE: {
+    explanation: {
+      en: 'The browser could not complete the request to the AI provider, but the device is online — so this is not "you are offline". It is usually DNS, a VPN or firewall rule, a browser extension, or the provider being briefly unavailable.',
+      my: 'စက် အွန်လိုင်းဖြစ်နေသော်လည်း AI provider ထံသို့ တောင်းဆိုမှု ပြီးဆုံး၍ မရပါ။ အများအားဖြင့် DNS၊ VPN/firewall စည်းမျဉ်း၊ browser extension သို့ ပေးပို့သူ ယာယီ မရနိုင်ခြင်း ဖြစ်သည်။',
+    },
+    steps: [
+      {
+        en: 'Check that another site loads, then press Retry.',
+        my: 'အခြား website ဖွင့်ရရှိမရ စစ်ပြီး Retry နှိပ်ပါ။',
+      },
+      {
+        en: 'If you use a VPN or firewall, allow the provider domain.',
+        my: 'VPN/firewall သုံးပါက provider domain ကို ခွင့်ပြုပါ။',
+      },
+      {
+        en: 'The run keeps its progress; only the current batch is retried.',
+        my: 'လက်ရှိ အစုကိုသာ ပြန်ကြိုးစားပြီး တိုးတက်မှု မဆုံးရှုံးပါ။',
+      },
+    ],
+  },
   SYNC_FAILED: {
     explanation: {
       en: 'A sync cycle failed. The reason is usually in the status line next to the Sync Now button or in the Logs page; local data is unaffected and retries are automatic.',

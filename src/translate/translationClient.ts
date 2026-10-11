@@ -12,6 +12,7 @@
 
 import TranslationWorker from '@/workers/translation.worker?worker'
 import type { ReasonCode } from '@/core/reasonCodes'
+import { deviceOffline } from './reasons'
 import type {
   RunnerHooks,
   RunnerOutcome,
@@ -57,7 +58,14 @@ class WorkerRunner implements TranslateRunner {
     worker.onmessage = (event: MessageEvent<WorkerToMain>) => this.onMessage(event.data)
     worker.onerror = () => {
       for (const [id, entry] of this.pending) {
-        entry.reject(new TranslationRunError('NETWORK_OFFLINE', 'translation worker crashed'))
+        // A crashed worker proves nothing about the network — never claim the
+        // device is offline unless the browser itself says so.
+        entry.reject(
+          new TranslationRunError(
+            deviceOffline() ? 'NETWORK_OFFLINE' : 'PROVIDER_UNREACHABLE',
+            'translation worker crashed',
+          ),
+        )
         this.pending.delete(id)
       }
       worker.terminate()

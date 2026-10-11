@@ -17,6 +17,7 @@ import {
   cancelParse,
   ensurePagesExtracted,
   loadParseSnapshot,
+  parseSnapshot,
   pauseParse,
   resumeParse,
   restoreParse,
@@ -231,12 +232,22 @@ export function PageThumbnails({ projectId, className, height = 520 }: PageThumb
     if (restoredForRef.current === projectId || pageCount === 0) return undefined
     restoredForRef.current = projectId
     let cancelled = false
-    void loadParseSnapshot(projectId).then((stored) => {
-      if (cancelled || !stored) return
-      setSnapshot(stored)
-      if (stored.phase === 'running') void restoreParse(projectId, true)
-      else if (stored.phase === 'paused') void restoreParse(projectId, false)
-    })
+    void loadParseSnapshot(projectId)
+      .then(async (stored) => {
+        if (cancelled || !stored) return
+        setSnapshot(stored)
+        if (stored.phase !== 'running' && stored.phase !== 'paused') return
+        const requeued = await restoreParse(projectId, stored.phase === 'running')
+        if (cancelled) return
+        /*
+         * Everything was already parsed, so the queue emits no events at all.
+         * Adopt the live snapshot instead of leaving the stored one on screen —
+         * otherwise the panel offers Pause/Cancel over a finished document and
+         * both buttons silently do nothing.
+         */
+        if (requeued === 0) setSnapshot(parseSnapshot())
+      })
+      .catch(() => undefined)
     return () => {
       cancelled = true
     }
@@ -323,6 +334,22 @@ export function PageThumbnails({ projectId, className, height = 520 }: PageThumb
             >
               {t('pipeline.PARSE')}
             </Button>
+          ) : null}
+          {/*
+           * Explicit "nothing left to do" state. Without it a finished parse
+           * leaves an empty toolbar next to "N / N pages parsed", which reads
+           * as "still working" — and the Pause/Cancel buttons the user last saw
+           * look like they are simply stuck.
+           */}
+          {phase !== 'running' &&
+          phase !== 'paused' &&
+          pageCount > 0 &&
+          parsedCount >= pageCount ? (
+            <span data-testid="page-parse-complete">
+              <Badge tone="success" dot>
+                {t('workspace.pages.parsed')}
+              </Badge>
+            </span>
           ) : null}
         </div>
       </header>

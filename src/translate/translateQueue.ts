@@ -56,6 +56,7 @@ import {
 } from './translationClient'
 import { estimateTokens, type LimitConfig, type PersistedKeyState } from './keyPool'
 import type { RunnerHooks, TranslateRunner } from './protocol'
+import { reasonFor } from './reasons'
 import { resetTokenScale } from './tokenEstimate'
 import { lookupTranslation, storeTranslation } from './tm'
 import { annotatedTerms } from './terminology'
@@ -564,8 +565,10 @@ async function runJob(job: TranslateJob, signal: AbortSignal): Promise<void> {
 }
 
 function handleRunFailure(run: ActiveRun, error: unknown): void {
+  // Anything that is *not* an already-classified run error is unexpected, and
+  // defaulting it to NETWORK_OFFLINE told online users they were offline.
   const reasonCode: ReasonCode =
-    error instanceof TranslationRunError ? error.reasonCode : 'NETWORK_OFFLINE'
+    error instanceof TranslationRunError ? error.reasonCode : reasonFor(error).reasonCode
   const message = error instanceof Error ? error.message : String(error)
   run.failure = { reasonCode, message }
   useTranslateStore.getState().setFailure({ reasonCode, message })
@@ -1045,7 +1048,7 @@ export async function startTranslate(
   } catch (error) {
     active = null
     const reasonCode: ReasonCode =
-      error instanceof TranslationRunError ? error.reasonCode : 'NETWORK_OFFLINE'
+      error instanceof TranslationRunError ? error.reasonCode : reasonFor(error).reasonCode
     store.setFailure({
       reasonCode,
       message: error instanceof Error ? error.message : String(error),

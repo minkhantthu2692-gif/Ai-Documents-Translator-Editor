@@ -16,6 +16,7 @@ export type ReasonCode =
   | 'ALL_KEYS_COOLING_DOWN'
   | 'QUOTA_EXHAUSTED'
   | 'NETWORK_OFFLINE'
+  | 'PROVIDER_UNREACHABLE'
   | 'MODEL_UNAVAILABLE'
   | 'BAD_JSON_RESPONSE'
   | 'OCR_FAILED'
@@ -159,6 +160,29 @@ export const REASON_CODES: Record<ReasonCode, ReasonCodeDefinition> = {
     fixActions: [
       act('retry_when_online', 'retry', 'Retry when online', 'အွန်လိုင်းရောက်ရင် ပြန်စမ်းရန်'),
       act('open_docs', 'navigation', 'Continue offline work', 'အော့ဖ်လိုင်း ဆက်လုပ်ရန်'),
+    ],
+  },
+  PROVIDER_UNREACHABLE: {
+    code: 'PROVIDER_UNREACHABLE',
+    severity: 'warning',
+    messageMy:
+      'ပေးပို့သူ (AI provider) ထံသို့ ဆက်သွယ်၍ မရပါ။ စက်သည် အွန်လိုင်းဖြစ်နေသောကြောင့် ချိတ်ဆက်မှု၊ VPN သို့ firewall ကို စစ်ဆေးပြီး ပြန်ကြိုးစားပါ။',
+    messageEn:
+      'Could not reach the AI provider. Your device is online, so check your connection, VPN or firewall, then retry.',
+    technicalHint: 'fetch rejected or timed out while navigator.onLine === true',
+    fixActions: [
+      act(
+        'check_connection_and_retry',
+        'retry',
+        'Check the connection and retry',
+        'ချိတ်ဆက်မှု စစ်ဆေးပြီး ပြန်ကြိုးစားရန်',
+      ),
+      act(
+        'open_provider_settings',
+        'navigation',
+        'Open Settings → AI Providers',
+        'ဆက်တင် → AI Providers ဖွင့်ရန်',
+      ),
     ],
   },
   MODEL_UNAVAILABLE: {

@@ -556,6 +556,25 @@ Phase 5 — cloud sync and the troubleshooting assistant.
 
 ### Fixed
 
+- **"You are offline" is no longer claimed while the device is online** (Oct 2026): that copy
+  was attached to every failure that could not be classified, so one rejected `fetch` - DNS, a
+  captive portal, a firewall rule, a browser extension, the provider briefly down, or the
+  translation worker crashing - told the user their connection was the problem. A rejected
+  request proves nothing of the kind. `ProviderError` kinds `network`/`timeout` and the worker's
+  crash handler now report a new `PROVIDER_UNREACHABLE` code (bilingual, with a "check the
+  connection and retry" action and no suggestion to switch provider) unless `navigator.onLine`
+  is genuinely false, and the two `translateQueue` fallbacks go through `reasonFor` instead of
+  hard-coding `NETWORK_OFFLINE`. Regression suite: `src/translate/reasons.test.ts`.
+- **A finished parse no longer offers Pause/Cancel forever** (Oct 2026): the job queue
+  persists after every item, but the phase that ends a run is set *after* that write, so the
+  stored snapshot always said `running`. On the next visit the Pages panel displayed it,
+  found nothing left to re-queue - so the queue emitted no events to correct it - and offered
+  two buttons that could not pause anything, over "8 / 8 pages parsed". The queue now persists
+  the terminal phase (`done`/`failed`/`cancelled`) as well, the panel adopts the *live*
+  snapshot when a restore re-queues no windows, and a finished parse shows an explicit
+  "Parsed" badge instead of an empty toolbar. Regression suite:
+  `src/components/workspace/PageThumbnails.test.tsx` (a stored `running` with no work left must
+  not render the controls; a stored `running` that still has windows must).
 - **Google Sheets cloud sync audited end to end — client *and* backend — and the two are now
   proven against each other instead of against a mock that could drift** (Oct 2026):
   `src/sync/appsScriptRuntime.ts` evaluates the shipped `apps-script/Code.gs` byte-for-byte

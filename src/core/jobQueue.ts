@@ -143,6 +143,9 @@ export class JobQueue<T extends { id: string }> {
     }
     this.pending = []
     this.setPhase('cancelled')
+    // Same reason as `finishIfDone`: the terminal phase must reach the store,
+    // or a reload restores a run that no longer exists.
+    this.queuePersist(null)
     void this.flush()
     this.settleIfIdle()
   }
@@ -255,6 +258,13 @@ export class JobQueue<T extends { id: string }> {
     if (this.currentPhase === 'running' && this.pending.length > 0) return
     if (this.currentPhase === 'running') {
       this.setPhase(this.failedIds.length > 0 && this.completedIds.length === 0 ? 'failed' : 'done')
+      /*
+       * The per-item persist runs *before* this transition, so without this
+       * write a run that finished cleanly is stored as `running`. A panel that
+       * restores it after a reload would then show Pause/Cancel over a document
+       * that is already fully parsed — with nothing left to pause.
+       */
+      this.queuePersist(null)
     }
   }
 

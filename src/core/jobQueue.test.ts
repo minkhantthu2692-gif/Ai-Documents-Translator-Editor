@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { JobQueue, type QueueSnapshot } from './jobQueue'
+import { JobQueue, type QueuePhase, type QueueSnapshot } from './jobQueue'
 
 interface Item {
   id: string
@@ -64,13 +64,17 @@ describe('JobQueue', () => {
     expect(snapshot.active).toBe(0)
   })
 
-  it('persists a snapshot after every item', async () => {
-    const persisted: Array<{ id: string | null; completed: number }> = []
+  it('persists a snapshot after every item and once more when the run settles', async () => {
+    const persisted: Array<{ id: string | null; completed: number; phase: QueuePhase }> = []
     const queue = new JobQueue<Item>({
       concurrency: 1,
       run: async () => undefined,
       persist: (snapshot: QueueSnapshot, item) => {
-        persisted.push({ id: item?.id ?? null, completed: snapshot.completed })
+        persisted.push({
+          id: item?.id ?? null,
+          completed: snapshot.completed,
+          phase: snapshot.phase,
+        })
       },
     })
 
@@ -79,8 +83,32 @@ describe('JobQueue', () => {
     await queue.waitForIdle()
     await queue.flush()
 
-    expect(persisted.map((entry) => entry.id)).toEqual(['p0', 'p1', 'p2'])
-    expect(persisted.map((entry) => entry.completed)).toEqual([1, 2, 3])
+    expect(persisted.map((entry) => entry.id)).toEqual(['p0', 'p1', 'p2', null])
+    expect(persisted.map((entry) => entry.completed)).toEqual([1, 2, 3, 3])
+    // The trailing write carries the terminal phase. Without it the stored
+    // snapshot still says `running` and a restore after a reload would offer
+    // Pause/Cancel for a run that already finished.
+    expect(persisted.map((entry) => entry.phase)).toEqual(['running', 'running', 'running', 'done'])
+  })
+
+  it('stores the cancelled phase when a run is aborted', async () => {
+    const stored: QueueSnapshot[] = []
+    const gateItem = gate()
+    const queue = new JobQueue<Item>({
+      concurrency: 1,
+      run: () => gateItem.promise,
+      persist: (snapshot) => {
+        stored.push(snapshot)
+      },
+    })
+
+    queue.enqueue(ids('c', 2))
+    queue.start()
+    await tick()
+    queue.cancel()
+    await queue.flush()
+
+    expect(stored.at(-1)?.phase).toBe('cancelled')
   })
 
   it('stops dispatching while paused and continues on resume', async () => {

@@ -80,8 +80,12 @@ export function SyncCard() {
     EMPTY_TOKEN,
   )
   const [syncEnabled, setSyncEnabled] = useSetting<boolean>(SETTING_KEYS.syncEnabled, false)
-  const [autoSync, setAutoSync] = useSetting<boolean>(SETTING_KEYS.autoSync, false)
-  const [interval, setIntervalMinutes] = useSetting<number>(SETTING_KEYS.autoSyncInterval, 15)
+  // Fallbacks must match the engine's own defaults (`readSyncConfig` reads
+  // auto-sync as **true** and the interval as **5** minutes). A card that
+  // fell back to false/15 showed auto-sync switched off while the scheduler
+  // was in fact running every five minutes.
+  const [autoSync, setAutoSync] = useSetting<boolean>(SETTING_KEYS.autoSync, true)
+  const [interval, setIntervalMinutes] = useSetting<number>(SETTING_KEYS.autoSyncInterval, 5)
   const [conflictPolicy, setConflictPolicy] = useSetting<string>(
     SETTING_KEYS.conflictPolicy,
     'newest',

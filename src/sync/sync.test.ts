@@ -285,12 +285,15 @@ function createMockServer(): MockServer {
         if (body.confirm !== 'WIPE') {
           return json({ ok: false, code: 'BAD_REQUEST', message: 'confirm must be WIPE.' })
         }
-        let cleared = 0
+        // Code.gs reports the rows removed per tab, not one number.
+        const cleared: Record<string, number> = {}
+        let total = 0
         for (const name of SHEET_ORDER) {
-          cleared += sheets[name].size
+          cleared[name] = sheets[name].size
+          total += sheets[name].size
           sheets[name].clear()
         }
-        return json({ ok: true, cleared, total: cleared, chunks: 1 })
+        return json({ ok: true, cleared, total, chunks: 1 })
       }
 
       default:

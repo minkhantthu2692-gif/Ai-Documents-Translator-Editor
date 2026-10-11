@@ -556,6 +556,57 @@ Phase 5 — cloud sync and the troubleshooting assistant.
 
 ### Fixed
 
+- **Google Sheets cloud sync audited end to end — client *and* backend — and the two are now
+  proven against each other instead of against a mock that could drift** (Oct 2026):
+  `src/sync/appsScriptRuntime.ts` evaluates the shipped `apps-script/Code.gs` byte-for-byte
+  inside an in-memory Apps Script runtime (sheets, ranges, plain-text coercion, locks, script
+  properties), and two suites drive it: `appsScriptBackend.test.ts` (22 cases — handshake,
+  a byte-exact round trip for every syncable entity, formula/bullet/phone lookalikes,
+  last-write-wins, tombstones, deleteProject cascade incl. orphans and future-stamped rows,
+  pull paging with tied timestamps across a page boundary, budget-driven partial push resuming
+  from `nextCursor`, the secret-settings guard, validation, cell overflow, legacy migration
+  in place, wipe, the pruned token-free SyncLog, LOCK_TIMEOUT) and `syncRealBackend.test.ts`
+  (the engine end to end through the real backend: two Dexie databases, a whole document
+  round trip, a delete propagating, a concurrent edit resolved with the loser recoverable
+  from `syncConflicts`, wipe, and the capability handshake). Suite: 1513 passed / 6 skipped.
+- **The spreadsheet stops being a JSON dump.** Three tabs carried columns that matched no
+  client field and were therefore always empty, while the values they were meant to hold sat
+  inside the `data` JSON: Blocks had `type` (the record calls it `kind`), Glossary had
+  `source`/`target`/`note`/`locale` (the record uses `sourceTerm`/`targetTerm`/`notes`, and
+  has no locale at all), UsageStats had `metric`/`value`/`projectId` (the record is
+  provider/model/day plus six counters). Blocks now carry `kind`, `sourceText`,
+  `translatedText`, `status`; Glossary carries `sourceTerm`, `targetTerm`, `sourceLang`,
+  `targetLang`, `notes`, `caseSensitive`; UsageStats carries `provider`, `model`, `day` and
+  the counters; Settings gains `group`. A person opening the sheet can read and filter what
+  the app holds. `glossary.projectId` deliberately stays in `data`: a global entry carries
+  `projectId: null`, and a blank cell cannot tell "global" from "empty string".
+- **A deployed spreadsheet now upgrades in place instead of failing** (found by the migration
+  test): schema changes are rename-in-place or append-only — the `data` column never moves.
+  `createMissingSheets_` compares each header row against `LEGACY_HEADERS_`, renames the old
+  columns onto their new names, appends the ones that are missing, and leaves every existing
+  cell exactly where it was; `rowToRecord_` falls back to `data` for any declared column that
+  is still blank, so rows written before the columns existed keep reading correctly. A
+  hand-edited header row fails loudly (INTERNAL) rather than being guessed at.
+- **`deleteProject` no longer orphans rows or lets a future-dated clock win**: it walks the
+  whole subtree (project, pages, blocks) even when the project row itself is missing — the
+  half-pushed state a crash leaves behind — and stamps each tombstone at `max(now,
+  stored.updatedAt + 1)`, so a device whose clock runs ahead can never resurrect the row on
+  the next pull. NOT_FOUND is reported only when nothing matched at all; deleting an already
+  tombstoned project succeeds.
+- **`wipe` reports what it actually cleared** (found by the real backend): the backend
+  returns a per-tab count, but the client typed it as a single number and logged
+  `[object Object] row(s) cleared`. `WipeResponse.cleared` is now
+  `Record<string, number>`, and `wipeCloud` sums it and names the tabs in the event detail.
+- **`SyncClient.backup()` used a cursor the backend cannot read**: it sent a bare number
+  where Code.gs expects `{ sheetIndex, offset }`, so a paged backup walk restarted at the
+  first tab every time. Typed as `BackupCursor`/`BackupResponse` and matched to
+  `actionBackup_`.
+- **The auto-sync switches in Settings now tell the truth**: `SyncCard` fell back to
+  auto-sync off and a 15-minute interval while the engine's own defaults are on and 5
+  minutes, so a fresh profile showed a scheduler that was in fact already running.
+- **The SyncLog is bounded** (grows one row per request, forever): past `LOG_MAX_ROWS_`
+  (15000) it is trimmed back to 5000 — one prune per 10000 requests rather than a write on
+  every one — and the wipe documentation now names ApiKeys, which it does clear.
 - **A reasoning model can no longer burn its whole answer on thinking** (found by the live
   harness, Oct 2026 — the biggest translation bug of the sweep): `maxOutputFor` capped the
   completion at `batch.tokens × 1.6` with a 256-token floor, and reasoning models spend

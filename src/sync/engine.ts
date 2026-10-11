@@ -98,7 +98,14 @@ export interface SyncStats {
   conflicts: number
   orphans: number
   pullPages: number
-  /** True when the pull backlog outlived MAX_PULL_PAGES — sync again. */
+  /**
+   * Cells the backend had to shorten to fit a spreadsheet cell (see
+   * `sanitizeCell_` in Code.gs). Never silent: the record still arrives, but a
+   * long `sourceText` or a block's structured `lines` payload may be clipped,
+   * so the run reports it instead of pretending the push was lossless.
+   */
+  truncated: number
+  /** True when the pull or push backlog outlived its per-run cap — sync again. */
   hasMore: boolean
 }
 
@@ -249,6 +256,7 @@ export async function wipeCloud(): Promise<{ cleared: number }> {
   const config = await readSyncConfig()
   const client = makeClient(config)
   const res = await client.wipe()
+  const cleared = Object.values(res.cleared).reduce((sum, rows) => sum + rows, 0)
 
   const meta = await ensureSyncMeta()
   meta.pushCursor = 0
@@ -265,9 +273,12 @@ export async function wipeCloud(): Promise<{ cleared: number }> {
     severity: 'warning',
     messageMy: 'クラウドのデータをすべて削除しました',
     messageEn: 'Deleted all cloud-sync data from the spreadsheet',
-    technicalDetail: `wipe: ${res.cleared} row(s) cleared`,
+    technicalDetail: `wipe: ${cleared} row(s) cleared (${Object.entries(res.cleared)
+      .filter(([, rows]) => rows > 0)
+      .map(([sheet, rows]) => `${sheet}=${rows}`)
+      .join(' ')})`,
   })
-  return { cleared: res.cleared }
+  return { cleared }
 }
 
 /** Reconnect handler: drops per-row backoff so pending pushes retry now. */
@@ -593,6 +604,7 @@ async function pushPhase(
         stats.pushed += changes.length
         stats.applied += res.applied
         stats.skipped += res.skipped
+        stats.truncated += res.truncated
         if (res.partial && typeof res.nextCursor === 'number' && res.nextCursor >= 0) {
           // Server budget expired: everything before nextCursor is processed
           // (applied or skipped); the rest stays due for the next run.
@@ -616,6 +628,10 @@ async function pushPhase(
       if (iterations >= MAX_PUSH_BATCHES) break
     }
   }
+
+  // A partial push or the batch cap can leave the queue unfinished. Report it:
+  // a run that stopped half way must not look like a clean one.
+  if ((await outboxRepo.due(1)).length > 0) stats.hasMore = true
 
   meta.lastPushAt = Date.now()
   await persistMeta(meta)
@@ -961,6 +977,7 @@ async function executeSync(trigger: SyncStats['trigger']): Promise<SyncStats> {
     conflicts: 0,
     orphans: 0,
     pullPages: 0,
+    truncated: 0,
     hasMore: false,
   }
 
@@ -980,6 +997,17 @@ async function executeSync(trigger: SyncStats['trigger']): Promise<SyncStats> {
     meta.lastError = null
     meta.lastErrorCode = null
     await persistMeta(meta)
+
+    if (stats.truncated > 0) {
+      logEvent({
+        state: 'SYNC',
+        action: 'sync.truncated',
+        severity: 'warning',
+        messageMy: 'စာဆဲလ်အချို့ ရှည်လွန်းသဖြင့် တိုတောင်းသွားပါသည်',
+        messageEn: `Cloud push shortened ${stats.truncated} cell(s) to fit a spreadsheet cell`,
+        technicalDetail: `truncated=${stats.truncated} — see sanitizeCell_/shrinkDataJson_ in Code.gs`,
+      })
+    }
 
     if (trigger === 'manual') {
       logEvent({

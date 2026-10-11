@@ -13,11 +13,32 @@
  *   Projects, Pages, Blocks, Glossary, Settings, UsageStats, ApiKeys, SyncLog.
  *   Canonical header layout for every syncable sheet:
  *     ['id', 'updatedAt', 'deviceId', 'version', 'deleted', ...entity fields]
- *   Complex / nested entity fields (block geometry, lines, run styling, etc.)
- *   are JSON-encoded into a single `data` column instead of one column per
- *   nested key — this keeps the header row fixed and the read/write code
- *   generic. Scalar columns are used for fields the backend must filter on
- *   (projectId, pageId, order, name, source/target, ...).
+ *   Two kinds of entity field live after those five columns:
+ *     - SCALAR COLUMNS — the fields a human (or a Sheets filter) wants to see
+ *       and the backend has to sort/filter on: name, projectId, pageId, order,
+ *       kind, status, sourceText, translatedText, sourceTerm, targetTerm,
+ *       provider, model, day, … . Each gets its own 50k cell, so a long
+ *       paragraph and its translation never compete with the rest of the row
+ *       for the same budget.
+ *     - the trailing `data` column — nested/complex fields only (block
+ *       geometry, visual lines, run styling, table cells, link boxes, …),
+ *       JSON-encoded. That keeps the read/write code generic without pushing
+ *       a document's content into an opaque blob.
+ *   The client writes the *whole* record every time, so a field simply moving
+ *   from `data` into a column (a later build declaring it) needs no back-fill:
+ *   `rowToRecord_` prefers a non-empty column and falls back to the JSON for
+ *   rows written before the column existed.
+ *
+ * SCHEMA EVOLUTION (why the migration exists)
+ *   Columns are only ever renamed in place or APPENDED — never inserted, never
+ *   moved — because `data` must stay in the column index it was written at:
+ *   moving it would need a full-sheet rewrite, and a crash half-way through
+ *   that would leave every nested field stranded in the wrong column. Appends
+ *   are a single header-row write: crash before it and the old layout is still
+ *   intact, crash after it and the new one is already correct.
+ *   `createMissingSheets_` recognises a layout listed in LEGACY_HEADERS_ and
+ *   rewrites row 1 to today's headers; rows written under the old layout keep
+ *   reading correctly through the `data` fallback above.
  *
  *   Deletions are TOMBSTONES: `op:'delete'` sets the `deleted` column to TRUE
  *   and bumps updatedAt/version; rows are never physically removed (except by
@@ -71,7 +92,11 @@
  *     deployments set to "Execute as: Me / Anyone". The script itself cannot
  *     set response headers (no such API), so nothing to configure here.
  *   - `doGet` (health) and `doPost` (all actions) both return
- *     `ContentService` JSON output.
+ *     `ContentService` JSON output. `doGet` takes the token as a `token`
+ *     query parameter and refuses everything else: an unauthenticated health
+ *     probe used to reveal the spreadsheet's tab inventory (and create tabs)
+ *     for anyone who guessed the URL. The web app never calls it — the app's
+ *     "Test connection" is an authenticated `ping` POST.
  *
  * EXECUTION LIMITS
  *   - Apps Script stops a web app run after 6 minutes. A shared budget
@@ -156,6 +181,33 @@ var MAX_BLOCKS_ = 50000
 /** listProjects returns at most this many rows. */
 var MAX_PROJECT_LIST_ = 1000
 
+/**
+ * SyncLog is append-only and every request writes one row, so left alone it
+ * would eat the spreadsheet's 10M-cell allowance over a few busy months. Above
+ * LOG_MAX_ROWS_ the oldest rows are deleted down to LOG_KEEP_ROWS_, which makes
+ * a prune happen once per (LOG_MAX_ROWS_ - LOG_KEEP_ROWS_) requests instead of
+ * on every write.
+ */
+var LOG_MAX_ROWS_ = 15000
+var LOG_KEEP_ROWS_ = 5000
+
+/**
+ * Nested block fields that `recordToRow_` gives up before any content when a
+ * record's JSON `data` would exceed the cell limit. They are the biggest and
+ * the most recoverable payload on a block: `sourceText` / `translatedText`
+ * travel in their own columns, and the cells of a table are still present as
+ * ` \t `-separated text in `sourceText`, so dropping the structured copy
+ * degrades rendering rather than losing the document.
+ */
+var SHRINKABLE_DATA_KEYS_ = [
+  'lines',
+  'tableCells',
+  'tableSpans',
+  'figures',
+  'links',
+  'placeholders',
+]
+
 /** Script Property holding the shared secret (never stored in the sheet). */
 var TOKEN_PROP_ = 'TOKEN'
 
@@ -223,6 +275,12 @@ var SHEET_DEFS_ = [
     name: 'Blocks',
     entity: 'blocks',
     aliases: ['block'],
+    // `kind` used to be spelled `type` (never filled — the client's field is
+    // `kind`, so that column was always empty), and the two text fields used to
+    // live inside `data`, where a long paragraph and its translation shared one
+    // 45k cell with the block's geometry and lines. They are declared columns
+    // now: content keeps its own budget and the sheet is readable. The appended
+    // columns sit after `data` on purpose — see SCHEMA EVOLUTION above.
     headers: [
       'id',
       'updatedAt',
@@ -232,47 +290,69 @@ var SHEET_DEFS_ = [
       'projectId',
       'pageId',
       'order',
-      'type',
+      'kind',
       'data',
+      'sourceText',
+      'translatedText',
+      'status',
     ],
   },
   {
     name: 'Glossary',
     entity: 'glossary',
     aliases: ['glossaries', 'term', 'terms'],
+    // `source`/`target`/`note`/`locale` matched no client field either (the
+    // record calls them sourceTerm/targetTerm/notes and has no locale), so all
+    // four columns were empty and the terms themselves sat in `data`.
+    // `projectId` deliberately stays inside `data`: a global glossary entry
+    // carries `projectId: null`, and a blank cell cannot tell "global" from
+    // "empty string", so declaring it would quietly re-scope the entry.
     headers: [
       'id',
       'updatedAt',
       'deviceId',
       'version',
       'deleted',
-      'source',
-      'target',
-      'note',
-      'locale',
+      'sourceTerm',
+      'targetTerm',
+      'sourceLang',
+      'targetLang',
       'data',
+      'notes',
+      'caseSensitive',
     ],
   },
   {
     name: 'Settings',
     entity: 'settings',
     aliases: ['setting'],
-    headers: ['id', 'updatedAt', 'deviceId', 'version', 'deleted', 'value', 'data'],
+    // `group` is how the app buckets a setting (ui / ai / sync / …); it used to
+    // be reachable only through the JSON blob.
+    headers: ['id', 'updatedAt', 'deviceId', 'version', 'deleted', 'value', 'data', 'group'],
   },
   {
     name: 'UsageStats',
     entity: 'usageStats',
     aliases: ['usagestats', 'usage', 'stats', 'stat'],
+    // `metric`/`value`/`projectId` described a record shape this app never had:
+    // a usage row is a per-provider/model/day counter set, which is exactly
+    // what a person opens this tab to add up.
     headers: [
       'id',
       'updatedAt',
       'deviceId',
       'version',
       'deleted',
-      'metric',
-      'value',
-      'projectId',
+      'provider',
+      'model',
+      'day',
       'data',
+      'requests',
+      'failedRequests',
+      'characters',
+      'tokensIn',
+      'tokensOut',
+      'costUsd',
     ],
   },
   {
@@ -319,6 +399,58 @@ var ENTITY_MAP_ = {}
   }
 })()
 
+/**
+ * Header rows that shipped in earlier builds of this file, keyed by sheet
+ * name. A sheet whose row 1 matches one of these is upgraded in place by
+ * `createMissingSheets_`: renamed labels are rewritten and the new columns are
+ * appended, and no cell of data is moved (the values those columns now name
+ * are still read out of `data` until the row is rewritten).
+ *
+ * Every legacy layout here wrote NOTHING into the columns being renamed —
+ * the names did not exist on the client's records — so the upgrade can never
+ * destroy a value.
+ *
+ * @type {Object<string, Array<string>>}
+ */
+var LEGACY_HEADERS_ = {
+  Blocks: [
+    'id',
+    'updatedAt',
+    'deviceId',
+    'version',
+    'deleted',
+    'projectId',
+    'pageId',
+    'order',
+    'type',
+    'data',
+  ],
+  Glossary: [
+    'id',
+    'updatedAt',
+    'deviceId',
+    'version',
+    'deleted',
+    'source',
+    'target',
+    'note',
+    'locale',
+    'data',
+  ],
+  Settings: ['id', 'updatedAt', 'deviceId', 'version', 'deleted', 'value', 'data'],
+  UsageStats: [
+    'id',
+    'updatedAt',
+    'deviceId',
+    'version',
+    'deleted',
+    'metric',
+    'value',
+    'projectId',
+    'data',
+  ],
+}
+
 /* ==========================================================================
  * Action registry — `lock:true` means the handler runs under LockService.
  * ========================================================================== */
@@ -345,10 +477,24 @@ var ACTIONS_ = {
  * secrets so the web app can verify the deployment URL before syncing.
  * Health checks are deliberately NOT written to SyncLog to avoid spam.
  *
- * @param {Object} e     Apps Script event (unused).
+ * The token travels as a `token` query parameter and is required: an
+ * unauthenticated answer would disclose the spreadsheet's tab inventory — and
+ * used to *create* those tabs — for nothing more than knowing the URL.
+ *
+ * @param {Object} e     Apps Script event; e.parameter.token is the secret.
  * @return {ContentService.TextOutput} JSON response.
  */
 function doGet(e) {
+  var supplied = e && e.parameter ? e.parameter.token : undefined
+  if (!tokensMatch_(supplied, getToken_())) {
+    return jsonOut_({
+      ok: false,
+      code: 'UNAUTHORIZED',
+      message: 'Invalid or missing token.',
+      service: SERVICE_NAME_,
+      serverTime: Date.now(),
+    })
+  }
   try {
     ensureSheets_()
     return jsonOut_({
@@ -358,6 +504,7 @@ function doGet(e) {
       version: SERVICE_VERSION_,
       serverTime: Date.now(),
       sheetNames: allSheetNames_(),
+      entities: syncableEntities_(),
     })
   } catch (err) {
     // Never leak internals from the health path either.
@@ -798,10 +945,17 @@ function actionListProjects_(req, ctx) {
   var def = defForEntity_('projects')
   var data = readSheet_(ss, def)
   var projects = []
+  var truncated = false
 
-  for (var r = 0; r < data.rows.length && projects.length < MAX_PROJECT_LIST_; r++) {
+  for (var r = 0; r < data.rows.length; r++) {
     var rec = rowToRecord_(def, data.rows[r])
     if (rec.deleted) continue
+    if (projects.length === MAX_PROJECT_LIST_) {
+      // Only claim truncation when a live row really was left behind —
+      // tombstones beyond the cap are not data anyone is missing.
+      truncated = true
+      break
+    }
     projects.push(rec)
   }
 
@@ -815,7 +969,7 @@ function actionListProjects_(req, ctx) {
     ok: true,
     projects: projects,
     count: projects.length,
-    truncated: data.rows.length > projects.length,
+    truncated: truncated,
     serverTime: Date.now(),
   }
 }
@@ -854,12 +1008,12 @@ function actionGetProject_(req, ctx) {
   var project = null
   for (var p = 0; p < projectData.rows.length; p++) {
     var rec = rowToRecord_(projectDef, projectData.rows[p])
-    if (String(rec.id) === projectId) {
-      project = rec
-      break
-    }
+    // Last match wins, exactly like indexRows_ — and a tombstone is not a
+    // project: `getProject` of a deleted document answers NOT_FOUND, which is
+    // also what `listProjects` implies by filtering it out.
+    if (String(rec.id) === projectId) project = rec
   }
-  if (!project) {
+  if (!project || project.deleted === true) {
     throwCoded_('NOT_FOUND', 'Project not found.')
   }
 
@@ -988,9 +1142,12 @@ function actionUpsertBlocks_(req, ctx) {
 
 /**
  * deleteProject — tombstones a project and every page and block that belongs
- * to it (deleted = TRUE, updatedAt = now, version bumped). Rows are not
- * physically removed so the deletion propagates through pullChanges and can
- * be undone from another device's cache.
+ * to it (deleted = TRUE, version bumped, `updatedAt` moved past whatever is
+ * stored so the cascade always wins last-write-wins). Rows are not physically
+ * removed so the deletion propagates through pullChanges and can be undone
+ * from another device's cache. The subtree is walked even when the project row
+ * is missing, so orphans left by a half-finished push die with it too;
+ * `NOT_FOUND` is only reported when nothing matched at all.
  *
  * Request: { token, projectId }
  * Response: { ok, project, pages, blocks }
@@ -1009,10 +1166,6 @@ function actionDeleteProject_(req, ctx) {
 
   var projectDef = defForEntity_('projects')
   var projectData = readSheet_(ss, projectDef)
-  var projectIndex = indexRows_(projectData.rows)
-  if (projectIndex[projectId] === undefined) {
-    throwCoded_('NOT_FOUND', 'Project not found.')
-  }
 
   var tombstoned = { project: 0, pages: 0, blocks: 0 }
   var plan = [
@@ -1021,6 +1174,10 @@ function actionDeleteProject_(req, ctx) {
     { def: defForEntity_('blocks'), data: null, byId: false, key: 'blocks' },
   ]
 
+  // The subtree is walked even when the project row itself is missing: a push
+  // that failed halfway can leave pages/blocks behind the project it belonged
+  // to, and those orphans would otherwise survive the delete and be pulled
+  // back to life on every other device.
   for (var t = 0; t < plan.length; t++) {
     var step = plan[t]
     var data = step.data || readSheet_(ss, step.def)
@@ -1036,7 +1193,12 @@ function actionDeleteProject_(req, ctx) {
         continue
       }
       rec.deleted = true
-      rec.updatedAt = now
+      // A cascade has to beat whatever is stored, including rows stamped by a
+      // device whose clock runs ahead of this one: a tombstone with a smaller
+      // `updatedAt` loses last-write-wins and the deletion silently stops
+      // propagating.
+      var storedAt = Number(rec.updatedAt) || 0
+      rec.updatedAt = now > storedAt ? now : storedAt + 1
       rec.deviceId = deviceId
       rec.version = (Number(rec.version) || 0) + 1
       var values = recordToRow_(step.def, rec, stats)
@@ -1054,6 +1216,13 @@ function actionDeleteProject_(req, ctx) {
     stats.chunks += writeModified_(data.sheet, data.cols, modified)
   }
 
+  if (tombstoned.project + tombstoned.pages + tombstoned.blocks === 0) {
+    // Nothing matched at all: the project never reached this spreadsheet, or
+    // every row was already a tombstone. The client treats NOT_FOUND as a
+    // successful delete, so this is a report, not a failure.
+    throwCoded_('NOT_FOUND', 'Project not found.')
+  }
+
   ctx.rowsIn = 1
   ctx.rowsOut = tombstoned.project + tombstoned.pages + tombstoned.blocks
   return {
@@ -1069,13 +1238,13 @@ function actionDeleteProject_(req, ctx) {
  * "download cloud backup" action.
  *
  * Limits (documented): rows are converted in a loop that checks the shared
- * time budget every 500 rows and stops after MAX_BACKUP_ROWS_ (20,000) rows.
- * When either limit is hit the response carries partial:true and a
- * nextCursor { sheetIndex, sheet, offset }; re-call backup with
- * { cursor: nextCursor } to continue. Large documents therefore come back as
- * several snapshots the client concatenates.
+ * time budget every 500 rows and stops after `pageSize` rows (default and
+ * ceiling MAX_BACKUP_ROWS_ = 20,000). When either limit is hit the response
+ * carries partial:true and a nextCursor { sheetIndex, sheet, offset }; re-call
+ * backup with { cursor: nextCursor } to continue. Large documents therefore
+ * come back as several snapshots the client concatenates.
  *
- * Request: { token, cursor?:{sheetIndex, offset} }
+ * Request: { token, cursor?:{sheetIndex, offset}, pageSize?:number }
  * Response: { ok, snapshot:{SheetName:{headers,rows}}, counts, total,
  *           partial, nextCursor, serverTime }
  *
@@ -1095,6 +1264,13 @@ function actionBackup_(req, ctx) {
       startOffset = requireInt_(req.cursor.offset, 'cursor.offset', 0, 100000000)
     }
   }
+  // Rows per snapshot. A client that knows its own payload budget asks for
+  // fewer rows than the ceiling so one response stays small; anything else
+  // falls back to MAX_BACKUP_ROWS_.
+  var maxRows = MAX_BACKUP_ROWS_
+  if (req.pageSize !== undefined && req.pageSize !== null) {
+    maxRows = requireInt_(req.pageSize, 'pageSize', 1, MAX_BACKUP_ROWS_)
+  }
 
   var ss = ensureSheets_()
   var budget = makeBudget_(ctx.start)
@@ -1113,7 +1289,7 @@ function actionBackup_(req, ctx) {
     for (var r = fromRow; r < data.rows.length; r++) {
       rows.push(rowToRecord_(def, data.rows[r]))
       total++
-      if (total >= MAX_BACKUP_ROWS_) {
+      if (total >= maxRows) {
         partial = true
         nextCursor = { sheetIndex: s, sheet: def.name, offset: r + 1 }
         break
@@ -1146,10 +1322,12 @@ function actionBackup_(req, ctx) {
 
 /**
  * wipe — deletes ALL cloud data (the UI's "delete all cloud data" button).
- * Requires BOTH a valid token and `confirm: 'WIPE'`. Clears every data row in
- * Projects/Pages/Blocks/Glossary/Settings/UsageStats with one clearContent()
- * call per sheet (headers are kept) and records the event in SyncLog.
- * SyncLog itself is never wiped so the audit trail survives.
+ * Requires BOTH a valid token and `confirm: 'WIPE'`. Clears every data row of
+ * every syncable sheet — Projects, Pages, Blocks, Glossary, Settings,
+ * UsageStats and ApiKeys (a stored key is the most sensitive row in the
+ * spreadsheet, so "delete all cloud data" has to mean it) — with one
+ * clearContent() call per sheet (headers are kept) and records the event in
+ * SyncLog. SyncLog itself is never wiped so the audit trail survives.
  *
  * Request: { token, confirm: 'WIPE' }
  * Response: { ok, cleared:{SheetName:rows}, total }
@@ -1271,7 +1449,13 @@ function sheetsReady_(ss) {
 }
 
 /**
- * Creates missing sheets with header rows and verifies existing ones.
+ * Creates missing sheets with header rows, upgrades a layout listed in
+ * LEGACY_HEADERS_, and verifies the rest.
+ *
+ * An upgrade is a single header-row write: columns are renamed in place or
+ * appended, so no cell of existing data is moved. Rows written under the old
+ * layout keep reading correctly because `rowToRecord_` falls back to the `data`
+ * JSON for any declared column that is empty.
  *
  * @param {Spreadsheet} ss Target spreadsheet.
  * @private
@@ -1291,22 +1475,41 @@ function createMissingSheets_(ss) {
       sh.getRange(1, 1, 1, def.headers.length).setValues([def.headers.slice()])
       continue
     }
-    if (sh.getLastColumn() < def.headers.length) {
-      throwCoded_(
-        'INTERNAL',
-        'Sheet "' + def.name + '" has too few columns; repair its header row.',
-      )
+    var lastCol = sh.getLastColumn()
+    if (lastCol < 1) {
+      throwCoded_('INTERNAL', 'Sheet "' + def.name + '" has no header row; repair it.')
     }
-    var head = sh.getRange(1, 1, 1, def.headers.length).getValues()[0]
-    for (var c = 0; c < def.headers.length; c++) {
-      if (String(head[c]) !== def.headers[c]) {
-        throwCoded_(
-          'INTERNAL',
-          'Sheet "' + def.name + '" header row does not match the expected layout.',
-        )
-      }
+    var head = sh.getRange(1, 1, 1, lastCol).getValues()[0]
+    if (headersMatch_(head, def.headers, def.headers.length)) {
+      continue
     }
+    var legacy = LEGACY_HEADERS_[def.name]
+    if (legacy && headersMatch_(head, legacy, legacy.length)) {
+      sh.getRange(1, 1, 1, def.headers.length).setValues([def.headers.slice()])
+      continue
+    }
+    throwCoded_(
+      'INTERNAL',
+      'Sheet "' + def.name + '" header row does not match the expected layout.',
+    )
   }
+}
+
+/**
+ * Compares the first `length` labels of a header row against an expected list.
+ *
+ * @param {Array<*>} head     Header row as read from the sheet.
+ * @param {Array<string>|undefined} expected Expected labels.
+ * @param {number} length     How many labels to compare.
+ * @return {boolean} True when they are identical.
+ * @private
+ */
+function headersMatch_(head, expected, length) {
+  if (!expected || !length || head.length < length) return false
+  for (var c = 0; c < length; c++) {
+    if (String(head[c]) !== expected[c]) return false
+  }
+  return true
 }
 
 /**
@@ -1533,8 +1736,7 @@ function recordToRow_(def, rec, stats) {
   for (i = 0; i < def.headers.length; i++) {
     var h = def.headers[i]
     if (h === 'data') {
-      var json = Object.keys(extras).length ? JSON.stringify(extras) : ''
-      row.push(sanitizeCell_(json, stats))
+      row.push(sanitizeCell_(shrinkDataJson_(extras, stats), stats))
       continue
     }
     if (h === 'deleted') {
@@ -1552,8 +1754,43 @@ function recordToRow_(def, rec, stats) {
 }
 
 /**
+ * JSON-encodes the nested remainder of a record, giving up the largest — and
+ * most recoverable — keys while the result still would not fit one cell.
+ *
+ * A block's structured payload (every visual line with its text, box and run
+ * styling) is the only thing in this backend that can plausibly outgrow the
+ * 50k Sheets cell limit, and losing it the hard way is expensive: a truncated
+ * JSON string is not JSON at all, so `rowToRecord_` would drop the record's
+ * WHOLE nested payload — including fields that fit. Losing `lines` instead
+ * costs rendering detail: the text still travels in its own column, and a
+ * table's cells are still present as ` \t `-separated text in `sourceText`.
+ *
+ * Every key given up is counted into `stats.truncated`, which reaches the
+ * client in the push response — a silent loss is not acceptable either.
+ *
+ * @param {Object} extras Non-column fields of the record (mutated).
+ * @param {Object} stats  {truncated} counter (mutated).
+ * @return {string} JSON for the `data` column.
+ * @private
+ */
+function shrinkDataJson_(extras, stats) {
+  var json = Object.keys(extras).length ? JSON.stringify(extras) : ''
+  for (var i = 0; i < SHRINKABLE_DATA_KEYS_.length && json.length > MAX_CELL_CHARS_; i++) {
+    var key = SHRINKABLE_DATA_KEYS_[i]
+    if (!Object.prototype.hasOwnProperty.call(extras, key)) continue
+    delete extras[key]
+    if (stats) stats.truncated++
+    json = Object.keys(extras).length ? JSON.stringify(extras) : ''
+  }
+  return json
+}
+
+/**
  * Converts a sheet row back into a record: the `data` JSON column is parsed
- * and merged first so the declared scalar columns always win.
+ * first, then every declared scalar column is layered on top — a NON-EMPTY
+ * column always wins, an empty one leaves whatever `data` held in place (see
+ * isEmptyCell_), which is what keeps rows written before a column existed
+ * readable.
  *
  * @param {Object} def Sheet definition.
  * @param {Array<*>} row Row values in header order.
@@ -1582,6 +1819,12 @@ function rowToRecord_(def, row) {
     var h = def.headers[i]
     if (h === 'data') continue
     var v = row[i]
+    // An empty column never erases what the `data` JSON holds. That is how a
+    // row written before a field was declared — or before its column was
+    // renamed — keeps reading correctly after the sheet is upgraded: the value
+    // simply comes from where it was stored, and the first rewrite moves it
+    // into its column.
+    if (isEmptyCell_(v) && Object.prototype.hasOwnProperty.call(rec, h)) continue
     if (h === 'deleted' || h === 'enabled') {
       // Plain-text cells render booleans as "TRUE"/"FALSE" rather than keeping
       // them as booleans, and a string is truthy — so a disabled key would
@@ -1595,6 +1838,15 @@ function rowToRecord_(def, row) {
     }
   }
   return rec
+}
+
+/**
+ * @param {*} v Cell value as returned by getValues().
+ * @return {boolean} True for a cell Sheets reports as blank.
+ * @private
+ */
+function isEmptyCell_(v) {
+  return v === '' || v === null || v === undefined
 }
 
 /**
@@ -2057,6 +2309,16 @@ function writeSyncLog_(ctx) {
     if (lastRow < 1) {
       sh.getRange(1, 1, 1, LOG_HEADERS_.length).setValues([LOG_HEADERS_.slice()])
       lastRow = 1
+    }
+    // Bound the audit trail. Every request appends a row, so left alone the
+    // log would grow for months until it collided with the spreadsheet's own
+    // cell allowance; trimming it back to LOG_KEEP_ROWS_ above the ceiling
+    // keeps that one prune per (LOG_MAX_ROWS_ - LOG_KEEP_ROWS_) requests
+    // instead of a write on every single one.
+    if (lastRow > LOG_MAX_ROWS_) {
+      var prune = lastRow - LOG_KEEP_ROWS_
+      sh.deleteRows(2, prune)
+      lastRow -= prune
     }
     var row = [
       [

@@ -124,9 +124,52 @@ export interface DeleteProjectResponse {
 
 export interface WipeResponse {
   ok: true
-  cleared: number
+  /** Rows removed per sheet tab (`Projects`, `Blocks`, `ApiKeys`, …). */
+  cleared: Record<string, number>
+  /** Rows removed across every tab — the sum of `cleared`. */
   total: number
   chunks: number
+}
+
+/**
+ * Where a paged `backup` call stopped. Not the push cursor: a snapshot walks
+ * the tabs in order and resumes by sheet *and* offset, so passing a plain
+ * number (as an earlier client did) would restart the walk from the first tab.
+ */
+export interface BackupCursor {
+  sheetIndex: number
+  sheet: string
+  offset: number
+}
+
+export interface BackupSheetSnapshot {
+  headers: string[]
+  rows: Record<string, unknown>[]
+}
+
+export interface BackupResponse {
+  ok: true
+  /** Sheet name → decoded rows for that tab. */
+  snapshot: Record<string, BackupSheetSnapshot>
+  counts: Record<string, number>
+  /** Rows returned in this page (across the tabs it reached). */
+  total: number
+  partial: boolean
+  /** Resume point, or `null` when the walk reached the last tab. */
+  nextCursor: { sheetIndex: number; sheet: string; offset: number } | null
+  serverTime: number
+}
+
+export interface BackupResponse {
+  ok: true
+  /** Tab name → that tab's rows, as `rowToRecord_` decodes them. */
+  snapshot: Record<string, BackupSheetSnapshot>
+  counts: Record<string, number>
+  /** Rows in *this* response, across every tab it visited. */
+  total: number
+  partial: boolean
+  nextCursor: BackupCursor | null
+  serverTime: number
 }
 
 /* -------------------------------------------------------------------------- */

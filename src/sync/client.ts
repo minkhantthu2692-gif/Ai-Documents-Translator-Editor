@@ -11,6 +11,7 @@
 import {
   REQUEST_TIMEOUT_MS,
   SyncError,
+  type BackupResponse,
   type DeleteProjectResponse,
   type PingResponse,
   type PullResponse,
@@ -117,11 +118,16 @@ export class SyncClient {
     return this.post<WipeResponse>('wipe', { confirm: 'WIPE' })
   }
 
-  /** Cloud backup snapshot (cursor-paged like pushChanges). */
-  backup(cursor?: number | null, pageSize = 500): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>(
-      'backup',
-      cursor ? { cursor, pageSize } : { pageSize },
-    )
+  /**
+   * Cloud backup snapshot. `backup` is not a push cursor: Code.gs resumes a
+   * walk of the tabs by sheet index **and** row offset, so the cursor is the
+   * `{ sheetIndex, offset }` object it returned — never a bare number, which
+   * would silently restart the walk at the first tab.
+   */
+  backup(
+    cursor: { sheetIndex: number; offset: number } | null = null,
+    pageSize = 500,
+  ): Promise<BackupResponse> {
+    return this.post<BackupResponse>('backup', cursor ? { cursor, pageSize } : { pageSize })
   }
 }

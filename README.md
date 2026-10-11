@@ -54,7 +54,8 @@ Repository: <https://github.com/minkhantthu2692-gif/Ai-Documents-Translator-Edit
   local conflict log; offline runs fail fast and retry when the connection returns.
 - Troubleshooting Assistant in `src/assistant/`: proxy mode (your own `proxy/` server) or a
   fully offline rule-based fallback, with automatic secret redaction and one-click safe actions.
-- `.env.example`, launcher scripts under `tools/`, and a GitHub Pages deploy workflow.
+- `.env.example`, launcher scripts under `tools/`, a `vercel.json` for Vercel, and a GitHub
+  Pages deploy workflow.
 
 ## Quick start
 
@@ -193,6 +194,7 @@ open-data, open-logs) run entirely on your device.
 ├── scripts/             smoke test and fixture builders
 ├── tools/               launcher.html, open-app.*, push-to-github.*
 ├── docs/                documentation (this folder, plus bilingual guides)
+├── vercel.json          Vercel: build, SPA rewrite, cache headers
 └── .github/workflows/   deploy.yml — GitHub Pages
 ```
 

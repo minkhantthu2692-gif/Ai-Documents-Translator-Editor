@@ -21,8 +21,10 @@
  *   VERIFY_LIVE=1        master switch — without it the whole suite skips,
  *                        so the offline gate (`vitest run`) never spends a
  *                        request or needs a secret.
- *   OR_KEY1 / OR_KEY2    OpenRouter key(s); at least OR_KEY1 runs the suite.
- *   GROQ_KEY1 / GROQ_KEY2  Groq key(s); at least GROQ_KEY1 runs the suite.
+ *   OR_KEY1 … OR_KEY5    OpenRouter key(s); at least OR_KEY1 runs the suite.
+ *   GROQ_KEY1 … GROQ_KEY5  Groq key(s); at least GROQ_KEY1 runs the suite.
+ *                        The free tiers are per organisation, so a pool of
+ *                        keys is what keeps a run from parking on one 429.
  *   VERIFY_PDF_1         path to the first real-world PDF (OpenRouter leg).
  *   VERIFY_PDF_2         path to the second real-world PDF (Groq leg).
  *
@@ -101,12 +103,23 @@ import { useTranslateStore } from '@/stores/translateStore'
 /* ------------------------------------------------------------------ */
 
 const verifyLive = process.env.VERIFY_LIVE === '1'
-const orKeys = [process.env.OR_KEY1, process.env.OR_KEY2].filter(
-  (secret): secret is string => typeof secret === 'string' && secret.length > 0,
-)
-const groqKeys = [process.env.GROQ_KEY1, process.env.GROQ_KEY2].filter(
-  (secret): secret is string => typeof secret === 'string' && secret.length > 0,
-)
+
+/**
+ * Collects `PREFIX1…PREFIX5`. More than two keys matter because the free tiers
+ * are per-organisation: one key hits the RPM/TPM ceiling alone, and the pool
+ * only spreads load if it has somewhere to spread it to.
+ */
+function envKeys(prefix: 'OR' | 'GROQ'): string[] {
+  const found: string[] = []
+  for (let n = 1; n <= 5; n += 1) {
+    const secret = process.env[`${prefix}_KEY${n}`]
+    if (typeof secret === 'string' && secret.trim().length > 0) found.push(secret.trim())
+  }
+  return found
+}
+
+const orKeys = envKeys('OR')
+const groqKeys = envKeys('GROQ')
 const pdf1 = process.env.VERIFY_PDF_1 ?? ''
 const pdf2 = process.env.VERIFY_PDF_2 ?? ''
 

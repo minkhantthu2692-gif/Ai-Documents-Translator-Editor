@@ -4,7 +4,7 @@ There are three deployables, and only the first one is required:
 
 | Piece | Required? | Where it runs |
 | --- | --- | --- |
-| Frontend (static `dist/`) | Yes | GitHub Pages, or any static web server |
+| Frontend (static `dist/`) | Yes | Vercel, GitHub Pages, or any static web server |
 | Sync backend (`apps-script/Code.gs`) | Only if you use cloud sync | Your Google account (Apps Script web app + Sheet) |
 | Assistant proxy (`proxy/`) | Only if you want proxy mode | Anywhere Node ≥ 18 runs, or Cloudflare Workers |
 
@@ -45,6 +45,33 @@ the build environment. See the warning below: they are baked into the bundle.
 
 > A deployed build is public. Anything `VITE_`-prefixed in it is readable by anyone with the
 > URL, which is why the assistant key must never be there — see [SECURITY.md](SECURITY.md).
+
+## Vercel
+
+The repository ships [`vercel.json`](../vercel.json), so connecting the repo is the whole
+setup — no workflow to maintain, Vercel builds on every push to `main`.
+
+1. **Import:** [vercel.com/new](https://vercel.com/new) → pick the repository → **Deploy**.
+   The framework preset (Vite), install command (`npm ci`), build command (`npm run build`)
+   and output directory (`dist`) are all read from `vercel.json`.
+2. **Base path:** none. Vercel serves from the domain root, so `VITE_BASE` stays unset and
+   defaults to `/` — which is what `BrowserRouter basename` and the service-worker scope
+   already assume.
+3. **SPA fallback:** the rewrite `/(.*)  →  /index.html` gives deep links (`/workspace`,
+   `/logs`, …) a working hard reload. Vercel applies rewrites *after* the filesystem, so
+   real files (`/assets/*`, `/sw.js`, `/pdfjs-assets/*`) are still served as files.
+4. **Caching:** hashed bundles under `/assets/` are `immutable`; `/pdfjs-assets/` gets a
+   week; `sw.js` is `max-age=0, must-revalidate` so a redeploy is picked up on the next
+   navigation rather than being held by the browser's HTTP cache.
+5. **Environment:** set any of `VITE_APPS_SCRIPT_URL`, `VITE_APPS_SCRIPT_TOKEN`,
+   `VITE_ASSISTANT_PROXY_URL`, `VITE_PDF_SIDECAR_URL` under **Settings → Environment
+   Variables** and redeploy — they are inlined at build time, so editing them in the
+   dashboard without a rebuild does nothing.
+
+Both deploy paths are kept: `vercel.json` for Vercel and
+[`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) for GitHub Pages. Use one,
+not both — a repo connected to Vercel with the Pages workflow also enabled would deploy twice
+per push.
 
 ## Self-hosting `dist/`
 

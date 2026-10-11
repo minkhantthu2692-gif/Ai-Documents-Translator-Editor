@@ -9,12 +9,32 @@ import { SettingsPage } from '@/pages/SettingsPage'
 import { LogsPage } from '@/pages/LogsPage'
 import { KnowledgePage } from '@/pages/KnowledgePage'
 import { MyanmarTestPage } from '@/pages/MyanmarTestPage'
+import { WelcomePage } from '@/pages/WelcomePage'
+import { useUiStore } from '@/stores/uiStore'
+
+/**
+ * First-run guard, index route only: before `completeOnboarding()` the
+ * dashboard is the welcome/setup screen instead. Deep links (projects,
+ * workspace, settings…) are never gated — a shared URL must always open.
+ */
+function IndexRoute() {
+  const onboarded = useUiStore((state) => state.onboarded)
+  return onboarded ? <DashboardPage /> : <Navigate to="/welcome" replace />
+}
+
+/** Once onboarded the welcome screen sends the user to the dashboard. */
+function WelcomeRoute() {
+  const onboarded = useUiStore((state) => state.onboarded)
+  return onboarded ? <Navigate to="/" replace /> : <WelcomePage />
+}
 
 export function App() {
   return (
     <Routes>
+      {/* Outside the AppShell: a fresh install has nothing to navigate yet. */}
+      <Route path="welcome" element={<WelcomeRoute />} />
       <Route element={<AppShell />}>
-        <Route index element={<DashboardPage />} />
+        <Route index element={<IndexRoute />} />
         <Route path="projects" element={<ProjectsPage />} />
         <Route path="projects/new" element={<NewProjectPage />} />
         <Route path="workspace" element={<WorkspacePage />} />

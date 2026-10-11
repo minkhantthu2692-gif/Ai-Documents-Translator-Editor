@@ -12,6 +12,26 @@ Phase 5 — cloud sync and the troubleshooting assistant.
 
 ### Added
 
+- **Bulk project deletion** (Projects page): a checkbox on every project card (grid) and row
+  (table), a select-all checkbox in the table header, and a bulk bar that reports the true
+  selection count — "N selected · Clear selection · Delete selected" — behind the same
+  confirm dialog as a single delete. Backed by `projectRepo.removeMany`, which runs the full
+  cascade per project (pages, blocks, translations, jobs, sync tombstones), so a whole shelf
+  of finished books leaves in one gesture.
+- **Factory reset** (Settings → Cache → "Reset the whole app", in a danger-zone card): one
+  button returns the app to its freshly-installed state — every database table (projects,
+  pages, blocks, translations, translation memory, glossary, keys, settings, usage, events,
+  sync state), the sealed device secret, the cached device id and the persisted UI
+  preferences are erased, the page reloads and the defaults re-seed. Guarded twice: the
+  danger-zone placement, plus a modal that names what is about to be lost and keeps the
+  final button disabled until `RESET` is typed exactly — a trailing space does not arm it.
+- **Welcome + first-time setup screen** (`/welcome`, the combined landing/first-run page):
+  the first visit asks for the UI language (English/မြန်မာ), the appearance (light, dark or
+  system — applied live) and whether cloud sync will be set up later, then "Get started"
+  heads to the new-project flow (or straight to the sync settings) while a quiet link skips
+  to the dashboard. Only the index route is gated — shared deep links always open — and a
+  fresh profile or a factory reset brings the screen back. The smoke suite dismisses it
+  automatically.
 - **Google Apps Script cloud sync** (`apps-script/Code.gs`, `apps-script/appsscript.json`):
   a stateless web-app backend over a Google Sheet with tabs **Projects**, **Pages**,
   **Blocks**, **Glossary**, **Settings**, **UsageStats**, **ApiKeys** and **SyncLog**;
@@ -40,6 +60,29 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   `VITE_ASSISTANT_PROXY_URL` and `VITE_BASE`.
 - **Tooling**: `tools/launcher.html` bilingual start page, `tools/open-app.bat|.sh` one-click
   dev launcher, `tools/push-to-github.bat|.sh` guided commit/push.
+- **Live verification harness** (`src/verify/liveRun.test.ts`): an opt-in suite
+  (`VERIFY_LIVE=1` plus key/PDF variables in the environment — keys are never written to a
+  file) that drives the genuine pipeline end to end against a real provider: key validity,
+  live model discovery and chain selection, a first-token preflight through the real adapter,
+  three content-rich pages of a real PDF through the real queue (real key pool, budget,
+  engine, adapters, terminology), and a merge-integrity re-plan that re-derives the batch
+  plan from the finished state and proves nothing was dropped or duplicated. The report
+  prints per-batch requests/latency/tokens, retries with their kinds, rate-limit waits,
+  model fallbacks and per-key pool state — on success *and* on failure, because a stalled run
+  is the one that must be diagnosable. The harness shares the worker's `reasonFor` mapping
+  (`src/translate/reasons.ts`, now imported by both), so the queue and the report see the
+  production reason codes. The suite skips cleanly when the variables are absent. Before the
+  queue starts, a **protocol probe** asks the model two batches (3 and 20 lines) through the
+  engine's own system prompt, numbered-line user prompt and strict validator, so a model
+  that cannot honour the JSON contract — or that starves its answer with reasoning — is
+  exposed in seconds instead of burning a whole retry ladder and the day's free-tier quota;
+  and when every key ends up quota-parked or rejected the run fails fast in seconds with
+  that state instead of waiting out a deadline that lands tomorrow. The first
+  runs against OpenRouter's and Groq's free tiers are what surfaced the translation
+  fixes below — and pinned down what "free" means in practice: OpenRouter allows **50 model
+  requests per key per day** (adding $10 of credit raises it to 1000), while Groq's free
+  tier is token-paced (8000 TPM, 200 000 tokens/day for `gpt-oss-120b`) and sustains real
+  documents slowly rather than running out.
 - **GitHub Pages deployment**: `.github/workflows/deploy.yml` (type check → tests → build →
   `404.html` SPA fallback → deploy) with a configurable repository variable `VITE_BASE`.
 - Schema **v7**: `syncConflicts` (LWW conflict log) and `syncMeta` (pull cursor, push cursors,
@@ -510,6 +553,61 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   unrenderable block not taking the page with it — plus both paths of
   `workerMeasurer` (canvas when one exists, the 0.52em estimate
   when it does not, which is jsdom’s own). Suite: 1468/1468.
+
+### Fixed
+
+- **A reasoning model can no longer burn its whole answer on thinking** (found by the live
+  harness, Oct 2026 — the biggest translation bug of the sweep): `maxOutputFor` capped the
+  completion at `batch.tokens × 1.6` with a 256-token floor, and reasoning models spend
+  completion tokens *before any answer token exists* — gpt-oss-120b burned a 256-token
+  single-line cap entirely on reasoning and answered with an empty body. Validation saw
+  `empty` at every rung of the retry ladder (batch → halve → repair → fragments), the ladder
+  gave up, and 60 of 64 live-translated lines kept their English source (5 % contained
+  Burmese). Two changes: the completion cap now adds `REASONING_HEADROOM_TOKENS` (2048) on
+  top of the proportional size so thinking *and* translation fit, and the engine sends a
+  reasoning-effort knob — `reasoning_effort` on Groq, `reasoning: {effort}` on OpenRouter —
+  but only to models flagged `reasoning` in the model registry, because providers 400 on
+  unknown parameters (Groq rejects a bare `reasoning` property; live-checked 11 Oct 2026).
+  `High` quality asks for `medium` effort, everything else for `low`; a non-reasoning model
+  simply stops at EOS and never spends the allowance. After the fix the same Groq run
+  finished 3 batches in 5 requests / 78 s (was 250 requests / 568 s with the ladder burning
+  out), 83 % of the translations contained Burmese (was 5 %), and kept-original fell from ×60
+  to zero.
+- **Groq's chain drops a retired preview**: `qwen/qwen3.6-27b` answered 404 on 11 Oct 2026
+  (Groq retires previews at short notice); the chain now leads gpt-oss-120b → gpt-oss-20b →
+  qwen3.8-27b, all live, and the entry notes why.
+- **A routine TPM 429 can no longer park a healthy key for an hour** (found by the live
+  harness, Oct 2026): one `resetAt` was read off the *requests* header family — which Groq
+  stamps `1h6m14.4s` on every response — and `applyRateInfo` fed it into the *token* bucket.
+  Once real usage crossed the free tier's 8000 TPM, the pool refused the key until the
+  requests window rolled while the token window (`x-ratelimit-reset-tokens: 1.027s`) was
+  ignored: a run that flew for 23 lines then sat silent. `RateLimitInfo` now carries
+  `tokensResetAt` from the token-family headers, the TPM bucket is paced by that alone, and
+  for a non-quota 429 the same server deadline caps the exponential backoff (floor 1s) —
+  a streak of rejections no longer parks a key for minutes when the server says the window
+  rolls in a second. `Retry-After` stays authoritative and is never shortened.
+- **A 403 no longer condemns the key.** `unauthorized` and `forbidden` shared one switch arm,
+  so OpenRouter's model-gate 403 ("only available on agentic harnesses" — a *model* refusal,
+  not a credential refusal) poisoned the only healthy key and ended the run with "every
+  configured key was rejected". 401 stays the dead-key signal; 403 now walks the fallback
+  chain like a 404 and only marks the key invalid once every model has been refused.
+- **"Test key" can no longer bless a revoked OpenRouter key.** OpenRouter answers
+  `GET /models` without any credential, so the old probe reported `ok — 458 models` for a
+  dead key. The adapter config takes an optional `authProbePath`; OpenRouter uses its
+  authenticated, free `GET /auth/key`, which answers 200 for a live key and 401 for the dead
+  one. Groq and OpenAI already authenticate `/models` and keep the old probe.
+- **OpenRouter's bundled chain no longer leads with a model this app may not call.**
+  `thinkingmachines/inkling:free` headed the fallback chain — and so was the default model
+  for new runs — but it is gated to agentic harnesses, so every run paid a 403 before
+  anything else. The chain now leads with `nvidia/nemotron-3-super-120b-a12b:free` (200 on a
+  live probe), keeps the other nvidia free routes, and leaves the two gemma routes last:
+  their free pool rate-limits upstream sometimes, which the 429 path rides out.
+- **The smoke script stops racing itself**: the IndexedDB row check polls briefly for the
+  settings/events writes the route pass fires in the background (a single-shot read saw
+  zero rows with a healthy app under CPU load), the undo-drain check drains a stack the
+  bold-toggle retry may have filled rather than assuming exactly one entry, and the Chrome
+  profile cleanup retries the `EPERM` instead of throwing out of `finally` and crashing an
+  otherwise-passing run.
 
 ### Security
 

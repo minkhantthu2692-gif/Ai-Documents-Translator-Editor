@@ -18,12 +18,20 @@ interface UiState {
   mobileNavOpen: boolean
   inspectorOpen: boolean
   projectsView: ProjectsView
+  /**
+   * Whether the welcome/first-time setup screen has been completed. False on
+   * a fresh profile and after a factory reset (which clears this store), so
+   * the index route sends the user to `/welcome` until they have picked a
+   * language and theme. Deep links are never gated — only `/` is.
+   */
+  onboarded: boolean
   setTheme: (theme: Theme) => void
   setLanguage: (language: Language) => void
   toggleSidebar: () => void
   setMobileNavOpen: (open: boolean) => void
   toggleInspector: () => void
   setProjectsView: (view: ProjectsView) => void
+  completeOnboarding: () => void
 }
 
 export const useUiStore = create<UiState>()(
@@ -35,6 +43,7 @@ export const useUiStore = create<UiState>()(
       mobileNavOpen: false,
       inspectorOpen: true,
       projectsView: 'grid',
+      onboarded: false,
       setTheme: (theme) => set({ theme }),
       setLanguage: (language) => {
         void i18n.changeLanguage(language)
@@ -45,6 +54,7 @@ export const useUiStore = create<UiState>()(
       setMobileNavOpen: (mobileNavOpen) => set({ mobileNavOpen }),
       toggleInspector: () => set((state) => ({ inspectorOpen: !state.inspectorOpen })),
       setProjectsView: (projectsView) => set({ projectsView }),
+      completeOnboarding: () => set({ onboarded: true }),
     }),
     {
       name: 'aidt.ui',
@@ -55,6 +65,7 @@ export const useUiStore = create<UiState>()(
         sidebarCollapsed: state.sidebarCollapsed,
         projectsView: state.projectsView,
         inspectorOpen: state.inspectorOpen,
+        onboarded: state.onboarded,
       }),
     },
   ),

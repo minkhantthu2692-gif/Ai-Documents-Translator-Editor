@@ -1,14 +1,18 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Badge, Button, Card, ConfirmDialog, Input, Switch } from '@/components/ui'
+import { Badge, Button, Card, ConfirmDialog, Input, Modal, Switch } from '@/components/ui'
 import { cacheRepo, DEFAULT_MAX_BYTES, DEFAULT_TTL_MS } from '@/db/repo-cache'
 import { CACHE_KINDS, type CacheKind } from '@/db/types'
 import { SETTING_KEYS } from '@/db/repo-settings'
+import { resetEverything } from '@/db/db'
 import { logEvent } from '@/core/eventLogger'
 import { toast } from '@/stores/toastStore'
 import { formatBytes } from '@/lib/format'
 import { useSetting } from './useSetting'
+
+/** Typed phrase that arms the factory reset — see `resetApp`. */
+const RESET_PHRASE = 'RESET'
 
 const DEFAULT_TTL_DAYS: Record<CacheKind, number> = {
   translation: DEFAULT_TTL_MS.translation / 86_400_000,
@@ -36,6 +40,8 @@ export function CacheTab() {
 
   const sizes = useLiveQuery(() => cacheRepo.sizes(), [])
   const [confirmClearAll, setConfirmClearAll] = useState(false)
+  const [confirmReset, setConfirmReset] = useState(false)
+  const [resetPhrase, setResetPhrase] = useState('')
   const [busy, setBusy] = useState(false)
   const [draftTtl, setDraftTtl] = useState<Record<string, number>>({ ...DEFAULT_TTL_DAYS })
   const [draftMax, setDraftMax] = useState<Record<string, number>>({ ...DEFAULT_MAX_MB })
@@ -89,6 +95,33 @@ export function CacheTab() {
       technicalDetail: JSON.stringify({ ttl: draftTtl, max: draftMax }),
     })
     toast('success', t('settings.cache.budgetsSaved'))
+  }
+
+  /**
+   * Factory reset. Guarded twice over — a danger-zone button *and* a typed
+   * RESET phrase — because this erases every project, key and preference the
+   * browser holds, with no undo. The reload re-seeds the defaults, so the
+   * next visit is the welcome screen of a fresh install.
+   */
+  async function resetApp() {
+    setBusy(true)
+    try {
+      await resetEverything()
+      setConfirmReset(false)
+      logEvent({
+        state: 'SETTINGS',
+        action: 'app.reset',
+        severity: 'warning',
+        messageMy: 'အက်ပ်အားလုံး ပြန်လည်စတင်ပြီး',
+        messageEn: 'Factory reset: the app returned to its fresh-install state',
+      })
+      toast('success', t('settings.cache.resetDone'))
+      window.setTimeout(() => window.location.reload(), 350)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setBusy(false)
+      toast('danger', t('toast.failed'), message)
+    }
   }
 
   return (
@@ -200,6 +233,63 @@ export function CacheTab() {
         </div>
         <p className="mt-3 text-[11px] text-faint">{t('settings.cache.ttlDesc')}</p>
       </Card>
+
+      <Card title={t('settings.cache.resetCard')}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="max-w-xl text-xs text-muted">{t('settings.cache.resetBody')}</p>
+          <Button
+            variant="danger"
+            size="sm"
+            data-testid="reset-app-button"
+            onClick={() => {
+              setResetPhrase('')
+              setConfirmReset(true)
+            }}
+          >
+            {t('settings.cache.resetButton')}
+          </Button>
+        </div>
+      </Card>
+
+      <Modal
+        open={confirmReset}
+        onClose={() => setConfirmReset(false)}
+        title={t('settings.cache.resetCard')}
+        size="sm"
+        closeLabel={t('common.close')}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setConfirmReset(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="danger"
+              loading={busy}
+              disabled={resetPhrase !== RESET_PHRASE}
+              data-testid="reset-confirm-button"
+              onClick={() => void resetApp()}
+            >
+              {t('settings.cache.resetConfirm')}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <ul className="list-disc space-y-1 pl-4 text-xs text-muted">
+            <li>{t('settings.cache.resetWarnData')}</li>
+            <li>{t('settings.cache.resetWarnKeys')}</li>
+            <li>{t('settings.cache.resetWarnSettings')}</li>
+          </ul>
+          <Input
+            label={t('settings.cache.resetPrompt', { phrase: RESET_PHRASE })}
+            hint={t('settings.cache.resetHint')}
+            value={resetPhrase}
+            data-testid="reset-phrase-input"
+            onChange={(event) => setResetPhrase(event.target.value)}
+            autoFocus
+          />
+        </div>
+      </Modal>
 
       <ConfirmDialog
         open={confirmClearAll}

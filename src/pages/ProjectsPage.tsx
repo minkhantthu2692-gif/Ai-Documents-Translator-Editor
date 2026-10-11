@@ -54,6 +54,7 @@ type PendingAction =
   | { kind: 'duplicate'; project: ProjectRecord }
   | { kind: 'archive'; project: ProjectRecord }
   | { kind: 'delete'; project: ProjectRecord }
+  | { kind: 'deleteMany'; ids: string[] }
   | null
 
 export function ProjectsPage() {
@@ -69,6 +70,7 @@ export function ProjectsPage() {
   const [pending, setPending] = useState<PendingAction>(null)
   const [renameValue, setRenameValue] = useState('')
   const [busy, setBusy] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const fileRef = useRef<HTMLInputElement>(null)
 
   const projects = useLiveQuery(
@@ -102,8 +104,61 @@ export function ProjectsPage() {
     setShowArchived(false)
   }
 
+  /* Bulk selection — visible rows drive select-all; the set itself may hold
+   * rows a later filter hides, and the bulk bar always reports its true size. */
+  const visibleIds = rows.map((row) => row.id)
+  const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id))
+
+  function toggleSelected(id: string, checked: boolean) {
+    setSelected((current) => {
+      const next = new Set(current)
+      if (checked) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll(checked: boolean) {
+    setSelected(checked ? new Set(visibleIds) : new Set())
+  }
+
+  /** One cascade per project, then the selection is gone with them. */
+  async function deleteSelectedProjects() {
+    const ids = [...selected]
+    if (ids.length === 0) return
+    setBusy(true)
+    try {
+      const removed = await projectRepo.removeMany(ids)
+      setSelected(new Set())
+      logEvent({
+        state: 'PROJECT',
+        action: 'project.deleteMany',
+        severity: 'warning',
+        messageMy: `စီမံကိန်း ${removed} ခု ဖျက်ပြီး`,
+        messageEn: `Deleted ${removed} projects`,
+        technicalDetail: `ids=${ids.join(',')}`,
+      })
+      toast('warning', t('projects.deletedMany', { count: removed }))
+      setPending(null)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      logEvent({
+        state: 'PROJECT',
+        action: 'project.deleteMany.failed',
+        severity: 'error',
+        messageMy: 'စီမံကိန်းများ ဖျက်၍ မရပါ',
+        messageEn: 'The selected projects could not be deleted',
+        technicalDetail: message,
+      })
+      toast('danger', t('toast.failed'), message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function runAction() {
-    if (!pending) return
+    // deleteMany has its own handler (deleteSelectedProjects).
+    if (!pending || pending.kind === 'deleteMany') return
     const { kind, project } = pending
     setBusy(true)
     try {
@@ -269,6 +324,29 @@ export function ProjectsPage() {
   }
 
   const columns: TableColumn<ProjectRecord>[] = [
+    {
+      key: 'select',
+      header: (
+        <input
+          type="checkbox"
+          aria-label={t('projects.selectAll')}
+          checked={allSelected}
+          onChange={(event) => toggleSelectAll(event.target.checked)}
+          className="h-3.5 w-3.5 accent-[rgb(var(--color-primary))]"
+          data-testid="project-select-all"
+        />
+      ),
+      render: (project) => (
+        <input
+          type="checkbox"
+          aria-label={`${t('projects.select')}: ${project.name}`}
+          checked={selected.has(project.id)}
+          onChange={(event) => toggleSelected(project.id, event.target.checked)}
+          className="h-3.5 w-3.5 accent-[rgb(var(--color-primary))]"
+          data-testid="project-select"
+        />
+      ),
+    },
     {
       key: 'name',
       header: t('common.name'),
@@ -448,6 +526,30 @@ export function ProjectsPage() {
         </div>
       </Card>
 
+      {selected.size > 0 && (
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-raised px-3 py-2"
+          data-testid="bulk-actions"
+        >
+          <p className="text-sm text-muted">
+            {t('projects.selectedCount', { count: selected.size })}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+              {t('projects.clearSelection')}
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              iconLeft={<IconTrash className="h-4 w-4" />}
+              onClick={() => setPending({ kind: 'deleteMany', ids: [...selected] })}
+            >
+              {t('projects.deleteSelected')}
+            </Button>
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 sm:gap-4">
           {Array.from({ length: 3 }).map((_, index) => (
@@ -493,16 +595,26 @@ export function ProjectsPage() {
           {rows.map((project) => (
             <Card key={project.id} className="min-w-0">
               <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <Link
-                    to={`/workspace/${project.id}`}
-                    className="block truncate text-sm font-semibold text-text hover:text-accent"
-                  >
-                    {project.name}
-                  </Link>
-                  <p className="mt-0.5 truncate text-[11px] text-faint">
-                    {project.sourceFileName ?? t('workspace.noFile')}
-                  </p>
+                <div className="flex min-w-0 items-start gap-2">
+                  <input
+                    type="checkbox"
+                    aria-label={`${t('projects.select')}: ${project.name}`}
+                    checked={selected.has(project.id)}
+                    onChange={(event) => toggleSelected(project.id, event.target.checked)}
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[rgb(var(--color-primary))]"
+                    data-testid="project-select"
+                  />
+                  <div className="min-w-0">
+                    <Link
+                      to={`/workspace/${project.id}`}
+                      className="block truncate text-sm font-semibold text-text hover:text-accent"
+                    >
+                      {project.name}
+                    </Link>
+                    <p className="mt-0.5 truncate text-[11px] text-faint">
+                      {project.sourceFileName ?? t('workspace.noFile')}
+                    </p>
+                  </div>
                 </div>
                 <Badge tone={STATUS_TONE[project.status]}>
                   {t(`projects.status.${project.status}`)}
@@ -594,10 +706,20 @@ export function ProjectsPage() {
       <ConfirmDialog
         open={pending?.kind === 'archive'}
         title={
-          pending?.project.archived ? t('projects.unarchiveConfirm') : t('projects.archiveConfirm')
+          pending?.kind === 'archive' && pending.project.archived
+            ? t('projects.unarchiveConfirm')
+            : t('projects.archiveConfirm')
         }
-        body={pending?.project.archived ? t('projects.unarchiveBody') : t('projects.archiveBody')}
-        confirmLabel={pending?.project.archived ? t('common.unarchive') : t('common.archive')}
+        body={
+          pending?.kind === 'archive' && pending.project.archived
+            ? t('projects.unarchiveBody')
+            : t('projects.archiveBody')
+        }
+        confirmLabel={
+          pending?.kind === 'archive' && pending.project.archived
+            ? t('common.unarchive')
+            : t('common.archive')
+        }
         cancelLabel={t('common.cancel')}
         closeLabel={t('common.close')}
         loading={busy}
@@ -615,6 +737,23 @@ export function ProjectsPage() {
         tone="danger"
         loading={busy}
         onConfirm={() => void runAction()}
+        onCancel={() => setPending(null)}
+      />
+
+      <ConfirmDialog
+        open={pending?.kind === 'deleteMany'}
+        title={t('projects.deleteManyTitle', {
+          count: pending?.kind === 'deleteMany' ? pending.ids.length : 0,
+        })}
+        body={t('projects.deleteManyBody')}
+        confirmLabel={t('projects.deleteManyConfirm', {
+          count: pending?.kind === 'deleteMany' ? pending.ids.length : 0,
+        })}
+        cancelLabel={t('common.cancel')}
+        closeLabel={t('common.close')}
+        tone="danger"
+        loading={busy}
+        onConfirm={() => void deleteSelectedProjects()}
         onCancel={() => setPending(null)}
       />
     </PageContainer>

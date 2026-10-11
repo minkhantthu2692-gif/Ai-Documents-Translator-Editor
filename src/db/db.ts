@@ -22,7 +22,8 @@
  */
 
 import Dexie, { type Table } from 'dexie'
-import { getDeviceId } from '@/core/id'
+import { destroyDeviceSecret } from '@/core/crypto'
+import { getDeviceId, resetDeviceIdCache } from '@/core/id'
 import type {
   ApiKeyRecord,
   BlockRecord,
@@ -388,4 +389,30 @@ export async function deleteDatabase(): Promise<void> {
     request.onblocked = () => resolve()
   })
   database = null
+}
+
+/** The one localStorage key Dexie itself never owns (see `src/stores/uiStore.ts`). */
+const UI_STORE_KEY = 'aidt.ui'
+/** Cached browser-profile id (see `src/core/id.ts` — its own reset is memory-only). */
+const DEVICE_ID_KEY = 'aidt.deviceId'
+
+/**
+ * Factory reset — the whole app back to its freshly-installed state
+ * (Settings → Cache → "Reset the whole app"). Erases every database table
+ * (projects, pages, blocks, translations, translation memory, glossary, API
+ * keys, settings, usage, events, sync state), the sealed device secret, the
+ * cached device id and the persisted UI preferences (theme, language, view).
+ * The caller reloads the page afterwards; every default re-seeds on boot, so
+ * the next visit starts at the welcome screen exactly like a new install.
+ */
+export async function resetEverything(): Promise<void> {
+  destroyDeviceSecret()
+  resetDeviceIdCache()
+  await deleteDatabase()
+  try {
+    globalThis.localStorage?.removeItem(DEVICE_ID_KEY)
+    globalThis.localStorage?.removeItem(UI_STORE_KEY)
+  } catch {
+    /* storage disabled (private mode) — nothing persisted to clear */
+  }
 }

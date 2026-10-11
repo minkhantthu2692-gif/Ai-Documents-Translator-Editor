@@ -224,6 +224,20 @@ export class ProjectRepository {
     }
   }
 
+  /**
+   * Bulk delete: one full cascade per project, sequentially — each `remove`
+   * owns its transaction and sync tombstone, and the order does not matter.
+   * Returns how many projects were actually removed.
+   */
+  async removeMany(ids: string[]): Promise<number> {
+    let removed = 0
+    for (const id of ids) {
+      await this.remove(id)
+      removed += 1
+    }
+    return removed
+  }
+
   async stats(): Promise<{
     projects: number
     activeProjects: number

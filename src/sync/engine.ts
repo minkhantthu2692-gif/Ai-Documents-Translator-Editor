@@ -610,6 +610,10 @@ async function pushPhase(
           // (applied or skipped); the rest stays due for the next run.
           for (const row of chunk.slice(0, res.nextCursor)) await outboxRepo.markSent(row.id)
           stats.deferred += chunk.length - res.nextCursor
+          // The rest of the queue is still pending, and this return bypasses
+          // the backlog probe at the bottom of the loop — report it here or
+          // a half-finished run looks clean.
+          stats.hasMore = true
           meta.lastPushAt = Date.now()
           await persistMeta(meta)
           return
@@ -918,7 +922,10 @@ async function pullPhase(
     await persistMeta(meta)
     stats.pullPages += 1
     if (!res.hasMore) {
-      stats.hasMore = false
+      // Drained — and `hasMore` is deliberately NOT cleared here. The push
+      // phase may have stopped on a deferred backlog (partial push or batch
+      // cap), and a run that stopped half way must keep saying so: the "more
+      // to sync" hint in SyncCard keys off this exact flag.
       return
     }
   }

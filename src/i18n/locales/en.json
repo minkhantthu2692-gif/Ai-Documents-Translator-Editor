@@ -61,8 +61,25 @@
     "saved": "Saved"
   },
   "welcome": {
-    "kicker": "Welcome",
-    "subtitle": "Turn PDFs into editable, translated documents — layout preserved, Burmese-ready. Two quick choices and you are in.",
+    "kicker": "Runs in your browser",
+    "headline": "Turn any PDF into a translated document — layout intact.",
+    "subtitle": "Pages, tables, images and footnotes keep their place while the text becomes Burmese. Export to PDF, Word, HTML or Markdown and keep editing.",
+    "featuresTitle": "What you get",
+    "fLayoutTitle": "Layout preserved",
+    "fLayoutDesc": "Paragraphs, headings, lists, tables, images and footnotes are read page by page and stay exactly where they belong.",
+    "fFormatsTitle": "Four ways out",
+    "fFormatsDesc": "Export as PDF, Word (.docx), HTML or Markdown — choose the format per export, and edit before you save.",
+    "fFontsTitle": "Burmese typography built in",
+    "fFontsDesc": "Noto Sans Myanmar and Padauk ship with the app, and both Zawgyi and Unicode text are handled.",
+    "fKeysTitle": "Bring your own AI key",
+    "fKeysDesc": "Gemini, Groq, OpenRouter or any OpenAI-compatible endpoint. Keys stay on this device and are sent only to that provider.",
+    "fLocalTitle": "Local-first",
+    "fLocalDesc": "Documents are parsed and stored in this browser. Nothing is uploaded unless you switch on sync.",
+    "fSyncTitle": "Optional cloud sync",
+    "fSyncDesc": "Back up projects to a Google Sheet you own, from this browser, whenever you choose.",
+    "localFirst": "No account, no upload, no server of ours — the app keeps working offline after the first visit.",
+    "setupTitle": "Set up",
+    "setupLede": "Three quick choices, then you are in.",
     "stepLanguage": "Language",
     "languageDesc": "The language of the app itself. Your documents translate to Burmese either way.",
     "stepAppearance": "Appearance",
@@ -77,7 +94,8 @@
     "syncLater": "Open sync settings after setup",
     "syncLaterDesc": "Takes you straight to the sync page once you press Get started.",
     "getStarted": "Get started",
-    "skipToDashboard": "Skip to the dashboard"
+    "skipToDashboard": "Skip to the dashboard",
+    "changeLater": "You can change any of this later in Settings."
   },
   "nav": {
     "dashboard": "Dashboard",

@@ -12,6 +12,20 @@ Phase 5 — cloud sync and the troubleshooting assistant.
 
 ### Added
 
+- **A redesigned first-run landing and setup screen** (Oct 2026): the old `/` was one column
+  of three bare cards — a form that never said what the app was for, so a first-time visitor
+  had to press "Get started" to find out. It is now two columns on desktop: the pitch on the
+  left (headline, a six-card feature grid covering layout fidelity, the four export formats,
+  bundled Burmese typefaces, bring-your-own keys, local-first storage and optional sync, plus
+  a no-account/no-upload trust line) and the same three choices on the right as a numbered
+  setup panel with a full-width CTA. The controls changed shape too — segmented language
+  buttons with a check on the selection, icon tiles for light/dark/system, radio cards that
+  highlight when chosen — and the screen fixes two defects along the way: `bg-canvas` was
+  never a defined token, so the old page carried a background class that compiled to nothing,
+  and the `မြန်မာ` option now carries `mm-text` so it paints with the bundled Noto Sans Myanmar
+  on a machine with no system Myanmar face instead of falling through to whatever
+  `sans-serif` resolves to. Behaviour is unchanged, so `src/pages/WelcomePage.test.tsx`
+  still passes as written.
 - **A "Try now" button on the waiting banner** (Oct 2026): a run parked on a rate-limit
   countdown offered only a clock — and the clock could read "Resumes in 3505s" under a banner
   that called it a daily window. The banner now offers a way out. Two halves, ordered:

@@ -16,7 +16,7 @@
 
 import { ProviderError, RETRYABLE_KINDS, type ProviderErrorKind } from '@/providers/types'
 import type { RateLimitInfo } from '@/providers/rateLimit'
-import type { KeyPool, KeyLease } from './keyPool'
+import type { KeyPool, KeyLease, WaitWindow } from './keyPool'
 import type { TranslateCall } from '@/providers/types'
 
 export interface TransportOk {
@@ -40,7 +40,7 @@ export type WaitingReason = 'ALL_KEYS_COOLING_DOWN' | 'QUOTA_EXHAUSTED'
 
 export interface ExecutorHooks {
   /** Called every time the executor parks until `until` (auto-resume). */
-  onWaiting?: (until: number, reason: WaitingReason) => void
+  onWaiting?: (until: number, reason: WaitingReason, window: WaitWindow) => void
   /** Called after each failed attempt (before the next key/model is chosen). */
   onRetry?: (info: {
     keyId: string
@@ -105,6 +105,57 @@ export function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
 function isAbort(error: unknown, signal?: AbortSignal): boolean {
   if (signal?.aborted) return true
   return error instanceof DOMException && error.name === 'AbortError'
+}
+
+/**
+ * The channel a "Try now" button uses to cut a rate-limit wait short.
+ *
+ * The executor parks *inside* `sleep()` between batches. Aborting the run's
+ * signal there would fail the whole run, and the wait can be minutes long, so
+ * the wait gets its own interruption: `fire()` ends every sleep in progress
+ * and the executor loop re-reads the pool — it then either finds a usable key
+ * (the backoffs are gone) or parks again on the same deadline (an untouched
+ * provider bucket still refuses, which is exactly what should happen).
+ */
+export class WakeChannel {
+  private readonly listeners = new Set<() => void>()
+
+  /** Ends every sleep registered through this channel. */
+  fire(): void {
+    for (const listener of [...this.listeners]) listener()
+  }
+
+  /** Sleep that `fire()` can end early; abort behaviour matches `defaultSleep`. */
+  sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new DOMException('aborted', 'AbortError'))
+        return
+      }
+      let settled = false
+      const finish = (): boolean => {
+        if (settled) return false
+        settled = true
+        clearTimeout(timer)
+        this.listeners.delete(onWake)
+        signal?.removeEventListener('abort', onAbort)
+        return true
+      }
+      const onWake = (): void => {
+        if (finish()) resolve()
+      }
+      const onAbort = (): void => {
+        if (finish()) reject(new DOMException('aborted', 'AbortError'))
+      }
+      // Declared after the closures that use it, but only ever *called* once
+      // the timer, the listener and the abort handler are all registered.
+      const timer = setTimeout(() => {
+        if (finish()) resolve()
+      }, ms)
+      this.listeners.add(onWake)
+      signal?.addEventListener('abort', onAbort, { once: true })
+    })
+  }
 }
 
 function asProviderError(error: unknown): ProviderError {
@@ -257,8 +308,8 @@ export async function executeWithRotation(
     }
 
     // No key right now: wait for the earliest cooldown/bucket reset.
-    const until = pool.availableAt(tokenEstimate, now())
-    if (until === null) {
+    const wait = pool.waitingDetail(tokenEstimate, now())
+    if (wait === null) {
       const reason = pool.exhaustionReason(now())
       if (reason === 'NO_API_KEY') {
         throw new ProviderError('unauthorized', 'No API key is configured for this provider')
@@ -267,11 +318,12 @@ export async function executeWithRotation(
         throw new ProviderError('unauthorized', 'Every configured key was rejected')
       }
       // Unknown deadline (e.g. bucket windows already rolled over) — back off a
-      // little instead of spinning.
+      // little instead of spinning. It is our own five-second guess, so it is
+      // reported as a cooldown and never dressed up as a provider window.
       const fallbackUntil = now() + 5_000
       const waitingReason: WaitingReason =
         reason === 'QUOTA_EXHAUSTED' ? 'QUOTA_EXHAUSTED' : 'ALL_KEYS_COOLING_DOWN'
-      hooks.onWaiting?.(fallbackUntil, waitingReason)
+      hooks.onWaiting?.(fallbackUntil, waitingReason, 'cooldown')
       await sleep(Math.max(0, fallbackUntil - now()), signal)
       continue
     }
@@ -281,8 +333,8 @@ export async function executeWithRotation(
         ? 'QUOTA_EXHAUSTED'
         : 'ALL_KEYS_COOLING_DOWN'
     consecutiveFailures = 0
-    hooks.onWaiting?.(until, reason)
-    const waitMs = Math.max(0, until - now())
+    hooks.onWaiting?.(wait.until, reason, wait.window)
+    const waitMs = Math.max(0, wait.until - now())
     await sleep(waitMs, signal)
   }
 }

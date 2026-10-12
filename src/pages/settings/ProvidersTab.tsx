@@ -20,7 +20,13 @@ import {
   IconRefresh,
   IconTrash,
 } from '@/components/layout/icons'
-import { PROVIDERS, defaultModelFor, type ProviderId } from '@/config/models.config'
+import {
+  PROVIDERS,
+  defaultModelFor,
+  providerMeta,
+  providerSharesQuota,
+  type ProviderId,
+} from '@/config/models.config'
 import { logEvent } from '@/core/eventLogger'
 import { isVaultUnlocked, unlockVault, vaultPassphrase } from '@/core/vault'
 import { apiKeyRepo, type ApiKeySummary } from '@/db/repo-apiKeys'
@@ -562,6 +568,19 @@ function ProviderCard({ providerId, keys, isActive, onChanged }: ProviderCardPro
               ))}
             </ul>
           )}
+
+          {/* A second key of a per-organisation provider buys failover, not
+              quota — say so before the user adds one expecting more. */}
+          {providerSharesQuota(providerId) ? (
+            <p
+              className="text-[11px] leading-relaxed text-muted"
+              data-testid={`shared-allowance-${providerId}`}
+            >
+              {t('settings.providers.sharedAllowance', {
+                provider: providerMeta(providerId).label,
+              })}
+            </p>
+          ) : null}
 
           <div className="flex flex-wrap items-end gap-2 border-t border-border pt-2">
             <Input

@@ -187,6 +187,38 @@ describe('runPreflight', () => {
     expect(isReadyToStart(ready)).toBe(true)
   })
 
+  it('says keys share one allowance only where that is true', () => {
+    // Groq's free tier is per organisation, so a second key from the same
+    // account buys failover, not quota — the exact assumption the user got
+    // wrong when a fresh key changed nothing.
+    const groq = runPreflight(
+      input({
+        aiReady: true,
+        apiKeyStatus: 'cooling',
+        provider: 'groq',
+        model: 'llama-3.3-70b-versatile',
+      }),
+    )
+    expect(byId(groq, 'apiKey').detailEn).toContain('failover, not quota')
+    expect(byId(groq, 'apiKey').detailMy).toContain('တစ်ခုတည်း')
+
+    const quota = runPreflight(
+      input({
+        aiReady: true,
+        apiKeyStatus: 'quota',
+        provider: 'groq',
+        model: 'llama-3.3-70b-versatile',
+      }),
+    )
+    expect(byId(quota, 'apiKey').detailEn).toContain('one organisation allowance')
+
+    const openai = runPreflight(
+      input({ aiReady: true, apiKeyStatus: 'cooling', provider: 'openai', model: 'gpt-4o-mini' }),
+    )
+    expect(byId(openai, 'apiKey').detailEn).not.toContain('failover')
+    expect(byId(openai, 'apiKey').detailEn).toBe('All keys are cooling down')
+  })
+
   it('compares the estimate against the free-tier quota', () => {
     const over = runPreflight(
       input({ estimate: { tokensIn: 150_000, tokensOut: 150_000, requests: 100, seconds: 900 } }),

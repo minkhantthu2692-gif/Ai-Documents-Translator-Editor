@@ -182,6 +182,14 @@ class WorkerRunner implements TranslateRunner {
     this.worker?.postMessage({ kind: 'cancel', id })
   }
 
+  /**
+   * Ends a rate-limit wait without touching the pending runs. Fire-and-forget:
+   * the worker clears its own backoffs and the parked batch resumes on its own.
+   */
+  wake(): void {
+    this.worker?.postMessage({ kind: 'wake' })
+  }
+
   cancelAll(): void {
     const ids = [...this.pending.keys()]
     for (const id of ids) this.cancel(id)

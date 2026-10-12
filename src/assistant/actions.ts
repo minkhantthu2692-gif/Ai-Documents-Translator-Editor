@@ -11,7 +11,6 @@
 import { apiKeyRepo } from '@/db/repo-apiKeys'
 import { cacheRepo } from '@/db/repo-cache'
 import { SETTING_KEYS, settingsRepo } from '@/db/repo-settings'
-import { getDb } from '@/db/db'
 import type { SafeActionId } from './types'
 
 export type ActionEffect =
@@ -51,15 +50,7 @@ export async function runSafeAction(
     case 'rotate-key': {
       // Clearing cooldowns never exposes a key — it only lets the pool try the
       // stored keys again; pasting a replacement still happens in Settings.
-      const rows = await apiKeyRepo.list()
-      let cleared = 0
-      const db = getDb()
-      for (const row of rows) {
-        if ((row.cooldownUntil ?? 0) > 0 || row.cooldownReason) {
-          await db.apiKeys.update(row.id, { cooldownUntil: 0, cooldownReason: null })
-          cleared += 1
-        }
-      }
+      const cleared = await apiKeyRepo.clearCooldowns()
       return {
         ok: true,
         titleEn:

@@ -13,7 +13,7 @@
 
 import type { ReasonCode } from '@/core/reasonCodes'
 import type { ApiKeyRecord } from '@/db/types'
-import type { LimitConfig, PersistedKeyState } from './keyPool'
+import type { LimitConfig, PersistedKeyState, WaitWindow } from './keyPool'
 import type {
   BatchRunResult,
   GlossarySpec,
@@ -79,7 +79,16 @@ export interface CloseMessage {
   kind: 'close'
 }
 
-export type MainToWorker = OpenMessage | RunMessage | CancelMessage | CloseMessage
+/**
+ * "Try now": drop the worker's own backoffs and end any rate-limit sleep in
+ * progress. Session-scoped rather than run-scoped — the key pool is shared by
+ * every batch of a run, so there is no single run id to name.
+ */
+export interface WakeMessage {
+  kind: 'wake'
+}
+
+export type MainToWorker = OpenMessage | RunMessage | CancelMessage | CloseMessage | WakeMessage
 
 export interface OpenedMessage {
   kind: 'opened'
@@ -105,6 +114,8 @@ export interface WaitingMessage {
   id: string
   until: number
   reason: WaitingReason
+  /** Which window set `until`, so the banner can name it rather than guess. */
+  window: WaitWindow
 }
 
 export interface ResumedMessage {
@@ -181,6 +192,7 @@ export interface RunnerTick {
 export interface RunnerWait {
   until: number
   reason: WaitingReason
+  window: WaitWindow
 }
 
 export interface RunnerHooks {
@@ -227,4 +239,11 @@ export interface TranslateRunner {
   cancel(id: string): void
   cancelAll(): void
   close(): void
+  /**
+   * Skips a rate-limit wait ("Try now"). Optional on purpose: a run is correct
+   * without it — it simply keeps waiting until the deadline. Only a runner that
+   * parks inside an interruptible sleep has anything to wake, and test fakes
+   * never park on a real clock.
+   */
+  wake?(): void
 }

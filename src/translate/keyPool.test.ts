@@ -321,6 +321,104 @@ describe('invalid keys and exhaustion', () => {
   })
 })
 
+describe('waitingDetail', () => {
+  it('names the day window when the daily bucket is what blocks', () => {
+    const { pool } = harness()
+    pool.setKeys([seed('key-a')])
+    pool.configureLimits({ rpd: 1 })
+    pool.reportSuccess('key-a', { now: T0 })
+
+    expect(pool.waitingDetail(0, T0)).toEqual({ until: T0 + DAY, window: 'day' })
+  })
+
+  it('names the minute window when the per-minute bucket blocks', () => {
+    const { pool } = harness()
+    pool.setKeys([seed('key-a')])
+    pool.configureLimits({ rpm: 2 })
+    pool.reportSuccess('key-a', { now: T0 })
+    pool.reportSuccess('key-a', { now: T0 })
+
+    expect(pool.waitingDetail(0, T0)).toEqual({ until: T0 + MINUTE, window: 'minute' })
+  })
+
+  it('reports a bare backoff as a cooldown, never as a provider window', () => {
+    const { pool } = harness()
+    pool.setKeys([seed('key-a')])
+    pool.reportRateLimit('key-a', { quota: true, now: T0 })
+
+    // The case the banner used to label "Daily": our own 60-minute
+    // quotaFallbackMs guess, which the provider never named at all. The
+    // harness' fixed random() makes the ±25% jitter land on exactly 1.
+    const detail = pool.waitingDetail(0, T0)
+    expect(detail?.window).toBe('cooldown')
+    expect(detail?.until).toBe(T0 + 60 * MINUTE)
+  })
+
+  it('reports a shared deadline as the window, whichever key offered it first', () => {
+    const { pool } = harness()
+    pool.setKeys([seed('key-a'), seed('key-b')])
+    pool.configureLimits({ rpd: 1 })
+    // key-a is held only by our backoff, which `reportRateLimit` landed on
+    // exactly the daily reset key-b is sitting on. Iteration reaches key-a
+    // first, so without an explicit tie-break the answer would be "cooldown"
+    // and the banner would stop naming the window that actually caused it.
+    pool.reportRateLimit('key-a', { retryAfterMs: DAY, now: T0 })
+    pool.reportSuccess('key-b', { now: T0 })
+
+    expect(pool.waitingDetail(0, T0)).toEqual({ until: T0 + DAY, window: 'day' })
+  })
+
+  it('returns null when a key can serve right now', () => {
+    const { pool } = harness()
+    pool.setKeys([seed('key-a')])
+    expect(pool.waitingDetail(0, T0)).toBeNull()
+    expect(pool.availableAt(0, T0)).toBeNull()
+  })
+})
+
+describe('clearCooldowns', () => {
+  it('drops every guessed backoff so a "Try now" runs straight away', () => {
+    const { pool } = harness()
+    pool.setKeys([seed('key-a'), seed('key-b')])
+    pool.reportRateLimit('key-a', { retryAfterMs: 30_000, now: T0 })
+    pool.reportRateLimit('key-b', { quota: true, now: T0 })
+    expect(pool.isExhausted(T0)).toBe(true)
+    expect(pool.exhaustionReason(T0)).toBe('QUOTA_EXHAUSTED')
+
+    expect(pool.clearCooldowns()).toBe(2)
+
+    expect(pool.isExhausted(T0)).toBe(false)
+    expect(pool.availableAt(0, T0)).toBeNull()
+    // The quota *reason* has to go too, or exhaustionReason would still claim
+    // a daily limit the moment a bucket filled.
+    expect(pool.exhaustionReason(T0)).not.toBe('QUOTA_EXHAUSTED')
+  })
+
+  it('leaves the provider bucket counters standing', () => {
+    const { pool } = harness()
+    pool.setKeys([seed('key-a')])
+    pool.configureLimits({ rpd: 1 })
+    pool.reportSuccess('key-a', { now: T0 })
+    pool.reportRateLimit('key-a', { retryAfterMs: 30_000, now: T0 })
+    expect(pool.isExhausted(T0)).toBe(true)
+
+    expect(pool.clearCooldowns()).toBe(1)
+
+    // The daily allowance really is spent. Skipping our backoff may cost one
+    // more attempt; it must never hand back quota the provider never gave.
+    expect(pool.pick(0, T0)).toBeNull()
+    expect(pool.availableAt(0, T0)).toBe(T0 + DAY)
+    expect(pool.waitingDetail(0, T0)?.window).toBe('day')
+  })
+
+  it('reports 0 and changes nothing when no key is cooling', () => {
+    const { pool } = harness()
+    pool.setKeys([seed('key-a')])
+    expect(pool.clearCooldowns()).toBe(0)
+    expect(pool.waitingDetail(0, T0)).toBeNull()
+  })
+})
+
 describe('quota scope', () => {
   it('per-provider: every key of the org draws on ONE daily allowance', () => {
     const { pool } = harness()

@@ -646,6 +646,28 @@ export function freeTierLimits(
   return { maxRequests: spec.rpd, maxTokens: spec.tpd ?? 0 }
 }
 
+/**
+ * True when every key of this provider draws on one organisation allowance.
+ *
+ * A second key from the same account buys failover, not quota — and the app
+ * cannot read an organisation out of a key string, so `per-provider` is the
+ * conservative reading. The UI says so wherever it counts keys, because
+ * "2 keys, 1 cooling down" otherwise reads as capacity that was never there.
+ */
+export function sharesQuota(provider: ProviderId, model: string): boolean {
+  return modelSpec(provider, model)?.quotaScope === 'per-provider'
+}
+
+/**
+ * Provider-wide variant, for screens where no model has necessarily been
+ * picked yet. Takes a plain string because callers hold `string | null` from
+ * settings written before the model was chosen; an unknown id simply has no
+ * spec and answers false.
+ */
+export function providerSharesQuota(provider: string): boolean {
+  return MODELS.some((entry) => entry.provider === provider && entry.quotaScope === 'per-provider')
+}
+
 /** Default model for a provider (first entry of its fallback chain). */
 export function defaultModelFor(provider: ProviderId): string {
   return FALLBACK_CHAINS[provider][0]

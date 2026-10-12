@@ -12,6 +12,28 @@ Phase 5 — cloud sync and the troubleshooting assistant.
 
 ### Added
 
+- **A "Try now" button on the waiting banner** (Oct 2026): a run parked on a rate-limit
+  countdown offered only a clock — and the clock could read "Resumes in 3505s" under a banner
+  that called it a daily window. The banner now offers a way out. Two halves, ordered:
+  `ApiKeyRepository.clearCooldowns` drops the stored backoffs first, so a reload cannot restore
+  the wait, then a new `wake` message drops the worker's own copies and ends the sleep the
+  executor is parked inside. That sleep runs on a new `WakeChannel` rather than on the run's
+  abort signal, which is what makes this a skip and not a cancel — the loop re-reads the pool
+  and either finds a key or parks again on the same deadline. Provider buckets are untouched
+  throughout: the button can spend what the allowance still allows and never invent any, so a
+  wait that was a genuinely full daily bucket simply reports the same countdown again, and the
+  toast says so when nothing was cooling at all. Pinned by `src/translate/executor.test.ts`
+  (five `WakeChannel` cases) and `src/translate/keyPool.test.ts`.
+- **The shared-allowance warning where keys are counted and where they are added**
+  (Oct 2026): "2 keys, 1 cooling down" read as twice the capacity that it was not. Groq's free
+  tier is per *organisation* (`quotaScope: 'per-provider'`), so a second key from the same
+  account adds failover, not quota — and the app cannot read an organisation out of a key
+  string, so the grouping is a deliberate conservative assumption rather than a fact it
+  verified. `sharesQuota` (model-precise) and `providerSharesQuota` (for screens with no model
+  picked yet) surface it in three places: the translate page's API-key check, appended to the
+  count line; Settings → AI Providers, above the add-key form; and the blocked pre-flight
+  API-key checks (`cooling` / `quota`) — the moment a stuck user is most likely to go and add
+  a key expecting it to help. Pinned by `src/pdf/preflight.test.ts`.
 - **Bulk project deletion** (Projects page): a checkbox on every project card (grid) and row
   (table), a select-all checkbox in the table header, and a bulk bar that reports the true
   selection count — "N selected · Clear selection · Delete selected" — behind the same
@@ -554,8 +576,61 @@ Phase 5 — cloud sync and the troubleshooting assistant.
   `workerMeasurer` (canvas when one exists, the 0.52em estimate
   when it does not, which is jsdom’s own). Suite: 1468/1468.
 
+### Changed
+
+- **Requests are now sized from what the completion can return, not from the window it sits
+  in** (Oct 2026): a single Gemini key ran out after about two seconds and a 350-page book
+  looked like it would need hundreds of keys. Two independent defects made every request cost
+  far more than it carried. The content budget was derived from the *context* window while the
+  completion cap stayed flat at 4,096, so on a 1M-window model the packer planned ~885,000
+  source tokens per request against an answer that could never contain them: a dense page came
+  back truncated mid-array, failed validation, and paid for a repair retry carrying the same
+  payload. The budget is now derived from the completion cap minus reasoning headroom over the
+  output ratio, and the cap itself scales with the window (16k wide, 8k medium, flat 4k below)
+  with `ModelSpec.maxOutputTokens` as the per-model escape hatch — steps are deliberately
+  conservative, because a provider that clamps costs nothing while one that rejects fails the
+  batch. The document glossary was also re-sent whole on every request: 200 entries is ~1,900
+  tokens against a ~511-token fixed prompt, so 42% of everything sent was preamble repeated
+  per request whether or not the batch contained a single glossary term. `selectGlossary` now
+  sends only what a batch can use — small glossaries still go whole, large ones are cut to
+  their matches claimed longest-first, Latin terms additionally require a left word boundary
+  while a script written without spaces gets none — and the stored batch-size setting became a
+  ceiling clamped by the model's budget rather than a licence to exceed it. Measured on a
+  400k-token book: **400k → 53 requests** against Gemini's 1,500/day, prompt overhead
+  194k → 30k tokens, zero truncated batches; before, the same book needed ~1.78M tokens, nearly
+  twice the daily allowance, and its dense pages failed outright. `.gitattributes` also pins LF
+  for source and config in this change: `* text=auto` normalises on commit but checks CRLF out
+  on Windows while Prettier is configured for LF, so a fresh clone failed `prettier --check .`
+  on files it had never opened. Suites: `src/translate/budget.test.ts`,
+  `src/translate/prompts.test.ts`.
+
 ### Fixed
 
+- **The waiting banner no longer calls every wait "Daily"** (Oct 2026): `en.json` hard-coded
+  "Daily quota reached" for every `QUOTA_EXHAUSTED` wait, so the pool's own one-hour fallback
+  guess — `quotaFallbackMs`, applied because the provider sent no reset time at all — was
+  presented to the user as a lost day. That is what made the fix look like "add more keys",
+  which on a per-organisation allowance could never have helped. `KeyPool.availableAt` has been
+  split into `waitingDetail`, which reports the deadline *and* the window that set it, and
+  `WaitWindow` rides `onWaiting` → the run → `TranslateProgress` to the banner, which now has
+  three honest strings: the day window, the per-minute window, and a fallback that says it is
+  our own estimate. Buckets are offered before the cooldown, so a tie credits the window
+  rather than the deadline we copied from it. Pinned by `src/translate/keyPool.test.ts`.
+- **A cancelled translation no longer resumes itself while the page is still open**
+  (Oct 2026): `restoreTranslate` read the persisted queue snapshot, which is written when a
+  batch settles and could therefore lag an explicit cancel by milliseconds — the
+  cancel-then-reload window handed a cancelled run its auto-start back and it quietly resumed
+  spending the quota the user had just stopped. A live queue knows the real phase, so its
+  phase now wins; the snapshot is what a cold start has, and all it is good for.
+  `src/translate/resume.test.ts` went from 2 passes in 5 to 10 in 10.
+- **Sync no longer reports "everything is in sync" while a push was deferred** (Oct 2026):
+  `pushPhase` returned early on a partial push, bypassing the backlog probe at the bottom of
+  the loop, so `stats.hasMore` stayed false and Settings → Data never showed its "more to
+  sync" hint for a deferred push; `pullPhase` then cleared the flag `pushPhase` had just set.
+  Both made a half-finished run look clean. Found by a new six-cycle test that expires
+  `Code.gs`'s shared execution budget mid-push and drains a 565-row backlog from a second
+  device across two pages — reverting either fix turns its `hasMore` assertion red.
+  `src/sync/syncRealBackend.test.ts`.
 - **A page no longer draws as a wall of empty squares at 100 %** (Oct 2026): pdf.js paints every
   page inside the analysis worker, and a worker has no `document`, so it could not register a
   `FontFace` for an embedded font and fell back to `ctx.font` set to that font's own name — which

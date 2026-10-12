@@ -33,6 +33,7 @@ import { hashText } from '@/db/repo-common'
 import { apiKeyRepo } from '@/db/repo-apiKeys'
 import { blockRepo, pageRepo, translationRepo } from '@/db/repo-content'
 import { glossaryRepo } from '@/db/repo-knowledge'
+import type { WaitWindow } from './keyPool'
 import { jobRepo } from '@/db/repo-jobs'
 import { SETTING_KEYS, settingsRepo } from '@/db/repo-settings'
 import { usageRepo } from '@/db/repo-usage'
@@ -155,6 +156,7 @@ export interface ActiveRun {
   model: string | null
   waitingUntil: number | null
   waitingReason: 'QUOTA_EXHAUSTED' | 'ALL_KEYS_COOLING_DOWN' | null
+  waitingWindow: WaitWindow | null
   failure: { reasonCode: ReasonCode; message: string } | null
   forcedPhase: TranslatePhase | null
 }
@@ -753,6 +755,7 @@ async function executeBatch(job: TranslateJob, run: ActiveRun, signal: AbortSign
     onWaiting: (wait) => {
       run.waitingUntil = wait.until
       run.waitingReason = wait.reason
+      run.waitingWindow = wait.window
       publish(run)
       logEvent({
         state: 'WAITING_RATE_LIMIT',
@@ -770,6 +773,7 @@ async function executeBatch(job: TranslateJob, run: ActiveRun, signal: AbortSign
     onResumed: () => {
       run.waitingUntil = null
       run.waitingReason = null
+      run.waitingWindow = null
       publish(run)
       logEvent({
         state: 'TRANSLATING',
@@ -950,6 +954,7 @@ function publish(run: ActiveRun, patch: Partial<TranslateProgress> = {}): void {
     model: run.model,
     waitingUntil: run.waitingUntil,
     waitingReason: run.waitingReason,
+    waitingWindow: run.waitingWindow,
     etaMs,
     startedAt: run.startedAt,
     ...patch,
@@ -1028,6 +1033,7 @@ export async function startTranslate(
     model: config.model,
     waitingUntil: null,
     waitingReason: null,
+    waitingWindow: null,
     failure: null,
     forcedPhase: options.forcedPhase ?? null,
   }
@@ -1166,6 +1172,30 @@ export function resumeTranslate(): void {
 /** Re-runs only the batches that failed (keeps everything already done). */
 export function retryFailedTranslate(): void {
   resumeTranslate()
+}
+
+/**
+ * "Try now": ends a rate-limit wait instead of serving out a guessed window.
+ *
+ * Two halves, in this order. The stored backoffs go first, so a reload cannot
+ * put the same wait straight back; then the worker drops its own copies and
+ * ends every parked sleep, which is what actually resumes the run. The two
+ * halves have to be ordered because the pool is seeded from IndexedDB — and
+ * clearing only the worker would leave the next session blocked again.
+ *
+ * Deliberately *not* optimistic about the UI: the batch either finds a key and
+ * posts `resumed`, or it parks again and posts a fresh `waiting`. The stale
+ * countdown should neither be cleared by hand nor linger after it is untrue.
+ *
+ * Bucket counters are untouched throughout — this can spend what the provider
+ * still allows, never invent allowance.
+ *
+ * @returns how many keys were cooling when called.
+ */
+export async function tryNowTranslate(): Promise<number> {
+  const cleared = await apiKeyRepo.clearCooldowns()
+  runner.wake?.()
+  return cleared
 }
 
 export function cancelTranslate(): void {

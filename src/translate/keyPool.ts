@@ -26,6 +26,22 @@ export type { BucketState, CooldownReason, KeyBuckets, QuotaScope }
 
 export type KeyHealthState = 'healthy' | 'cooling-down' | 'invalid' | 'quota-exhausted' | 'disabled'
 
+/** Which allowance is holding a wait: the per-minute or per-day window, or a key's own backoff. */
+export type WaitWindow = 'minute' | 'day' | 'cooldown'
+
+/**
+ * Lower ranks win a tie, so an equal deadline is reported as the window that
+ * actually caused it rather than as our own backoff.
+ */
+const WINDOW_RANK: Record<WaitWindow, number> = { day: 0, minute: 1, cooldown: 2 }
+
+export interface WaitDetail {
+  /** Epoch ms before which no key can serve a request. */
+  until: number
+  /** The window that set `until`, so the UI can name it instead of guessing. */
+  window: WaitWindow
+}
+
 export interface PersistedKeyState {
   id: string
   enabled: boolean
@@ -390,34 +406,74 @@ export class KeyPool {
    * right now. Used directly for the WAITING_RATE_LIMIT countdown.
    */
   availableAt(tokenEstimate = 0, now = this.nowFn()): number | null {
+    return this.waitingDetail(tokenEstimate, now)?.until ?? null
+  }
+
+  /**
+   * The deadline nothing can run before, and *which window set it*.
+   *
+   * The banner used to call every wait "daily" whatever had blocked it, which
+   * is how a one-hour fallback guess (`quotaFallbackMs`) got shown to the user
+   * as a lost day — and sent them adding keys that could never have helped.
+   *
+   * Ties resolve towards the more informative window. Two rules do that:
+   * candidates are offered day → minute → cooldown, and an equal deadline keeps
+   * whichever window already ranks higher — so a bucket that shares the reset
+   * `reportRateLimit` copied into `cooldownUntil` still reads as the window the
+   * provider named rather than as our bare backoff.
+   */
+  waitingDetail(tokenEstimate = 0, now = this.nowFn()): WaitDetail | null {
     if (this.pick(tokenEstimate, now)) return null
-    let earliest: number | null = null
+    let best: WaitDetail | null = null
+    const consider = (until: number | undefined, window: WaitWindow): void => {
+      if (typeof until !== 'number' || until <= now) return
+      const earlier = best === null || until < best.until
+      const sameButClearer =
+        best !== null && until === best.until && WINDOW_RANK[window] < WINDOW_RANK[best.window]
+      if (earlier || sameButClearer) best = { until, window }
+    }
+
     for (const key of this.keys.values()) {
       if (!key.enabled || key.invalid || !key.secret) continue
-      const candidates = [key.cooldownUntil]
-      if (key.buckets.rpm.used + 1 > key.buckets.rpm.limit) candidates.push(key.buckets.rpm.resetAt)
-      if (key.buckets.rpd.used + 1 > key.buckets.rpd.limit) candidates.push(key.buckets.rpd.resetAt)
-      if (tokenEstimate > 0 && key.buckets.tpm.used + tokenEstimate > key.buckets.tpm.limit) {
-        candidates.push(key.buckets.tpm.resetAt)
+      const { rpm, rpd, tpm, tpd } = key.buckets
+      if (rpd.used + 1 > rpd.limit) consider(rpd.resetAt, 'day')
+      if (tpd.limit > 0 && tokenEstimate > 0 && tpd.used + tokenEstimate > tpd.limit) {
+        consider(tpd.resetAt, 'day')
       }
-      if (
-        tokenEstimate > 0 &&
-        key.buckets.tpd.limit > 0 &&
-        key.buckets.tpd.used + tokenEstimate > key.buckets.tpd.limit
-      ) {
-        candidates.push(key.buckets.tpd.resetAt)
+      if (rpm.used + 1 > rpm.limit) consider(rpm.resetAt, 'minute')
+      if (tokenEstimate > 0 && tpm.used + tokenEstimate > tpm.limit) {
+        consider(tpm.resetAt, 'minute')
       }
-      for (const candidate of candidates) {
-        if (candidate <= now) continue
-        if (earliest === null || candidate < earliest) earliest = candidate
-      }
+      consider(key.cooldownUntil, 'cooldown')
     }
-    return earliest
+
+    return best
   }
 
   /** Cooldown (epoch ms) when every key is cooling/quota-bound, else null. */
   waitingUntil(now = this.nowFn()): number | null {
     return this.availableAt(0, now)
+  }
+
+  /**
+   * Drops every backoff this pool guessed at, and reports how many it touched.
+   *
+   * Only the *guessed* windows go: the RPM/TPM/RPD buckets are the provider's
+   * own counters, they stay exactly where they are, so a "Try now" can only
+   * spend what the provider still allows. A key rejected outright is left
+   * alone too — retrying a dead key on demand buys nothing.
+   *
+   * @returns the number of keys that were cooling.
+   */
+  clearCooldowns(): number {
+    let cleared = 0
+    for (const key of this.keys.values()) {
+      if (key.cooldownUntil === 0 && key.cooldownReason === null) continue
+      key.cooldownUntil = 0
+      key.cooldownReason = null
+      cleared += 1
+    }
+    return cleared
   }
 
   /* ------------------------------------------------------------------ */

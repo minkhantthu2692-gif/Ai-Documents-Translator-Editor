@@ -10,6 +10,7 @@
  */
 
 import type { FixAction, ReasonCode } from '@/core/reasonCodes'
+import { providerSharesQuota } from '@/config/models.config'
 import { MAX_FILE_BYTES, MAX_PAGE_COUNT, WARN_FILE_BYTES, WARN_PAGE_COUNT } from './fileValidation'
 
 export type CheckStatus = 'pass' | 'warn' | 'fail' | 'pending'
@@ -485,6 +486,17 @@ function apiKeyCheck(input: PreflightInput): PreflightCheck {
       'API key validation arrives with Phase 3',
     )
   }
+  /*
+   * Said exactly where a blocked check would otherwise send the user off to
+   * add a key: on a per-organisation allowance that second key buys failover,
+   * not quota, and "wait, I added another key and nothing changed" is the
+   * confusion this note exists to prevent.
+   */
+  const shared = input.provider && providerSharesQuota(input.provider) ? input.provider : null
+  const sharedMy = shared ? ` — ${shared} သော့အားလုံး အသုံးပြုခွင့်တစ်ခုတည်း မျှဝေသည်` : ''
+  const sharedEn = shared
+    ? ` — ${shared} keys share one organisation allowance, so another key adds failover, not quota`
+    : ''
   switch (input.apiKeyStatus) {
     case 'none':
       return check('apiKey', 'fail', 'AI သော့ မထည့်ရသေးပါ', 'No API key configured', 'NO_API_KEY', {
@@ -504,8 +516,8 @@ function apiKeyCheck(input: PreflightInput): PreflightCheck {
       return check(
         'apiKey',
         'warn',
-        'သော့အားလုံး အအေးခံနေသည်',
-        'All keys are cooling down',
+        `သော့အားလုံး အအေးခံနေသည်${sharedMy}`,
+        `All keys are cooling down${sharedEn}`,
         'ALL_KEYS_COOLING_DOWN',
         { id: 'wait_retry', kind: 'retry', labelEn: 'Retry later', labelMy: 'နောက်မှ ပြန်စမ်းရန်' },
       )
@@ -513,8 +525,8 @@ function apiKeyCheck(input: PreflightInput): PreflightCheck {
       return check(
         'apiKey',
         'fail',
-        'AI အသုံးပြုခွင့် ပြည့်သွားပြီ',
-        'The AI quota is exhausted',
+        `AI အသုံးပြုခွင့် ပြည့်သွားပြီ${sharedMy}`,
+        `The AI quota is exhausted${sharedEn}`,
         'QUOTA_EXHAUSTED',
         {
           id: 'wait_retry',

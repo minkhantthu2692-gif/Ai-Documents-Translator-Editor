@@ -202,6 +202,28 @@ export class ApiKeyRepository {
     return getDb().apiKeys.delete(id)
   }
 
+  /**
+   * Drops every stored backoff so the next attempt is immediate — the DB half
+   * of "Try now", so a reload does not put the same wait back in place.
+   *
+   * Only `cooldownUntil` / `cooldownReason` go: bucket counters are the
+   * provider's own accounting and a rejected key is still rejected.
+   *
+   * @returns how many keys were cooling.
+   */
+  async clearCooldowns(): Promise<number> {
+    const db = getDb()
+    const rows = await db.apiKeys.toArray()
+    let cleared = 0
+    for (const row of rows) {
+      if ((row.cooldownUntil ?? 0) > 0 || row.cooldownReason) {
+        await db.apiKeys.update(row.id, { cooldownUntil: 0, cooldownReason: null })
+        cleared += 1
+      }
+    }
+    return cleared
+  }
+
   clearAll(): Promise<void> {
     return getDb().apiKeys.clear()
   }

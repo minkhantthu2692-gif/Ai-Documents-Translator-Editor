@@ -20,9 +20,9 @@
 
 import { decodeSealed, openText } from '@/core/crypto'
 import { computeBudget } from '@/translate/budget'
-import { defaultSleep, type BatchTransport } from '@/translate/executor'
+import { WakeChannel, type BatchTransport } from '@/translate/executor'
 import { runBatch } from '@/translate/engine'
-import { KeyPool, type KeySeed, type PersistedKeyState } from '@/translate/keyPool'
+import { KeyPool, type KeySeed, type PersistedKeyState, type WaitWindow } from '@/translate/keyPool'
 import type {
   MainToWorker,
   OpenMessage,
@@ -40,6 +40,11 @@ const scope = self as unknown as DedicatedWorkerGlobalScope
 let session: RunnerSession | null = null
 let pool: KeyPool | null = null
 const controllers = new Map<string, AbortController>()
+/**
+ * Shared by every run of the session: a "Try now" has to reach the batch that
+ * is parked *right now*, and batches are sequential over one key pool.
+ */
+const wakeChannel = new WakeChannel()
 
 function post(message: WorkerToMain): void {
   scope.postMessage(message)
@@ -193,13 +198,14 @@ async function handleRun(message: RunMessage): Promise<void> {
       calibrate: true,
       context: message.context,
       signal: controller.signal,
-      sleep: defaultSleep,
+      // Interruptible, so a "Try now" can end this wait without failing the run.
+      sleep: (ms, sleepSignal) => wakeChannel.sleep(ms, sleepSignal),
       seenPage,
       seenDocument,
       hooks: {
-        onWaiting: (until: number, reason: WaitingReason) => {
+        onWaiting: (until: number, reason: WaitingReason, window: WaitWindow) => {
           waiting = true
-          post({ kind: 'waiting', id: message.id, until, reason })
+          post({ kind: 'waiting', id: message.id, until, reason, window })
         },
         onLease: () => {
           if (waiting) {
@@ -242,6 +248,15 @@ async function handle(message: MainToWorker): Promise<void> {
       return
     case 'cancel': {
       controllers.get(message.id)?.abort()
+      return
+    }
+    case 'wake': {
+      /*
+       * Clear first, wake second. Waking into a backoff that is still standing
+       * would only re-park the batch on the very same deadline.
+       */
+      pool?.clearCooldowns()
+      wakeChannel.fire()
       return
     }
     case 'close': {

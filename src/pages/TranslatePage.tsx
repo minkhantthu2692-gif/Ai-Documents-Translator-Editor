@@ -15,6 +15,7 @@ import {
   defaultModelFor,
   freeTierLimits,
   modelsFor,
+  sharesQuota,
   type ProviderId,
 } from '@/config/models.config'
 import { languageLabel, languageSelectOptions } from '@/config/languages.config'
@@ -35,6 +36,7 @@ import {
   restoreTranslate,
   startTranslate,
   subscribeTranslate,
+  tryNowTranslate,
 } from '@/translate/translateQueue'
 import {
   applySignal,
@@ -62,6 +64,27 @@ function formatEta(ms: number): string {
   if (minutes >= 60) return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
   if (minutes > 0) return `${minutes}m ${seconds.toString().padStart(2, '0')}s`
   return `${seconds}s`
+}
+
+/**
+ * i18n key for the waiting banner.
+ *
+ * This used to be a single "Daily quota reached" string for every
+ * `QUOTA_EXHAUSTED` wait, so the one-hour fallback guess the pool applies when
+ * a provider sends no reset time was presented as a lost day — which is what
+ * sent the user off adding keys that, being the same organisation, could never
+ * have added capacity.
+ */
+function waitingLabelKey(
+  reason: 'QUOTA_EXHAUSTED' | 'ALL_KEYS_COOLING_DOWN' | null,
+  window: 'minute' | 'day' | 'cooldown' | null,
+): string {
+  if (reason !== 'QUOTA_EXHAUSTED') return 'translate.waitingKeys'
+  if (window === 'day') return 'translate.waitingQuotaDay'
+  if (window === 'minute') return 'translate.waitingQuotaMinute'
+  // No window, or our own backoff: say it is an estimate rather than assert a
+  // deadline the provider never gave us.
+  return 'translate.waitingQuotaEstimate'
 }
 
 export function TranslatePage() {
@@ -398,6 +421,25 @@ export function TranslatePage() {
     void handleStart()
   }
 
+  /**
+   * "Try now": ends the guessed rate-limit wait instead of serving it out.
+   *
+   * It can only spend what the provider still has — the counters that really
+   * block a request are never cleared — so the banner comes back with a fresh
+   * deadline rather than disappearing if there is genuinely nothing left.
+   */
+  async function handleTryNow() {
+    try {
+      const cleared = await tryNowTranslate()
+      toast(
+        'info',
+        cleared > 0 ? t('translate.tryNowDone', { keys: cleared }) : t('translate.tryNowNone'),
+      )
+    } catch (error) {
+      toast('danger', error instanceof Error ? error.message : String(error))
+    }
+  }
+
   const percent =
     progress.total > 0
       ? Math.round(((progress.alreadyDone + progress.done) / progress.total) * 100)
@@ -418,6 +460,9 @@ export function TranslatePage() {
         key.provider === config.provider && key.enabled !== false && key.status !== 'invalid',
     )
     const cooling = usable.filter((key) => key.cooldownUntil > Date.now())
+    // "2 keys, 1 cooling down" otherwise reads as capacity that was never
+    // there: on a per-provider allowance the second key buys failover only.
+    const shared = usable.length > 1 && sharesQuota(config.provider, config.model)
     const out: PreflightCheck[] = []
 
     out.push(
@@ -441,11 +486,18 @@ export function TranslatePage() {
             status: cooling.length > 0 ? 'warn' : 'pass',
             labelKey: 'preflight.apiKey',
             reasonCode: cooling.length > 0 ? 'ALL_KEYS_COOLING_DOWN' : null,
-            detailMy: `အသုံးပြုနိုင်သော သော့ ${usable.length} ခု`,
-            detailEn:
+            detailMy: `အသုံးပြုနိုင်သော သော့ ${usable.length} ခု${
+              shared ? ` — ${config.provider} သော့အားလုံး အသုံးပြုခွင့်တစ်ခုတည်း မျှဝေသည်` : ''
+            }`,
+            detailEn: `${
               cooling.length > 0
                 ? `${usable.length} key(s), ${cooling.length} cooling down`
-                : `${usable.length} key(s) ready`,
+                : `${usable.length} key(s) ready`
+            }${
+              shared
+                ? ` — ${config.provider} keys share one allowance, so a second key adds failover, not quota`
+                : ''
+            }`,
             fix: null,
           },
     )
@@ -928,14 +980,19 @@ export function TranslatePage() {
                   className="flex flex-wrap items-center gap-2 rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-xs text-text"
                   data-testid="waiting-banner"
                 >
-                  <span>
-                    {progress.waitingReason === 'QUOTA_EXHAUSTED'
-                      ? t('translate.waitingQuota')
-                      : t('translate.waitingKeys')}
-                  </span>
+                  <span>{t(waitingLabelKey(progress.waitingReason, progress.waitingWindow))}</span>
                   <Badge tone="warning">
                     {t('translate.waitingUntil', { seconds: waitingSeconds })}
                   </Badge>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="ms-auto"
+                    onClick={() => void handleTryNow()}
+                    data-testid="try-now"
+                  >
+                    {t('translate.tryNow')}
+                  </Button>
                 </div>
               ) : null}
 

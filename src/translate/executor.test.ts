@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { emptyRateLimit, type RateLimitInfo } from '@/providers/rateLimit'
 import { ProviderError, type TranslateCall } from '@/providers/types'
 import {
+  WakeChannel,
   defaultSleep,
   executeWithRotation,
   type BatchTransport,
@@ -435,6 +436,51 @@ describe('abort', () => {
     const controller = new AbortController()
     controller.abort()
     const error = await captureError(defaultSleep(60_000, controller.signal))
+    if (!(error instanceof DOMException)) throw new Error('expected a DOMException')
+    expect(error.name).toBe('AbortError')
+  })
+})
+
+describe('WakeChannel', () => {
+  it('fire() ends an in-flight sleep instead of waiting out the rate-limit window', async () => {
+    const channel = new WakeChannel()
+    const pending = channel.sleep(60_000)
+    channel.fire()
+    await expect(pending).resolves.toBeUndefined()
+  })
+
+  it('one fire() releases every sleep parked on the channel', async () => {
+    const channel = new WakeChannel()
+    const first = channel.sleep(60_000)
+    const second = channel.sleep(60_000)
+    channel.fire()
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined])
+  })
+
+  it('a fire is not sticky — a sleep started afterwards still serves its delay', async () => {
+    const channel = new WakeChannel()
+    channel.fire()
+    const started = Date.now()
+    await channel.sleep(40)
+    // A leftover wake would resolve this near-instantly; it must not.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(25)
+  })
+
+  it('aborting still rejects with AbortError, so Cancel keeps working during a wait', async () => {
+    const channel = new WakeChannel()
+    const controller = new AbortController()
+    const pending = channel.sleep(60_000, controller.signal)
+    controller.abort()
+    const error = await captureError(pending)
+    if (!(error instanceof DOMException)) throw new Error('expected a DOMException')
+    expect(error.name).toBe('AbortError')
+  })
+
+  it('an already-aborted signal rejects before registering a listener', async () => {
+    const channel = new WakeChannel()
+    const controller = new AbortController()
+    controller.abort()
+    const error = await captureError(channel.sleep(60_000, controller.signal))
     if (!(error instanceof DOMException)) throw new Error('expected a DOMException')
     expect(error.name).toBe('AbortError')
   })

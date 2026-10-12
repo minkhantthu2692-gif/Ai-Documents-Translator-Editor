@@ -8,6 +8,7 @@
 import type { ProviderId, QualityTier } from '@/config/models.config'
 import type { Placeholder } from '@/pdf/placeholders'
 import type { BlockKind, TranslationFlag } from '@/db/types'
+import type { WaitWindow } from './keyPool'
 
 export type { TranslationFlag }
 
@@ -139,6 +140,11 @@ export interface TranslateProgress {
   waitingUntil: number | null
   /** Reason code while waiting (`QUOTA_EXHAUSTED` / `ALL_KEYS_COOLING_DOWN`). */
   waitingReason: 'QUOTA_EXHAUSTED' | 'ALL_KEYS_COOLING_DOWN' | null
+  /**
+   * Which window set `waitingUntil`. The banner used to say "daily" for every
+   * wait, so a one-hour fallback guess read as a lost day.
+   */
+  waitingWindow: WaitWindow | null
   /** Estimated ms remaining for the whole run, null when unknown. */
   etaMs: number | null
   startedAt: number
@@ -165,6 +171,7 @@ export const EMPTY_PROGRESS: TranslateProgress = {
   model: null,
   waitingUntil: null,
   waitingReason: null,
+  waitingWindow: null,
   etaMs: null,
   startedAt: 0,
 }
